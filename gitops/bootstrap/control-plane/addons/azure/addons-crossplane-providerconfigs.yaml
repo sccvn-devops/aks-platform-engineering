@@ -1,0 +1,61 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: addons-crossplane-providerconfigs
+spec:
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - clusters:
+              selector:
+                matchLabels:
+                  role: management
+                  lease-status: active
+                  enable_crossplane: "true"
+          - list:
+              elements:
+                - providerConfigName: default
+                - providerConfigName: azure-westeurope
+                - providerConfigName: azure-northeurope
+  template:
+    metadata:
+      name: addon-{{name}}-crossplane-providerconfig-{{providerConfigName}}
+      annotations:
+        argocd.argoproj.io/sync-wave: "26"
+    spec:
+      project: default
+      source:
+        chart: crossplane-azure-upbound
+        repoURL: https://gitops-bridge-dev.github.io/gitops-bridge-helm-charts
+        targetRevision: 1.1.0
+        helm:
+          releaseName: crossplane-providerconfig-{{providerConfigName}}
+          parameters:
+            - name: "global.enabled_azure_upbound"
+              value: "true"
+            - name: "deploymentRuntimeConfig.enabled"
+              value: "false"
+            - name: "provider.enabled"
+              value: "false"
+            - name: "providerConfig.enabled"
+              value: "true"
+            - name: "providerConfig.metadata.name"
+              value: "{{providerConfigName}}"
+            - name: "providerConfig.spec.source"
+              value: "OIDCTokenFile"
+            - name: "providerConfig.spec.clientID"
+              value: "{{metadata.annotations.crossplane_identity_client_id}}"
+            - name: "providerConfig.spec.subscriptionID"
+              value: "{{metadata.annotations.subscription_id}}"
+            - name: "providerConfig.spec.tenantID"
+              value: "{{metadata.annotations.tenant_id}}"
+      destination:
+        namespace: crossplane-system
+        name: "{{name}}"
+      syncPolicy:
+        automated: {}
+        syncOptions:
+          - CreateNamespace=true

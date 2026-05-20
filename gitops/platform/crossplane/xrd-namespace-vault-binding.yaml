@@ -1,0 +1,57 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xnamespacevaultbindings.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  defaultCompositionRef:
+    name: namespacevaultbinding.azure.platform.cityos.io
+  group: platform.cityos.io
+  names:
+    kind: XNamespaceVaultBinding
+    plural: xnamespacevaultbindings
+  claimNames:
+    kind: NamespaceVaultBinding
+    plural: namespacevaultbindings
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    tenantId:
+                      type: string
+                    objectId:
+                      type: string
+                    primaryRegion:
+                      type: string
+                      enum:
+                        - westeurope
+                        - northeurope
+                    secondaryRegion:
+                      type: string
+                      enum:
+                        - westeurope
+                        - northeurope
+                    primaryVaultId:
+                      type: string
+                    secondaryVaultId:
+                      type: string
+                  required:
+                    - tenantId
+                    - objectId
+                    - primaryRegion
+                    - secondaryRegion
+                    - primaryVaultId
+                    - secondaryVaultId
+              required:
+                - parameters

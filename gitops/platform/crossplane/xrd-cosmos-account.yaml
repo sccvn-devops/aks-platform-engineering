@@ -1,0 +1,55 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xcosmosaccounts.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  defaultCompositionRef:
+    name: cosmosaccount.azure.platform.cityos.io
+  group: platform.cityos.io
+  names:
+    kind: XCosmosAccount
+    plural: xcosmosaccounts
+  claimNames:
+    kind: CosmosAccount
+    plural: cosmosaccounts
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    region:
+                      type: string
+                      enum:
+                        - westeurope
+                        - northeurope
+                    resourceGroupName:
+                      type: string
+                    primaryLocation:
+                      type: string
+                    secondaryLocation:
+                      type: string
+                    sloClass:
+                      type: string
+                      enum:
+                        - bronze
+                        - silver
+                        - gold
+                      default: bronze
+                  required:
+                    - region
+                    - resourceGroupName
+                    - primaryLocation
+                    - secondaryLocation
+              required:
+                - parameters

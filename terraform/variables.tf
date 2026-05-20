@@ -8,13 +8,25 @@ variable "github_token" {
   description = "Specifies the GitHub token for the GitHub repository."
   type        = string
   default     = ""
-  
+
 }
 
 variable "location" {
   description = "Specifies the the location for the Azure resources."
   type        = string
-  default     = "eastus2"
+  default     = "westeurope"
+}
+
+variable "secondary_location" {
+  description = "Specifies the paired Azure region for standby resources."
+  type        = string
+  default     = "northeurope"
+}
+
+variable "dr_location" {
+  description = "Specifies the disaster recovery region for the seed cluster network."
+  type        = string
+  default     = "westus2"
 }
 
 variable "agents_size" {
@@ -29,7 +41,7 @@ variable "kubernetes_version" {
   default     = null
 }
 
-variable "green_field_application_gateway_for_ingress"{ 
+variable "green_field_application_gateway_for_ingress" {
   description = "Specifies the Application Gateway for Ingress Controller"
   type        = any
   default     = null
@@ -51,21 +63,21 @@ variable "addons" {
   description = "Specifies the Kubernetes addons to install on the hub cluster."
   type        = any
   default = {
-    enable_argocd                            = true # installs argocd
+    enable_argocd = true # installs argocd
   }
 }
 
 variable "addons_versions" {
   description = "Specifies the Kubernetes addons to install on the hub cluster."
-  type        = list (object({
-    argocd_chart_version = string
+  type = list(object({
+    argocd_chart_version        = string
     argo_rollouts_chart_version = string
-    kargo_chart_version = string
+    kargo_chart_version         = string
   }))
   default = [{
-    argocd_chart_version                     = "7.8.25" # https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/Chart.yaml
-    argo_rollouts_chart_version              = "2.39.5" # https://github.com/argoproj/argo-helm/blob/main/charts/argo-rollouts/Chart.yaml
-    kargo_chart_version                      = "1.4.1" # https://github.com/akuity/kargo/releases
+    argocd_chart_version        = "7.8.25" # https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/Chart.yaml
+    argo_rollouts_chart_version = "2.39.5" # https://github.com/argoproj/argo-helm/blob/main/charts/argo-rollouts/Chart.yaml
+    kargo_chart_version         = "1.4.1"  # https://github.com/akuity/kargo/releases
   }]
 }
 
@@ -96,6 +108,11 @@ variable "gitops_addons_revision" {
   description = "Specifies the Git repository revision/branch/ref for addons."
   type        = string
   default     = "main"
+}
+variable "gitops_addons_repo_url" {
+  description = "Optional full Git repository URL for Argo CD source and repo credentials. Set this to an SSH URL when using a deploy key."
+  type        = string
+  default     = ""
 }
 variable "gitops_addons_basepath" {
   description = "Specifies the Git repository base path for addons."
@@ -159,7 +176,7 @@ variable "sku_tier" {
 
 variable "private_cluster_enabled" {
   description = "Specifies wether the AKS cluster be private or not."
-  default     = false
+  default     = true
   type        = bool
 }
 
@@ -219,13 +236,13 @@ variable "microsoft_defender_enabled" {
 
 variable "net_profile_dns_service_ip" {
   description = "Specifies the DNS service IP"
-  default     = "10.0.0.10"
+  default     = "172.20.0.10"
   type        = string
 }
 
 variable "net_profile_service_cidr" {
   description = "Specifies the service CIDR"
-  default     = "10.0.0.0/16"
+  default     = "172.20.0.0/16"
   type        = string
 }
 

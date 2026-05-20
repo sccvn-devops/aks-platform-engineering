@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mgmt-leader-lease
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: mgmt-leader-lease
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mgmt-leader-lease
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mgmt-leader-lease
+        app.kubernetes.io/component: controller
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: mgmt-leader-lease
+          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+            - name: LEASE_BLOB_URL
+              value: {{ .Values.leaseBlobUrl | quote }}
+            - name: STATUS_NAMESPACE
+              value: kube-system
+            - name: STATUS_CONFIGMAP_NAME
+              value: mgmt-leader-status
+            - name: LEASE_DURATION_SECONDS
+              value: "60"
+            - name: LEASE_RENEW_INTERVAL_SECONDS
+              value: "15"
+            - name: METRICS_ADDR
+              value: :{{ .Values.metrics.port }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+

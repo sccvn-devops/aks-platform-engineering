@@ -1,0 +1,12 @@
+clusterName: ""
+
+image:
+  repository: acrplatformprod.azurecr.io/platform/controller-scaler
+  tag: latest
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  name: controller-scaler
+
+argocdNamespace: argocd
+pollIntervalSeconds: 5

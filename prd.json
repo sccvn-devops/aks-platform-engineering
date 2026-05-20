@@ -19,7 +19,7 @@
       ],
       "priority": 1,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented Terraform hub-and-spoke networking foundation on 2026-05-20 in terraform/networking.tf, rewired the existing AKS module to the mgmt-we spoke with private API defaults, corrected Azure Firewall and Helm provider compatibility issues, and moved the AKS service CIDR off the hub address space. `terraform validate` now passes locally. `terraform plan -refresh=false -lock=false -input=false` is still blocked in this workspace because Azure CLI authentication is missing (`az login` required), so the story remains open until plan can be verified."
     },
     {
       "id": "US-002",
@@ -41,7 +41,7 @@
       ],
       "priority": 2,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-20 by preserving `mgmt-we` as the bootstrap cluster, renaming it explicitly to match the blueprint, adding the dedicated autoscaled `cipool` user node pool with `workload=ci:NoSchedule`, and provisioning the remaining six AKS clusters through a shared Terraform configuration map in `terraform/clusters.tf`. All seven clusters now target their dedicated spoke subnets with private API, Workload Identity, and OIDC issuer enabled; staging and production profiles use multi-AZ defaults while `seed-wus` remains a single-node DR cluster. `terraform validate` passes locally. Story still needs `terraform plan -refresh=false -lock=false -input=false` verification against Azure, which remains blocked in this workspace until `az login` is completed."
     },
     {
       "id": "US-003",
@@ -59,7 +59,7 @@
       ],
       "priority": 3,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-20 by adding four workload-scoped Key Vaults in `terraform/keyvaults.tf`: `kv-platform-dev-we`, `kv-platform-staging-we`, `kv-platform-prod-we`, and `kv-platform-prod-ne`, all with RBAC authorization enabled, soft-delete retention set to 90 days, purge protection enabled, and public network access disabled. Added private endpoints for each vault into the corresponding regional hub private-endpoint subnet with Private DNS registration against `privatelink.vaultcore.azure.net`, plus a shared Log Analytics workspace and diagnostic settings that emit `AuditEvent` logs and `AllMetrics`. Also exposed Key Vault and diagnostics outputs in `terraform/outputs.tf`. Story still needs `terraform plan -refresh=false -lock=false -input=false` verification against Azure, which remains blocked in this workspace until `az login` is completed."
     },
     {
       "id": "US-004",
@@ -75,7 +75,7 @@
       ],
       "priority": 4,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-20 by adding `terraform/storage.tf` with a geo-redundant management lease storage account (`stplatformmgmtlease`), private `leases` container, seeded `mgmt-active` blob, and a blob private endpoint in the West Europe hub registered against `privatelink.blob.core.windows.net`. Added dedicated user-assigned managed identities for `mgmt-we` and `mgmt-ne`, attached them to the corresponding AKS clusters in `terraform/main.tf` and `terraform/clusters.tf`, and granted both identities `Storage Blob Data Contributor` on the lease container scope. Exposed storage and identity outputs in `terraform/outputs.tf`. `terraform validate` passes locally. `terraform plan -refresh=false -lock=false -input=false` is still blocked in this workspace because Azure CLI authentication is missing (`az login` required), so the story remains open until plan can be verified."
     },
     {
       "id": "US-005",
@@ -91,7 +91,7 @@
       ],
       "priority": 5,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-20 by adding `terraform/acr.tf` with a shared Premium Azure Container Registry named `acrplatformprod`, geo-replicated to North Europe, with public network access disabled and a private endpoint in the West Europe hub private-endpoint subnet registered against `privatelink.azurecr.io`. Added a reusable Jenkins user-assigned managed identity (`uami-jenkins`) with `AcrPush` on the registry, and granted `AcrPull` on the registry to the kubelet identity of all seven AKS clusters. Exposed registry and Jenkins identity outputs in `terraform/outputs.tf`. Story still needs `terraform plan -refresh=false -lock=false -input=false` verification against Azure, which remains blocked in this workspace until `az login` is completed."
     },
     {
       "id": "US-006",
@@ -109,7 +109,7 @@
       ],
       "priority": 6,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-20 by hardening the Argo CD addon values in `gitops/environments/default/addons/argo-cd/values.yaml` for HA (`controller.replicas=3` with dynamic cluster distribution, `repoServer.replicas=2`, `server.replicas=2`, `redis-ha.enabled=true`) and private-only exposure through an internal Azure LoadBalancer. Added Terraform bootstrap support in `terraform/main.tf`, `terraform/variables.tf`, and `terraform/argocd_bootstrap.tf` to register all seven AKS clusters as Argo CD cluster Secrets with the required `env`, `region`, `role`, and `lease-status` labels, plus SSH repo credentials support via `gitops_addons_repo_url` and `git_private_ssh_key`. Added Kyverno addon values in `gitops/environments/default/addons/kyverno/values.yaml` and the enforcing policy manifest `gitops/bootstrap/control-plane/addons/oss/kyverno-required-cluster-secret-labels.yaml`. `terraform validate` passes locally. Runtime verification is still blocked in this workspace because no Azure-authenticated apply has been run (`az login` required), so Argo CD component health and live repo access with a real deploy key remain unverified."
     },
     {
       "id": "US-007",
@@ -127,7 +127,7 @@
       ],
       "priority": 7,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-20 by adding a dedicated Crossplane workload identity in `terraform/main.tf` with subscription-scoped Contributor access and exposing its client ID through GitOps bridge metadata for the active management cluster. Extended the Crossplane Azure provider addon in `gitops/bootstrap/control-plane/addons/azure/addons-azure-oss-crossplane-upbound.yaml` and `gitops/environments/default/addons/crossplane-azure-upbound/values.yaml` to enable Azure Workload Identity runtime configuration and install the additional Azure SQL, Cosmos DB, and Service Bus provider packages. Added Argo CD-managed regional ProviderConfigs plus a Crossplane platform API bundle in `gitops/bootstrap/control-plane/addons/azure/addons-crossplane-providerconfigs.yaml`, `gitops/bootstrap/control-plane/addons/oss/addons-crossplane-platform.yaml`, and `gitops/platform/crossplane/` with XRDs and SLO-aware compositions for `SQLDatabase`, `CosmosAccount`, `DnsRecord`, `ServiceBus`, and dual-Key-Vault `NamespaceVaultBinding`, along with Argo CD `health.lua` custom health checks for the new XR group. Local verification is still limited to static checks in this workspace; live provider health and reconciliation on `mgmt-we` remain blocked until the stack is applied against Azure (`az login` required)."
     },
     {
       "id": "US-008",
@@ -144,7 +144,7 @@
       ],
       "priority": 8,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-20 by wiring the management-plane lock addon through `gitops/bootstrap/control-plane/addons/oss/addons-mgmt-plane-lock.yaml` and the Helm chart in `gitops/platform/mgmt-plane-lock/` so `mgmt-we` and `mgmt-ne` each run a single-replica `mgmt-leader-lease` Deployment with Azure Workload Identity, a 60-second blob lease TTL, a 15-second renew interval, and Prometheus-scraped metrics on `mgmt_leader_lease_renewed_seconds`. Hardened the Go controller in `tools/mgmt-plane-lock/cmd/mgmt-leader-lease/main.go` so lease shutdown and failback paths update `kube-system/mgmt-leader-status` back to standby, and refactored the controller/CLI for testability. Added focused unit coverage in `tools/mgmt-plane-lock/cmd/mgmt-leader-lease/main_test.go`, `tools/mgmt-plane-lock/cmd/mgmt-cli/main_test.go`, `tools/mgmt-plane-lock/internal/kube/status_test.go`, and `tools/mgmt-plane-lock/internal/bloblease/bloblease_test.go` for acquire/renew/release transitions, ConfigMap status updates, and `mgmt-cli failback --to <cluster> --confirm`. Story remains open because live failover validation against Azure and cluster runtime health are still blocked until the stack is applied with Azure credentials (`az login` required), and this workspace does not currently have the Go toolchain installed so `go test ./...` / typecheck could not be executed locally."
     },
     {
       "id": "US-009",
@@ -161,7 +161,7 @@
       ],
       "priority": 9,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-20 by adding a dedicated `controller-scaler` management-plane controller in `tools/mgmt-plane-lock/cmd/controller-scaler/main.go` with workload reconciliation helpers in `tools/mgmt-plane-lock/internal/scaling/`. The controller watches `kube-system/mgmt-leader-status`, scales the local Argo CD application controller/repo-server/server, Crossplane, External Secrets, and Jira bridge workloads to their active or standby replica targets, and patches the local Argo CD cluster Secret `lease-status` label to `active` or `standby`. Added focused unit coverage in `tools/mgmt-plane-lock/cmd/controller-scaler/main_test.go`, `tools/mgmt-plane-lock/internal/scaling/scaling_test.go`, and `tools/mgmt-plane-lock/internal/config/config_test.go`, plus GitOps packaging in `gitops/platform/controller-scaler/` and bootstrap wiring via `gitops/bootstrap/control-plane/addons/oss/addons-controller-scaler.yaml`. Story remains open because live failover timing validation on `mgmt-we`/`mgmt-ne` is still blocked until the stack is applied with Azure credentials (`az login` required), and this workspace still does not have the Go toolchain installed so `go test ./...` / typecheck could not be executed locally."
     },
     {
       "id": "US-010",

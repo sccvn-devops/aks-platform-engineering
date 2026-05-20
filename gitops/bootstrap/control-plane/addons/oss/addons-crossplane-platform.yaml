@@ -1,0 +1,34 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: addons-crossplane-platform
+spec:
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            role: management
+            lease-status: active
+            enable_crossplane: "true"
+  template:
+    metadata:
+      name: addon-{{name}}-crossplane-platform
+      annotations:
+        argocd.argoproj.io/sync-wave: "27"
+    spec:
+      project: default
+      source:
+        repoURL: '{{metadata.annotations.addons_repo_url}}'
+        targetRevision: '{{metadata.annotations.addons_repo_revision}}'
+        path: '{{metadata.annotations.addons_repo_basepath}}platform/crossplane'
+      destination:
+        namespace: crossplane-system
+        name: '{{name}}'
+      syncPolicy:
+        automated: {}
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

@@ -1,7 +1,9 @@
 # Sample tfvars - rename to terraform.tfvars to use
 
 # Azure region
-location = "westus3"
+location = "westeurope"
+secondary_location = "northeurope"
+dr_location = "westus2"
 
 # Kubernetes version
 kubernetes_version = null # Defaults to latest
@@ -15,6 +17,9 @@ gitops_addons_revision = "main"
 
 # Agents size
 agents_size = "Standard_D2s_v3"
+
+# Infrastructure provider
+infrastructure_provider = "crossplane"
 
 # Addons configuration
 addons = {

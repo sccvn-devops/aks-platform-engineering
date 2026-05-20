@@ -1,0 +1,6 @@
+apiVersion: v2
+name: controller-scaler
+description: Scales management-plane controllers based on mgmt-leader-status
+type: application
+version: 0.1.0
+appVersion: 0.1.0

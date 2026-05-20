@@ -1,0 +1,14 @@
+FROM golang:1.24.3 AS build
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/controller-scaler ./cmd/controller-scaler
+
+FROM gcr.io/distroless/static-debian12:nonroot
+WORKDIR /app
+COPY --from=build /out/controller-scaler /app/controller-scaler
+USER nonroot:nonroot
+ENTRYPOINT ["/app/controller-scaler"]

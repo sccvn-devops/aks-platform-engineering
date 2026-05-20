@@ -1,0 +1,117 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: namespacevaultbinding.azure.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.cityos.io/v1alpha1
+    kind: XNamespaceVaultBinding
+  resources:
+    - name: primary-policy
+      base:
+        apiVersion: keyvault.azure.upbound.io/v1beta1
+        kind: AccessPolicy
+        spec:
+          forProvider:
+            certificatePermissions:
+              - Get
+              - List
+            keyPermissions:
+              - Get
+              - List
+            keyVaultId: placeholder
+            objectId: placeholder
+            secretPermissions:
+              - Get
+              - List
+              - Set
+            tenantId: placeholder
+          providerConfigRef:
+            name: azure-westeurope
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.name
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-primary"
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-primary"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.primaryVaultId
+          toFieldPath: spec.forProvider.keyVaultId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.objectId
+          toFieldPath: spec.forProvider.objectId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.tenantId
+          toFieldPath: spec.forProvider.tenantId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.primaryRegion
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: map
+              map:
+                westeurope: azure-westeurope
+                northeurope: azure-northeurope
+    - name: secondary-policy
+      base:
+        apiVersion: keyvault.azure.upbound.io/v1beta1
+        kind: AccessPolicy
+        spec:
+          forProvider:
+            certificatePermissions:
+              - Get
+              - List
+            keyPermissions:
+              - Get
+              - List
+            keyVaultId: placeholder
+            objectId: placeholder
+            secretPermissions:
+              - Get
+              - List
+              - Set
+            tenantId: placeholder
+          providerConfigRef:
+            name: azure-northeurope
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.name
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-secondary"
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-secondary"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secondaryVaultId
+          toFieldPath: spec.forProvider.keyVaultId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.objectId
+          toFieldPath: spec.forProvider.objectId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.tenantId
+          toFieldPath: spec.forProvider.tenantId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secondaryRegion
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: map
+              map:
+                westeurope: azure-westeurope
+                northeurope: azure-northeurope

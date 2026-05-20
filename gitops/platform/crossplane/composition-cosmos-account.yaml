@@ -1,0 +1,89 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: cosmosaccount.azure.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.cityos.io/v1alpha1
+    kind: XCosmosAccount
+  writeConnectionSecretsToNamespace: crossplane-system
+  resources:
+    - name: account
+      base:
+        apiVersion: cosmosdb.azure.upbound.io/v1beta1
+        kind: Account
+        spec:
+          forProvider:
+            kind: GlobalDocumentDB
+            offerType: Standard
+            consistencyPolicy:
+              - consistencyLevel: Session
+            geoLocation:
+              - failoverPriority: 0
+                location: westeurope
+                zoneRedundant: false
+              - failoverPriority: 1
+                location: northeurope
+                zoneRedundant: false
+            location: westeurope
+            multipleWriteLocationsEnabled: false
+            publicNetworkAccessEnabled: false
+            resourceGroupName: placeholder
+          providerConfigRef:
+            name: default
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.resourceGroupName
+          toFieldPath: spec.forProvider.resourceGroupName
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.primaryLocation
+          toFieldPath: spec.forProvider.location
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.primaryLocation
+          toFieldPath: spec.forProvider.geoLocation[0].location
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secondaryLocation
+          toFieldPath: spec.forProvider.geoLocation[1].location
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.sloClass
+          toFieldPath: spec.forProvider.multipleWriteLocationsEnabled
+          transforms:
+            - type: map
+              map:
+                bronze: false
+                silver: false
+                gold: true
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.sloClass
+          toFieldPath: spec.forProvider.geoLocation[0].zoneRedundant
+          transforms:
+            - type: map
+              map:
+                bronze: false
+                silver: false
+                gold: true
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.sloClass
+          toFieldPath: spec.forProvider.geoLocation[1].zoneRedundant
+          transforms:
+            - type: map
+              map:
+                bronze: false
+                silver: false
+                gold: true
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: map
+              map:
+                westeurope: azure-westeurope
+                northeurope: azure-northeurope
