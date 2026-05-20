@@ -1,0 +1,496 @@
+{
+  "project": "IDP GitOps Blueprint v2",
+  "branchName": "ralph/idp-gitops-implementation",
+  "description": "Production-grade multi-cluster, multi-region Internal Developer Platform with GitOps Bridge pattern — 7 AKS clusters, automatic failover, Crossplane, ArgoCD, progressive delivery with Argo Rollouts",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Provision Hub-and-Spoke Network Topology",
+      "description": "As a platform engineer, I need to provision the Azure hub-and-spoke VNet topology with Azure Firewall Premium, private DNS zones, and zero-trust segmentation for all clusters.",
+      "acceptanceCriteria": [
+        "Hub VNets created in West Europe (10.0.0.0/16) and North Europe with peering configured",
+        "7 spoke VNets created: mgmt-we (10.1/16), aks-prod-we (10.2/16), aks-staging-we (10.3/16), aks-dev-we (10.4/16), mgmt-ne (10.5/16), aks-prod-ne (10.6/16)",
+        "Azure Firewall Premium deployed in WE hub with FQDN allow-list for Bitbucket/Atlassian, ACR, Azure services",
+        "Private DNS Zones created: AKV, SQL, Cosmos, Service Bus, ACR, Blob Storage",
+        "Azure Bastion deployed for break-glass operator access",
+        "No public IP on any AKS cluster API server",
+        "Terraform plan applies cleanly with no errors",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Provision AKS Clusters with Naming Convention",
+      "description": "As a platform engineer, I need to provision all 7 AKS clusters (mgmt-we, mgmt-ne, aks-dev-we, aks-staging-we, aks-prod-we, aks-prod-ne, seed-wus) with correct configuration per the blueprint naming convention.",
+      "acceptanceCriteria": [
+        "mgmt-we: Private API, system pool + cipool (cipool has taint workload=ci:NoSchedule, autoscaler 1-30 nodes)",
+        "mgmt-ne: Private API, system pool only, minimal node count (standby mode)",
+        "aks-dev-we: Single-AZ, private API",
+        "aks-staging-we: Multi-AZ, private API",
+        "aks-prod-we: Multi-AZ, Premium SKU, private API",
+        "aks-prod-ne: Multi-AZ, Premium SKU, private API",
+        "seed-wus: Single-node cluster in West US 2 for catastrophic DR bootstrap",
+        "All clusters have Workload Identity enabled",
+        "All clusters have OIDC issuer enabled",
+        "Private endpoints from spokes to hub services configured",
+        "Terraform plan applies cleanly",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Provision Regional Azure Key Vaults",
+      "description": "As a platform engineer, I need to provision per-region Azure Key Vaults for each workload cluster with RBAC mode and proper access controls.",
+      "acceptanceCriteria": [
+        "kv-platform-dev-we created with RBAC mode, soft-delete (90 days), purge-protection enabled",
+        "kv-platform-staging-we created with same settings",
+        "kv-platform-prod-we created with same settings",
+        "kv-platform-prod-ne created with same settings",
+        "Private endpoints in each respective regional hub configured",
+        "Diagnostic logs piped to Azure Monitor",
+        "Terraform plan applies cleanly",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Provision Azure Storage Account for Management Lease",
+      "description": "As a platform engineer, I need to provision a geo-redundant storage account with blob lease for singleton management-plane lock.",
+      "acceptanceCriteria": [
+        "Storage account with GRS replication created",
+        "Blob container 'leases' with blob 'mgmt-active' created",
+        "Private endpoint reachable from both mgmt-we and mgmt-ne spokes",
+        "mgmt-we and mgmt-ne UAMI granted Storage Blob Data Contributor on lease container",
+        "Terraform plan applies cleanly",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Provision Azure Container Registry",
+      "description": "As a platform engineer, I need to provision a shared ACR for Jenkins to push images and workload clusters to pull them.",
+      "acceptanceCriteria": [
+        "acrplatformprod created with Premium SKU and geo-replication to North Europe",
+        "Private endpoint in hub VNet configured",
+        "AKS clusters configured with acrpull role assignment",
+        "Jenkins UAMI granted acrpush role",
+        "Terraform plan applies cleanly",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Bootstrap ArgoCD on mgmt-we",
+      "description": "As a platform engineer, I need to install and bootstrap ArgoCD on mgmt-we in HA mode so it can manage all workload clusters as a hub.",
+      "acceptanceCriteria": [
+        "ArgoCD installed via Helm with HA values: 3 application-controllers (sharded by cluster), 2 repo-servers, 3 redis-ha, 2 servers",
+        "ArgoCD configured with SSH deploy key for platform-gitops Bitbucket repo",
+        "All cluster Secrets registered with mandatory labels: env, region, role, lease-status, argocd.argoproj.io/secret-type: cluster",
+        "Kyverno policy KyvernoRequiredClusterSecretLabels enforces label schema",
+        "ArgoCD accessible only via private endpoint (no public Ingress)",
+        "ArgoCD bootstrap ApplicationSet deployed (App-of-Apps pattern)",
+        "Health check passes for all ArgoCD components",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Install Crossplane with Azure Provider on mgmt-we",
+      "description": "As a platform engineer, I need to install Crossplane with Azure provider so cloud resources can be provisioned declaratively via XRDs.",
+      "acceptanceCriteria": [
+        "Crossplane core installed via Helm",
+        "provider-azure installed and healthy",
+        "ProviderConfig configured with Workload Identity (UAMI on mgmt-we with Contributor on target subscriptions)",
+        "Per-region ProviderConfig sharding configured for dual AKV writes",
+        "XRDs deployed: SQLDatabase, CosmosAccount, DnsRecord, ServiceBus, NamespaceVaultBinding",
+        "Compositions deployed with SLO-class-aware logic (bronze/silver/gold)",
+        "health.lua custom health checks for Crossplane XR kinds registered in ArgoCD",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Deploy Management-Plane Singleton Lock Controller",
+      "description": "As a platform engineer, I need to deploy the mgmt-leader-lease controller on both mgmt clusters to enforce singleton management-plane lock with automatic failover.",
+      "acceptanceCriteria": [
+        "mgmt-leader-lease Go controller deployed as single-replica Deployment on both mgmt-we and mgmt-ne",
+        "Controller acquires Azure Storage Blob Lease (TTL 60s, renewal every 15s)",
+        "On lease acquisition: writes identity to ConfigMap mgmt-leader-status in kube-system",
+        "On lease loss: updates ConfigMap to reflect non-leader status",
+        "Prometheus metrics exposed: mgmt_leader_lease_renewed_seconds",
+        "mgmt-cli failback --to <cluster> --confirm CLI tool functional",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Deploy Controller-Scaler for Management Cluster Scaling",
+      "description": "As a platform engineer, I need to deploy controller-scaler so platform controllers scale to zero on the standby cluster and scale up on lease acquisition.",
+      "acceptanceCriteria": [
+        "controller-scaler watches mgmt-leader-status ConfigMap",
+        "On lease-acquisition: scales ArgoCD controllers → 3/2/2, Crossplane → 1, ESO → 1, jira-bridge → 1; updates cluster Secret label lease-status=active",
+        "On lease-loss: scales all above → 0; updates cluster Secret label lease-status=standby",
+        "Argo Rollouts NOT managed by controller-scaler (runs in workload clusters independently)",
+        "mgmt-ne confirmed at 0 replicas for all controllers in steady state",
+        "Failover tested: kill mgmt-we lease → mgmt-ne scales up within 120s",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Install External Secrets Operator",
+      "description": "As a platform engineer, I need to install ESO on all clusters so secrets flow from AKV to Kubernetes Secrets automatically.",
+      "acceptanceCriteria": [
+        "ESO controller installed on mgmt-we (orchestrator role, managed by controller-scaler)",
+        "ESO agent installed on each workload cluster",
+        "--namespace-scoped-stores=true flag set on all ESO instances",
+        "No ClusterSecretStore deployed anywhere",
+        "ESO healthy and reconciling on all clusters",
+        "Verify ExternalSecret pulling test secret from AKV",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Deploy Kyverno Admission Policies",
+      "description": "As a platform engineer, I need to install Kyverno and deploy admission policies to enforce namespace requirements and reject non-conformant resources.",
+      "acceptanceCriteria": [
+        "Kyverno installed on all clusters",
+        "tier=platform label required on all mgmt cluster namespaces; pods in non-conformant namespaces rejected",
+        "KyvernoProdRequiresRollout policy rejects Deployment in prod cluster namespaces",
+        "KyvernoRequiredClusterSecretLabels enforces ArgoCD cluster Secret labels (including lease-status)",
+        "Policies tested with both conformant and non-conformant resources",
+        "All policies report as Active",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011b",
+      "title": "Deploy Cosign Image Verification Policy (Kyverno)",
+      "description": "As a platform engineer, I need to deploy a Kyverno policy that verifies Cosign image signatures so only signed images from ACR can run on workload clusters.",
+      "acceptanceCriteria": [
+        "Kyverno ClusterPolicy deployed on all workload clusters verifying Cosign signatures",
+        "Policy references Cosign public key stored in AKV",
+        "Unsigned images rejected at admission on staging and production clusters",
+        "Dev clusters configured in Audit mode (warn but don't block) during initial rollout",
+        "Policy excludes system namespaces: kube-system, kyverno, external-secrets",
+        "Test: unsigned image rejected on prod cluster",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Deploy Jenkins on mgmt-we",
+      "description": "As a platform engineer, I need to deploy Jenkins as a single-replica StatefulSet on mgmt-we so CI pipelines can build images and update GitOps state.",
+      "acceptanceCriteria": [
+        "Jenkins deployed as StatefulSet with replicas: 1",
+        "PVC: ReadWriteOnce Azure Disk Premium SSD for $JENKINS_HOME",
+        "terminationGracePeriodSeconds: 300 for in-flight job draining",
+        "LivenessProbe on /login, readinessProbe on /whoAmI/api/json",
+        "Jenkins scheduled on cipool node pool (tolerates workload=ci:NoSchedule)",
+        "Kubernetes-plugin configured for ephemeral agent pods on cipool",
+        "bitbucket-workspace-token credential sourced from AKV via ESO",
+        "jira-service-account-token credential sourced from AKV via ESO",
+        "Reloader configured to restart Jenkins on credential Secret change",
+        "Velero backup schedule: every 6 hours, retention 30 days, GRS storage",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Configure Jenkins Multibranch Pipeline with Loop Prevention",
+      "description": "As a platform engineer, I need to configure the Jenkins pipeline with loop-prevention so PlatformBot commits never trigger builds.",
+      "acceptanceCriteria": [
+        "Bitbucket Branch Source trait configured with author filter: ^(?!PlatformBot).*$",
+        "Pipeline commits use [ci skip] marker as defensive layer",
+        "GitOps update stage only touches apps/<svc>/workload/overlays/dev/",
+        "Push retry logic (5 attempts with rebase) implemented",
+        "Pipeline uses git -c user.name=PlatformBot for commits",
+        "End-to-end test: commit to service repo → image built → image tag updated in platform-gitops",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013b",
+      "title": "Implement Cosign Image Signing in Jenkins Pipeline",
+      "description": "As a platform engineer, I need to configure Jenkins to sign all container images with Cosign using an AKV-backed key so supply chain integrity is enforced.",
+      "acceptanceCriteria": [
+        "Cosign signing key provisioned in AKV (HSM-backed if compliance requires)",
+        "Jenkins pipeline signs every image after push to ACR using cosign sign --key azurekms://...",
+        "Signature attestation stored alongside image in ACR",
+        "Signing step uses Workload Identity (no static key material on disk)",
+        "Verification: cosign verify succeeds for all pipeline-produced images",
+        "End-to-end test: unsigned image rejected by Kyverno policy on staging cluster",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Configure Inbound Webhook Path for Bitbucket",
+      "description": "As a platform engineer, I need to configure Azure Front Door and Azure Firewall so Bitbucket webhooks reach Jenkins securely.",
+      "acceptanceCriteria": [
+        "Azure Front Door configured with WAF rule pinning Atlassian webhook CIDRs",
+        "DNAT rule on Azure Firewall routes webhook traffic to Jenkins controller",
+        "TLS verified at WAF layer and at Jenkins",
+        "Webhook delivery tested end-to-end: Bitbucket push → Jenkins build starts",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Configure Two-Tier ArgoCD ApplicationSets",
+      "description": "As a platform engineer, I need to deploy platform-infra-set and workloads-set ApplicationSets so infrastructure and workload lifecycles are managed independently.",
+      "acceptanceCriteria": [
+        "platform-infra-set ApplicationSet deployed with Matrix generator (env list × git directories under apps/*/infra/overlays/)",
+        "Infra Applications: prune: false, selfHeal: true, retry limit 10, max backoff 30m",
+        "workloads-set ApplicationSet deployed with Matrix generator (clusters with role: workload × git directories under apps/*/workload/overlays/)",
+        "Workload Applications: prune: true, selfHeal: true, retry limit 5, max backoff 5m",
+        "Application naming: <svc>-infra-<env> and <svc>-app-<env>-<cluster>",
+        "Sync waves configured per blueprint (infra: 0 to 1; workload: -1 to 4)",
+        "Workload Application blocks sync if corresponding infra Application is not Healthy",
+        "ServerSideApply=true and ApplyOutOfSyncOnly=true on both tiers",
+        "All Applications reach Healthy/Synced state",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Deploy argocd-jira-bridge",
+      "description": "As a platform engineer, I need to deploy the argocd-jira-bridge so drift events and rollback incidents are automatically tracked in Jira.",
+      "acceptanceCriteria": [
+        "argocd-jira-bridge deployed on mgmt-we, managed by controller-scaler",
+        "Failed syncs create Jira incidents in the IDP project",
+        "Rollout analysis failures create SEV1 incidents",
+        "Drift corrections logged as informational tickets",
+        "Bridge uses jira-service-account-token from AKV via ESO",
+        "Test: trigger an Application failure → verify Jira incident created",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Implement Per-Namespace Vault Binding (NamespaceVaultBinding XRD)",
+      "description": "As a platform engineer, I need to implement the NamespaceVaultBinding Crossplane Composition so each workload namespace gets isolated identity and AKV access.",
+      "acceptanceCriteria": [
+        "XRD xnamespacevaultbindings.platform.example.com deployed",
+        "Composition creates: UAMI (uami-<namespace>-<cluster>), FederatedIdentityCredential, RoleAssignment with ABAC condition (secrets:Name LIKE '<prefix>-*')",
+        "SecretStore and ServiceAccount auto-created per namespace",
+        "ABAC condition tested: namespace payments cannot read secrets prefixed billing-*",
+        "ApplicationSet namespace-vault-bindings-set generates one binding per namespace × cluster pair",
+        "End-to-end test: create namespace → UAMI created → SecretStore functional → ExternalSecret pulls value",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Implement Crossplane Dual-Write to Regional AKVs",
+      "description": "As a platform engineer, I need to configure Crossplane Compositions to write connection strings to both regional AKVs so each workload cluster reads from its local vault.",
+      "acceptanceCriteria": [
+        "SQL Composition writes connection JSON to both kv-platform-prod-we and kv-platform-prod-ne",
+        "Cosmos Composition writes to both vaults",
+        "Service Bus Composition writes to both vaults",
+        "Secret names identical in both vaults (e.g., payments-sql-conn)",
+        "Alert PerRegionAKVDualWriteSkew fires if vaults drift > 10 minutes apart",
+        "End-to-end test: provision SQL → both vaults contain identical secret",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Deploy Argo Rollouts with SLO-Class Analysis Templates",
+      "description": "As a platform engineer, I need to deploy Argo Rollouts on workload clusters with auto-generated AnalysisTemplates via NamespaceRolloutPolicy Composition.",
+      "acceptanceCriteria": [
+        "Argo Rollouts controller installed on all workload clusters (aks-dev-we, aks-staging-we, aks-prod-we, aks-prod-ne) via bootstrap ApplicationSet",
+        "Argo Rollouts NOT in management cluster and NOT managed by controller-scaler",
+        "New XRD NamespaceRolloutPolicy (separate from NamespaceVaultBinding) generates AnalysisTemplates per SLO class",
+        "Gold AnalysisTemplate: success-rate ≥ 99%, p99-latency ≤ 500ms, canary steps 5/25/50/100 with 5m pauses",
+        "Silver AnalysisTemplate: success-rate ≥ 99%, canary steps 25/100",
+        "Bronze: no analysis, direct cutover [setWeight: 100]",
+        "Failed analysis aborts rollout (canary → 0, stable → 100%)",
+        "ArgoCD marks Application Degraded on rollout failure",
+        "argocd-jira-bridge opens Jira incident on rollout failure",
+        "RolloutAnalysisFailed alert fires within 1 minute",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Implement SaaS Token Rotation CronJob",
+      "description": "As a platform engineer, I need to deploy automated rotation of Bitbucket and Jira tokens so static SaaS credentials have a quarterly lifecycle.",
+      "acceptanceCriteria": [
+        "saas-token-rotator binary deployed as two CronJobs (Bitbucket and Jira) — lease-aware, only runs on active mgmt",
+        "Bitbucket rotator mints new workspace token via Bitbucket API, writes to both regional AKVs",
+        "Jira rotator mints new service-account token, writes to both regional AKVs",
+        "Reloader detects new Secret hash; rolls Jenkins controller pod",
+        "Previous tokens revoked after 24-hour grace period",
+        "Prometheus metric saas_token_age_days{token=\"bitbucket-workspace|jira-sa\"} exposed",
+        "SaaSTokenAgeExceeded alert fires if token age > 100 days",
+        "End-to-end test: run rotation CronJob → verify new tokens in both AKVs → Jenkins pod restarted",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Deploy Observability Stack with Platform Alerts",
+      "description": "As a platform engineer, I need to deploy Prometheus + Grafana with platform-specific alert rules so operational issues are detected automatically.",
+      "acceptanceCriteria": [
+        "Prometheus + Grafana deployed on mgmt-we (managed by controller-scaler)",
+        "Alert MgmtLeaderLeaseLost: fires if lease renewal > 30s stale for 1m",
+        "Alert PerRegionAKVDualWriteSkew: fires if vault pair out-of-sync > 10m",
+        "Alert SaaSTokenAgeExceeded: fires if token age > 100 days",
+        "Alert RolloutAnalysisFailed: fires if rollout phase == Degraded",
+        "Platform-loop SLOs dashboarded: time-to-deploy, time-to-provision, drift-correction-MTTR, secret freshness, mgmt-failover RTO",
+        "PagerDuty integration for critical alerts configured",
+        "Verify Prometheus scraping all targets, Grafana dashboards accessible",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Configure Velero Backup for Management Cluster",
+      "description": "As a platform engineer, I need to configure Velero on mgmt-we so the management cluster can be restored from backup.",
+      "acceptanceCriteria": [
+        "Velero installed on mgmt-we",
+        "Backup schedule: every 6 hours (etcd + PVCs including Jenkins home)",
+        "Backup stored in GRS storage account",
+        "Retention: 30 days",
+        "Restore tested: Velero restore → Jenkins PVC restored → Jenkins starts with previous state",
+        "mgmt-ne configured as Velero restore target",
+        "Multiple backups created and validated",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Validate DR Runbook — Management Plane Failover",
+      "description": "As a platform engineer, I need to validate the automated DR failover end-to-end to confirm the 120-second RTO claim.",
+      "acceptanceCriteria": [
+        "Simulate mgmt-we failure: cordon + drain + delete lease",
+        "mgmt-ne acquires lease within 65s of TTL expiry (60s TTL + 5s poll)",
+        "controller-scaler scales up mgmt-ne controllers within 70s",
+        "ArgoCD on mgmt-ne re-establishes cluster connections within 120s",
+        "All workload Applications return to Healthy/Synced state",
+        "Crossplane re-adopts cloud resources (no duplicate provisioning)",
+        "Argo Rollouts in workload clusters unaffected (no disruption to in-flight canaries)",
+        "Total failover RTO measured ≤ 120s",
+        "Failback via mgmt-cli failback --to mgmt-we --confirm validated",
+        "No split-brain observed at any point during test",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Implement Create New IDP Service Seed Job",
+      "description": "As a platform engineer, I need the Jenkins seed job functional so a Jira ticket can trigger full service scaffolding end-to-end.",
+      "acceptanceCriteria": [
+        "Jira webhook triggers Jenkins seed job on IDP Service Request issue type",
+        "Seed job creates Bitbucket repository from Cookiecutter template",
+        "Seed job creates two PRs to platform-gitops: one for apps/<svc>/infra/, one for apps/<svc>/workload/",
+        "PRs use bitbucket-workspace-token credential",
+        "Generated infra includes: xrc-sql.yaml, xrc-cosmos.yaml, xrc-sb.yaml, xrc-namespace-binding.yaml with overlays",
+        "Generated workload includes: rollout.yaml, analysis-template.yaml, service.yaml, ingress.yaml, external-secrets with overlays",
+        "Rollout.yaml uses kind: Rollout for prod overlays, kind: Deployment for dev/staging",
+        "Analysis template auto-selected based on SLO class from Jira ticket",
+        "End-to-end test: Jira ticket → repo created → PRs merged → infra provisioned → app deployed",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Validate Seed Cluster DR (Catastrophic Recovery)",
+      "description": "As a platform engineer, I need the seed-wus cluster validated so both management clusters can be rebuilt from scratch if needed.",
+      "acceptanceCriteria": [
+        "seed-wus cluster operational with Crossplane installed",
+        "bootstrap/control-plane-claim.yaml provisions a new management cluster when applied",
+        "New management cluster acquires the (free) blob lease",
+        "ArgoCD bootstraps itself from platform-gitops",
+        "Full recovery RTO measured ≤ 45 minutes",
+        "Workload clusters confirmed serving traffic throughout the entire DR scenario",
+        "Typecheck passes"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
