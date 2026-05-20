@@ -4,13 +4,13 @@
 **Programme:** Internal Developer Platform on Azure AKS
 **Owner:** Principal Enterprise Architect, Platform Engineering
 **Document version:** 2.0 — 2026-05-19
-**Originals (preserved):** `IDP-GitOps-Blueprint.md`, `IDP-GitOps-ADRs.md` — kept in repository for traceability.
+**Originals (preserved):** `IDP-GitOps-ADRs.md` — kept in repository for traceability.
 
 This v2 pack:
 
-- **Amends** ADR-001, ADR-003, ADR-004, ADR-005, ADR-006, ADR-010, ADR-013 — the original ADRs remain Accepted at v1; the amendments below are **superseding versions** marked `Accepted (supersedes v1)`. The originals retain status `Superseded by ADR-<n>-v2`.
+- **Amends** ADR-001, ADR-003, ADR-004, ADR-005, ADR-006, ADR-008, ADR-010, ADR-013 — the original ADRs remain Accepted at v1; the amendments below are **superseding versions** marked `Accepted (supersedes v1)`. The originals retain status `Superseded by ADR-<n>-v2`.
 - **Adds** ADR-016 through ADR-022 — new decisions surfaced by the audit.
-- **Leaves untouched** ADR-002, ADR-007, ADR-008, ADR-009, ADR-011, ADR-012, ADR-014, ADR-015 — those decisions remain Accepted as written in v1.
+- **Leaves untouched** ADR-002, ADR-007, ADR-009, ADR-011, ADR-012, ADR-014, ADR-015 — those decisions remain Accepted as written in v1.
 
 ## Index (v2)
 
@@ -23,7 +23,7 @@ This v2 pack:
 | ADR-005-v2 | Secret Management — ESO + Per-Region AKV Pair + Per-Namespace SecretStore | Accepted (supersedes v1) |
 | ADR-006-v2 | Identity Model — Workload Identity for Azure; Vaulted Rotating Tokens for SaaS (Bitbucket, Jira) | Accepted (supersedes v1) |
 | ADR-007 | GitOps Engine — ArgoCD with ApplicationSet | Accepted (unchanged) |
-| ADR-008 | Supply Chain — Cosign + AKV + Kyverno | Accepted (unchanged) |
+| ADR-008-v2 | Supply Chain — Cosign + AKV + Kyverno Verification (enforcement changed from Gatekeeper) | Accepted (supersedes v1) |
 | ADR-009 | Network Posture — Private AKS + Private Endpoints + Hub-Spoke (SaaS via Firewall + WAF) | Accepted (unchanged in spirit; §1.4 of blueprint clarifies SaaS path) |
 | ADR-010-v2 | Race-Free GitOps Update — Author Filter Primary; `[ci skip]` Defensive | Accepted (supersedes v1) |
 | ADR-011 | Source of Truth — Monorepo `platform-gitops` | Accepted (unchanged) |
@@ -356,6 +356,109 @@ Narrow ADR-006 to:
 ## Related ADRs
 - ADR-005-v2 (per-namespace AKV access) — same pipeline used here.
 - ADR-021 (Argo Rollouts) — unrelated, but cross-references for "platform-managed tokens."
+
+---
+
+# ADR-008-v2: Supply Chain — Cosign Image Signing with AKV-Backed Key + Kyverno Verification
+
+**Status:** Accepted — supersedes ADR-008 (v1)
+**Date:** 2026-05-20
+**Deciders:** Principal Architect, Security Lead, Platform Lead
+
+## Context
+
+ADR-008 (v1) chose Cosign + AKV for image signing (correct) and OPA/Gatekeeper with a `K8sRequiredCosignSignature` constraint template for admission enforcement. The v2 audit standardized on **Kyverno** as the sole policy engine (ADR-003-v2, ADR-016, ADR-021). Running both Gatekeeper and Kyverno simultaneously increases operational surface, conflicts on admission control, and contradicts the platform's "one tool per concern" principle.
+
+## Decision
+
+The signing side is unchanged from v1:
+
+- **Cosign** signs every image at CI time using an **AKV-backed key** (HSM if compliance demands).
+- `cosign attest --type spdx` attaches an SBOM attestation alongside the signature.
+- The signing key is stored in `kv-platform-prod-we:cosign-signing-key`.
+
+The enforcement side changes from Gatekeeper to **Kyverno**:
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-cosign-signature
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+  - name: verify-image-signature
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+        clusterSelector:
+          matchLabels:
+            role: workload
+    exclude:
+      any:
+      - resources:
+          namespaces:
+          - kube-system
+          - kyverno
+          - external-secrets
+          - argo-rollouts
+    verifyImages:
+    - imageReferences:
+      - "acrplatformprod.azurecr.io/*"
+      attestors:
+      - entries:
+        - keys:
+            publicKeys: |-
+              -----BEGIN PUBLIC KEY-----
+              {{ fetched from AKV at deploy time via ExternalSecret }}
+              -----END PUBLIC KEY-----
+      mutateDigest: true
+      verifyDigest: true
+      required: true
+```
+
+- **Production and staging clusters:** `validationFailureAction: Enforce` — unsigned images are rejected.
+- **Dev clusters:** `validationFailureAction: Audit` — warn but don't block during initial rollout.
+- System namespaces (`kube-system`, `kyverno`, `external-secrets`, `argo-rollouts`) are excluded since their images are platform-managed.
+
+## Options Reconsidered
+
+| Option | Verdict |
+|---|---|
+| A — Kyverno `verifyImages` (chosen) | Native Cosign verification in Kyverno; no separate tool |
+| B — Keep Gatekeeper alongside Kyverno | Two admission controllers; conflict risk; rejected by v2 standardization |
+| C — Connaisseur (dedicated image-verification admission controller) | Extra operator; Kyverno does it natively |
+
+## Consequences
+
+**Easier:**
+- Single policy engine (Kyverno) handles all admission: label enforcement, Rollout-only-in-prod, AND image verification.
+- `verifyImages` is a first-class Kyverno feature with built-in Cosign support — no external webhook or constraint template.
+- Policy management is uniform across all concerns.
+
+**Harder:**
+- Kyverno's `verifyImages` adds latency to pod admission (~200-300ms for signature verification).
+- Public key distribution requires an ExternalSecret to pull the Cosign public key from AKV into a ConfigMap/Secret referenced by the policy.
+
+**Will need to revisit if:**
+- Kyverno drops `verifyImages` support (unlikely — it's a headline feature).
+- Notary v2 becomes the standard and Kyverno doesn't support it natively.
+
+## Action Items
+1. [ ] Remove any Gatekeeper installation from the platform (no Gatekeeper CRDs, no constraint templates).
+2. [ ] Author the Kyverno `verify-cosign-signature` ClusterPolicy.
+3. [ ] Create an ExternalSecret that pulls the Cosign public key from AKV for the policy to reference.
+4. [ ] Deploy in `Audit` mode on dev, `Enforce` on staging/prod.
+5. [ ] Validate end-to-end: unsigned image → rejected on staging; signed image → admitted.
+
+## Related ADRs
+- ADR-003-v2 (cluster topology) — Kyverno enforces `tier=platform` on mgmt clusters.
+- ADR-005-v2 (AKV) — stores the signing key.
+- ADR-006-v2 (identity model) — Workload Identity used by the signing step in CI.
+- ADR-021 (Argo Rollouts) — Kyverno also enforces `Rollout`-only-in-prod.
 
 ---
 
@@ -884,8 +987,8 @@ The lease blob is the **authoritative** source of "who is active." Cluster label
 
 ## Appendix — Maintenance Notes for the v2 Pack
 
-- Originals remain at `IDP-GitOps-ADRs.md` and `IDP-GitOps-Blueprint.md`. They are marked `Superseded by v2` in the index but are not deleted — they record what was decided at v1 and why it changed.
-- The seven new ADRs (016–022) follow the same template as v1: Context → Decision → Options → Trade-off → Consequences → Action Items → Related ADRs.
+- The original ADR pack remains at `IDP-GitOps-ADRs.md`. Superseded ADRs are marked `Superseded by ADR-<n>-v2` in the index — they record what was decided at v1 and why it changed.
+- The eight new/amended ADRs (008-v2, 016–022) follow the same template as v1: Context → Decision → Options → Trade-off → Consequences → Action Items → Related ADRs.
 - Each `-v2` ADR cross-references the original it supersedes; readers can trace the evolution.
 - Future ADRs continue the sequence: ADR-023, ADR-024, etc. Number reuse is forbidden.
 - The decision ledger from the audit (Q1–Q17 → resolutions) is preserved in the blueprint's changelog for traceability.

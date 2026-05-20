@@ -10,7 +10,7 @@
 
 ## Changelog from v1.0
 
-This revision resolves 17 inconsistencies and ambiguities identified in a structured audit of v1.0. The originals (`IDP-GitOps-Blueprint.md`, `IDP-GitOps-ADRs.md`) remain in place for traceability.
+This revision resolves 17 inconsistencies and ambiguities identified in a structured audit of v1.0. The original ADR pack (`IDP-GitOps-ADRs.md`) remains in place for traceability.
 
 | # | Change | Affects |
 |---|---|---|
