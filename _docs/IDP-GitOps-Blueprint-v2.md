@@ -89,7 +89,7 @@ labels:
   env: dev | staging | prod | mgmt | seed
   region: westeurope | northeurope | westus2
   role: workload | management | seed
-  lease-status: active | standby | n-a    # set by mgmt-leader-lease on mgmt clusters; "n-a" for workload/seed
+  lease-status: active | standby | n-a    # set by controller-scaler on mgmt clusters; "n-a" for workload/seed
 data:
   name: aks-prod-we    # must equal metadata.name
 ```
@@ -235,7 +235,7 @@ A small Go controller named **`mgmt-leader-lease`** runs in both `mgmt-we` and `
 **Effect:**
 - The lease-holding cluster writes its identity to ConfigMap `mgmt-leader-status` in `kube-system`.
 - A second controller, **`controller-scaler`**, watches that ConfigMap and reconciles controller replica counts:
-  - On lease-acquisition: ArgoCD application-controller → 3, server → 2, repo-server → 2; Crossplane providers → 1; ESO orchestrator → 1.
+  - On lease-acquisition: ArgoCD application-controller → 3, server → 2, repo-server → 2; Crossplane providers → 1; ESO orchestrator → 1; `argocd-jira-bridge` → 1.
   - On lease-loss: all of the above → 0.
   - Additionally, updates the `lease-status` label on the cluster's ArgoCD Secret to `active` (on acquisition) or `standby` (on loss).
 - The Storage Account hosting the lease blob has a private endpoint reachable from both regions; its own HA is the standard Azure Storage 99.99% SLA, geo-replicated for catastrophe recovery.
@@ -644,6 +644,90 @@ The Composition is invoked once per (namespace, cluster) pair. In practice, an A
 
 Unchanged from v1.0 §4.6. One addition: the per-region ProviderConfig sharding now also distributes secret writes across the two regional AKVs.
 
+## 4.8 XRD #6 — Namespace Rollout Policy (NEW)
+
+Required by the progressive delivery pattern (ADR-021). Each workload namespace on a production cluster gets a `NamespaceRolloutPolicy` claim that materializes the correct AnalysisTemplate based on the service's SLO class. This is deliberately **separate** from `NamespaceVaultBinding` (§4.6) to avoid mixing identity/secret concerns with progressive-delivery concerns.
+
+```yaml
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xnamespacerolloutpolicies.platform.example.com
+spec:
+  group: platform.example.com
+  names: { kind: XNamespaceRolloutPolicy, plural: xnamespacerolloutpolicies }
+  claimNames: { kind: NamespaceRolloutPolicy, plural: namespacerolloutpolicies }
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              parameters:
+                type: object
+                required: [namespaceName, sloClass]
+                properties:
+                  namespaceName: { type: string }
+                  sloClass:      { type: string, enum: [bronze, silver, gold] }
+                  customSuccessRate: { type: number, description: "Override default success-rate threshold (0-1)" }
+                  customLatencyP99: { type: number, description: "Override default p99 latency threshold in seconds" }
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: namespace-rollout-policy.platform.example.com
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.com/v1alpha1
+    kind: XNamespaceRolloutPolicy
+  resources:
+  - name: analysis-template
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha2
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            apiVersion: argoproj.io/v1alpha1
+            kind: AnalysisTemplate
+            metadata:
+              namespace: ""          # patched from namespaceName
+            spec:
+              metrics: []            # patched based on sloClass
+    patches:
+    - fromFieldPath: spec.parameters.namespaceName
+      toFieldPath: spec.forProvider.manifest.metadata.namespace
+    - fromFieldPath: spec.parameters.namespaceName
+      toFieldPath: spec.forProvider.manifest.metadata.name
+      transforms:
+      - type: map
+        map:
+          # Name is derived from sloClass; namespace provides uniqueness
+    - fromFieldPath: spec.parameters.sloClass
+      toFieldPath: spec.forProvider.manifest.metadata.name
+      transforms:
+      - type: map
+        map:
+          bronze: bronze-analysis
+          silver: silver-analysis
+          gold: gold-analysis
+```
+
+**SLO class → AnalysisTemplate mapping:**
+
+| SLO Class | Template Name | Metrics | Canary Steps |
+|---|---|---|---|
+| Bronze | `bronze-analysis` | None (no analysis) | `[setWeight: 100]` (direct cutover) |
+| Silver | `silver-analysis` | success-rate ≥ 99% | 25% → 100% with 5m pause |
+| Gold | `gold-analysis` | success-rate ≥ 99%, p99-latency ≤ 500ms | 5% → 25% → 50% → 100% with 5m pauses |
+
+The Composition is invoked once per (namespace, cluster) pair on production clusters only. An ApplicationSet `namespace-rollout-policies-set` generates one `NamespaceRolloutPolicy` per namespace listed in `platform/namespaces.yaml`, filtered to clusters with label `env: prod`. The output is consumed by the workload's `Rollout` resource (see §6.5).
+
 ---
 
 # 5. ZERO-TRUST SECURITY — AZURE KEY VAULT & ESO
@@ -776,8 +860,8 @@ Bitbucket Cloud and Jira Cloud don't accept federated identity tokens inbound �
 
 | Token | Type | Scope | Storage | Rotation |
 |---|---|---|---|---|
-| Bitbucket workspace access token | Workspace-scoped (not user) | `repository:write`, `pullrequest:write` | `kv-platform-prod-we:bitbucket-workspace-token` | Quarterly via Crossplane CronJob |
-| Jira service-account API token | Bound to dedicated svc account, project-scoped to `IDP` | Read+write on IDP project only | `kv-platform-prod-we:jira-sa-token` | Quarterly via Crossplane CronJob |
+| Bitbucket workspace access token | Workspace-scoped (not user) | `repository:write`, `pullrequest:write` | `kv-platform-prod-we:bitbucket-workspace-token` | Quarterly via `saas-token-rotator` CronJob |
+| Jira service-account API token | Bound to dedicated svc account, project-scoped to `IDP` | Read+write on IDP project only | `kv-platform-prod-we:jira-sa-token` | Quarterly via `saas-token-rotator` CronJob |
 | Cosign signing key | KMS-backed in AKV (HSM if compliance demands) | Sign images in ACR | `kv-platform-prod-we:cosign-signing-key` | Annually (re-sign in place) |
 
 Rotation procedure for the Bitbucket workspace token:
@@ -904,6 +988,7 @@ spec:
         - CreateNamespace=true
         - PrunePropagationPolicy=foreground
         - ServerSideApply=true
+        - ApplyOutOfSyncOnly=true
         retry:
           limit: 5
           backoff:

@@ -760,7 +760,7 @@ Adopt **Argo Rollouts** as the platform default for production workloads.
   - Bronze: single step (effectively direct cutover, but using the Rollout primitive for uniformity).
   - Silver: 25% / 100% with success-rate analysis.
   - Gold: 5% / 25% / 50% / 100% with success-rate + p99-latency analysis.
-- AnalysisTemplate is **synthesized** by the `NamespaceVaultBinding` Composition based on the service's SLO class — service teams don't author their own analysis logic.
+- AnalysisTemplate is **synthesized** by the `NamespaceRolloutPolicy` Composition (separate from `NamespaceVaultBinding`) based on the service's SLO class — service teams don't author their own analysis logic.
 - Failed analysis aborts the rollout (canary ReplicaSet scaled to 0); the stable ReplicaSet stays at 100%.
 
 Traffic shifting uses NGINX Ingress Controller — no service mesh requirement.
