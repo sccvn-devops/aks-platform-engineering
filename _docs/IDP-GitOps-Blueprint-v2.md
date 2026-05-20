@@ -19,7 +19,7 @@ This revision resolves 17 inconsistencies and ambiguities identified in a struct
 | C-3 | "Private endpoint to Bitbucket" removed. Bitbucket Cloud reached via Azure Firewall Premium + FQDN allow-list; inbound webhooks via Front Door + WAF + Atlassian CIDR pin. | §1.4, ADR-009 |
 | C-4 | Cloud infrastructure and workload manifests now live in **two separate Applications** per service (`<svc>-infra-<env>`, `<svc>-app-<env>-<cluster>`); long retry budgets on infra, short on workload. | §6.2, §6.3, ADR-013 |
 | C-5 | PlatformBot's Bitbucket app password replaced by **workspace access token** stored in AKV, managed by ESO + Reloader, rotated quarterly. Same pattern for Jira service-account token. | §2.1.2, §5.7 (new), ADR-006 |
-| C-6 | Formal glossary introduced (§0). "Workload" vs "platform component" defined precisely; Gatekeeper enforces `tier=platform` namespace label on mgmt clusters. | §0 (new), §1.3, ADR-003, ADR-016 (new) |
+| C-6 | Formal glossary introduced (§0). "Workload" vs "platform component" defined precisely; Kyverno enforces `tier=platform` namespace label on mgmt clusters. | §0 (new), §1.3, ADR-003, ADR-016 (new) |
 | C-7 | Crossplane "read-only mode" in mgmt-ne replaced with explicit **scale-to-zero** of controllers + cluster `role=standby` label gating the ApplicationSet. | §1.2, §7.3, ADR-004, ADR-017 (new) |
 | C-8 | SLO class (bronze/silver/gold) re-defined as a single availability tier with explicit RTO/RPO targets; **Cosmos consistency level decoupled** as its own parameter. | §0, §4.0 (new), §4.2-4.5, ADR-018 (new) |
 | C-9 | Per-region Azure Key Vault pair (`kv-platform-prod-we`, `kv-platform-prod-ne`); Crossplane dual-writes; ESO points to local vault. | §5.1.1 (new), §4 Compositions, ADR-005, ADR-019 (new) |
@@ -54,9 +54,9 @@ This blueprint defines a **resilient, multi-cluster, multi-region Internal Devel
 | Term | Definition |
 |---|---|
 | **Workload** | Any application that serves customer-, business-, or end-user-facing traffic. Workloads run in **workload clusters** only. |
-| **Platform component** | Any service that supports the developer or operator experience: ArgoCD, Crossplane (core + providers), ESO controllers, Reloader, Argo Rollouts, Velero, Jenkins (controller + ephemeral agents), observability stack, `argocd-jira-bridge`, `mgmt-leader-lease`. Platform components run in **management clusters** only. |
-| **Management cluster** | A cluster named `mgmt-<region>`. Hosts only platform components. Gatekeeper rejects any Pod whose namespace lacks the label `tier=platform`. |
-| **Workload cluster** | A cluster named `aks-<env>-<region>`. Hosts only workloads, plus the minimum operators they need (ESO agent, Reloader, Argo Rollouts, Gatekeeper, ArgoCD agent SA). |
+| **Platform component** | Any service that supports the developer or operator experience: ArgoCD, Crossplane (core + providers), ESO controllers, Reloader, Velero, Jenkins (controller + ephemeral agents), observability stack, `argocd-jira-bridge`, `mgmt-leader-lease`. Platform components run in **management clusters** only. |
+| **Management cluster** | A cluster named `mgmt-<region>`. Hosts only platform components. Kyverno rejects any Pod whose namespace lacks the label `tier=platform`. |
+| **Workload cluster** | A cluster named `aks-<env>-<region>`. Hosts only workloads, plus the minimum operators they need (ESO agent, Reloader, Argo Rollouts controller, Kyverno, ArgoCD agent SA). |
 | **Seed cluster** | A tiny single-node cluster (`seed-wus`) in a third region used only as a re-build origin for management clusters during catastrophic DR. |
 | **Active management cluster** | Whichever mgmt cluster currently holds the Azure Storage Blob Lease (§1.7). Exactly one at any time. |
 | **Standby management cluster** | All mgmt clusters that do not hold the lease. Controllers there are scaled to zero. |
@@ -81,7 +81,7 @@ This blueprint defines a **resilient, multi-cluster, multi-region Internal Devel
 | Workload, prod (WE) | `aks-prod-we` | Multi-AZ |
 | Workload, prod (NE) | `aks-prod-ne` | Multi-AZ |
 
-Cluster Secrets registered in ArgoCD carry these mandatory labels (enforced by Kyverno `K8sRequiredClusterSecretLabels`):
+Cluster Secrets registered in ArgoCD carry these mandatory labels (enforced by Kyverno `KyvernoRequiredClusterSecretLabels`):
 
 ```yaml
 labels:
@@ -89,6 +89,7 @@ labels:
   env: dev | staging | prod | mgmt | seed
   region: westeurope | northeurope | westus2
   role: workload | management | seed
+  lease-status: active | standby | n-a    # set by mgmt-leader-lease on mgmt clusters; "n-a" for workload/seed
 data:
   name: aks-prod-we    # must equal metadata.name
 ```
@@ -130,7 +131,6 @@ data:
 │  ─ Jenkins ctrl     │  ── kubectl ──►   │  ─ Crossplane + Azure provider          │      │  ─ Crossplane installed but quiet   │    │                  │
 │   (mgmt-we only)    │                   │  ─ ESO controller-of-controllers        │      │  ─ ESO orchestrator @ 0 replicas    │    │                  │
 └─────────────────────┘                   │  ─ Velero (6h etcd/PV → GRS storage)    │      │  ─ Velero (restore target)          │    │                  │
-                                          │  ─ Argo Rollouts controller             │      │  ─ Argo Rollouts (0 replicas)       │    │                  │
                                           │  ─ mgmt-leader-lease (single replica)   │      │  ─ mgmt-leader-lease (single)       │    │                  │
                                           └──────────┬──────────────────────────────┘      └────────────────────────────────────┘    └──────────────────┘
                                                      │ syncs (via ApplicationSet labels)
@@ -141,6 +141,7 @@ data:
                   │ Single-AZ         │  │ Multi-AZ           │  │ Multi-AZ, Premium SKU │  │ Multi-AZ, Premium    │
                   │ ArgoCD destination│  │ ArgoCD destination │  │ Argo Rollouts canary  │  │ Argo Rollouts canary │
                   │ ESO + SecretStore │  │ ESO + SecretStore  │  │ ESO + SecretStore     │  │ ESO + SecretStore    │
+                  │ Argo Rollouts ctrl│  │ Argo Rollouts ctrl │  │ Argo Rollouts ctrl    │  │ Argo Rollouts ctrl   │
                   │ → kv-platform-    │  │ → kv-platform-     │  │ → kv-platform-        │  │ → kv-platform-       │
                   │   dev-we          │  │   staging-we       │  │   prod-we             │  │   prod-ne            │
                   └───────────────────┘  └────────────────────┘  └───────────────────────┘  └──────────────────────┘
@@ -157,12 +158,12 @@ The full C4 Container diagram in v2 is `IDP-C4-Container-v2.drawio` (delivered a
 | Jira Cloud down | New service requests; drift incidents not auto-tracked | All pipelines, all workloads, ArgoCD reconcile | Jira is *intent-side*; runtime is unaware |
 | Bitbucket Cloud down | New commits; ArgoCD pulls fail | Running workloads; in-flight reconciliations using last-known revision | ArgoCD caches last good revision; Crossplane reconciles from in-cluster CRs |
 | Jenkins controller down | Image builds; new image-tag PRs | Existing images in ACR; ArgoCD continues syncing whatever is in Git | CI is write-side only |
-| mgmt-we down | Drift correction (briefly, until lease expires); active reconciliation | Workload pods, in-region DB connections; mgmt-ne auto-promotes via lease (~75s) | Lease-based singleton lock; mgmt-ne stands by |
+| mgmt-we down | Drift correction (briefly, until lease expires); active reconciliation | Workload pods, in-region DB connections; mgmt-ne auto-promotes via lease (~120s) | Lease-based singleton lock; mgmt-ne stands by |
 | Workload cluster down (single) | Workloads on that cluster | All other clusters, control plane, CI; Front Door routes around if it's a prod cluster | Per-cluster blast radius |
 | Entire West Europe region down | WE workloads; mgmt-we; AKV-WE writes | NE workloads (Active-Active reads); mgmt-ne promoted via lease; AKV-NE serves NE pods; Cosmos auto-failover promotes NE to writes | Per-region AKV; auto-promotion |
 | mgmt-we ↔ mgmt-ne partition (split-brain risk) | mgmt-we can no longer renew lease; mgmt-ne acquires it; mgmt-we's controller-scaler scales mgmt-we controllers to 0 on lease loss | Workloads; ArgoCD on whichever cluster has lease | Azure Storage Blob Lease is single source of truth |
 
-**Critical design rule:** the management cluster never schedules workloads. Gatekeeper enforces `tier=platform` on every namespace; non-conformant pods are admission-denied. This means a management-plane outage degrades the *meta-capability* of provisioning, never the *capability* of serving traffic.
+**Critical design rule:** the management cluster never schedules workloads. Kyverno enforces `tier=platform` on every namespace; non-conformant pods are admission-denied. This means a management-plane outage degrades the *meta-capability* of provisioning, never the *capability* of serving traffic.
 
 ## 1.4 Network Topology — Zero-Trust Segmentation (Revised)
 
@@ -226,16 +227,17 @@ Extensions beyond Azure-Samples `aks-platform-engineering` (unchanged from v1.0)
 A small Go controller named **`mgmt-leader-lease`** runs in both `mgmt-we` and `mgmt-ne`. Its job: acquire and continuously renew an Azure Storage Blob Lease against `stplatleasewe<random>/leases/mgmt-active` (or its NE counterpart — the storage account is geo-redundant via GRS).
 
 **Lease semantics:**
-- Lease TTL: 15 seconds.
-- Renewal interval: 5 seconds.
+- Lease TTL: 60 seconds.
+- Renewal interval: 15 seconds.
 - Acquire-when-free: poll every 5 seconds when not holding the lease.
 - Operator override: a small CLI `mgmt-cli failback --to mgmt-we --confirm` calls Storage REST to break the lease and reacquire from the target cluster.
 
 **Effect:**
 - The lease-holding cluster writes its identity to ConfigMap `mgmt-leader-status` in `kube-system`.
 - A second controller, **`controller-scaler`**, watches that ConfigMap and reconciles controller replica counts:
-  - On lease-acquisition: ArgoCD application-controller → 3, server → 2, repo-server → 2; Crossplane providers → 1; ESO orchestrator → 1; Argo Rollouts → 1.
+  - On lease-acquisition: ArgoCD application-controller → 3, server → 2, repo-server → 2; Crossplane providers → 1; ESO orchestrator → 1.
   - On lease-loss: all of the above → 0.
+  - Additionally, updates the `lease-status` label on the cluster's ArgoCD Secret to `active` (on acquisition) or `standby` (on loss).
 - The Storage Account hosting the lease blob has a private endpoint reachable from both regions; its own HA is the standard Azure Storage 99.99% SLA, geo-replicated for catastrophe recovery.
 
 **Why this exists:** prevents split-brain where both mgmt clusters believe they are active simultaneously, which would cause ARM ownership thrash, ARM rate-limit exhaustion, and double-writes to AKVs.
@@ -780,7 +782,7 @@ Bitbucket Cloud and Jira Cloud don't accept federated identity tokens inbound �
 
 Rotation procedure for the Bitbucket workspace token:
 
-1. `bitbucket-token-rotator` CronJob (in `mgmt-leader-status`-aware namespace, runs only on lease holder) authenticates to Atlassian via the existing token, mints a new workspace token via `POST /workspaces/{slug}/access-tokens`, writes the new value to AKV (both regions).
+1. `saas-token-rotator` CronJob (in `mgmt-leader-status`-aware namespace, runs only on lease holder) authenticates to Atlassian via the existing token, mints a new workspace token via `POST /workspaces/{slug}/access-tokens`, writes the new value to AKV (both regions).
 2. Reloader detects the new Secret hash in Jenkins's mounted Secret; rolls Jenkins controller pod. In-flight builds are checkpointed by Jenkins's resume-on-restart.
 3. After 24 hours, the rotator revokes the previous token via `DELETE /workspaces/{slug}/access-tokens/{id}`.
 
@@ -949,7 +951,9 @@ The infra tier deliberately disables `prune` to prevent accidental destruction o
 
 ## 6.5 Progressive Delivery — Argo Rollouts (NEW)
 
-**Argo Rollouts is mandatory for all workloads in `aks-prod-we` and `aks-prod-ne`.** Dev and staging may use either `Deployment` or `Rollout`. A Gatekeeper constraint `K8sProdRequiresRollout` rejects `Deployment` resources in any namespace residing on a prod cluster.
+**Argo Rollouts is mandatory for all workloads in `aks-prod-we` and `aks-prod-ne`.** Dev and staging may use either `Deployment` or `Rollout`. A Kyverno policy `KyvernoProdRequiresRollout` rejects `Deployment` resources in any namespace residing on a prod cluster.
+
+The Argo Rollouts controller runs **locally in each workload cluster** (not in the management cluster), deployed via the bootstrap ApplicationSet. It is not managed by `controller-scaler`.
 
 Default canary strategy per SLO class:
 
@@ -980,7 +984,7 @@ spec:
   template: { ... }       # the pod spec
 ```
 
-The `AnalysisTemplate` is created by the namespace's `NamespaceVaultBinding` Composition based on its SLO class:
+The `AnalysisTemplate` is created by a separate Composition **`NamespaceRolloutPolicy`** (XRD `xnamespacerolloutpolicies.platform.example.com`) based on the service's SLO class. This decouples progressive-delivery concerns from identity/secret concerns (handled by `NamespaceVaultBinding`):
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -1068,7 +1072,7 @@ Unchanged from v1.0 §7.1. Added alert rules:
 | Time-to-provision (infra tier) | p95 ≤ 30 min | PR merge → SQL/Cosmos Ready |
 | Drift-correction-MTTR (workload) | p95 ≤ 3 min | Manual change → reverted |
 | Secret freshness | p95 ≤ 90 s | AKV rotation → app restart |
-| Mgmt-plane failover RTO | p99 ≤ 90 s | Lease loss → mgmt-ne fully active |
+| Mgmt-plane failover RTO | p99 ≤ 120 s | Lease loss → mgmt-ne fully active |
 
 ## 7.3 Disaster Recovery — Total Loss of Active Management Cluster (Revised)
 
@@ -1086,23 +1090,24 @@ Unchanged from v1.0 §7.1. Added alert rules:
 T+0  — ALERT FIRES (MgmtLeaderLeaseLost or AKS API unreachable)
        PagerDuty + Jira SEV1 incident opened automatically.
 
-T+15s — mgmt-we's lease blob TTL expires.
+T+60s — mgmt-we's lease blob TTL expires (60s TTL, renewal every 15s).
 
-T+20s — mgmt-ne's mgmt-leader-lease acquires the lease.
+T+65s — mgmt-ne's mgmt-leader-lease acquires the lease (polls every 5s).
         ConfigMap mgmt-leader-status in mgmt-ne is written to "we are now leader."
+        controller-scaler updates cluster Secret label: lease-status=active.
 
-T+25s — controller-scaler in mgmt-ne reads the ConfigMap; scales up:
+T+70s — controller-scaler in mgmt-ne reads the ConfigMap; scales up:
           - argocd-application-controller → 3 replicas
           - argocd-server → 2 replicas
           - argocd-repo-server → 2 replicas
           - crossplane-provider-azure → 1 replica
           - external-secrets controller → 1 replica
-          - argo-rollouts-controller → 1 replica
           - argocd-jira-bridge → 1 replica
 
-T+75s — ArgoCD on mgmt-ne reads the cluster Secrets (preserved in Git);
-        re-establishes connections to workload clusters; resumes reconciliation.
-        Crossplane re-establishes ownership of cloud resources via Adopt policy.
+T+120s — ArgoCD on mgmt-ne reads the cluster Secrets (preserved in Git);
+         re-establishes connections to workload clusters; resumes reconciliation.
+         Crossplane re-establishes ownership of cloud resources via Adopt policy.
+         (Argo Rollouts controllers in workload clusters are unaffected — they run locally.)
 
 T+5min — On-call engineer validates:
            - kubectl --context mgmt-ne -n argocd get app → all Healthy/Synced
@@ -1158,7 +1163,7 @@ Same as v1.0, with additions:
 | `mgmt-leader-lease` (in-house) | v1.0 | proprietary |
 | `controller-scaler` (in-house) | v1.0 | proprietary |
 | `argocd-jira-bridge` (in-house) | v1.0 | proprietary |
-| `bitbucket-token-rotator` (in-house) | v1.0 | proprietary |
+| `saas-token-rotator` (in-house) | v1.0 | proprietary |
 
 ## Appendix B — Folder Layout (platform-gitops repo, Revised)
 

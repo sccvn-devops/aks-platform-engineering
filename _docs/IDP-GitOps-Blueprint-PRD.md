@@ -6,7 +6,7 @@ This PRD defines the implementation plan for a **production-grade, multi-cluster
 
 The implementation is a **greenfield build** leveraging existing Terraform and GitOps foundations in this repository, delivered in **five phased milestones**. The target team is a mixed group of platform engineers, DevOps engineers, and application developers.
 
-**Key technologies:** Azure AKS, Crossplane (Azure Provider), ArgoCD, Jenkins, External Secrets Operator (ESO), Argo Rollouts, Azure Key Vault, Azure Front Door, Kyverno/Gatekeeper.
+**Key technologies:** Azure AKS, Crossplane (Azure Provider), ArgoCD, Jenkins, External Secrets Operator (ESO), Argo Rollouts, Azure Key Vault, Azure Front Door, Kyverno.
 
 **Bootstrapping strategy:** Semi-automated — Terraform provisions base infrastructure (VNets, AKS clusters, storage accounts, ACR); ArgoCD is manually bootstrapped once, after which the platform becomes self-managing via GitOps.
 
@@ -14,7 +14,7 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 
 ## Goals
 
-- Deliver a fully operational multi-region IDP with automatic management-plane failover (RTO ≤ 90s)
+- Deliver a fully operational multi-region IDP with automatic management-plane failover (RTO ≤ 120s)
 - Provide zero-trust secret delivery via per-namespace ESO + Workload Identity + ABAC-scoped AKV
 - Enable progressive delivery (Argo Rollouts) with SLO-class-aware canary analysis for production workloads
 - Achieve failure-domain isolation: DX/Control/Data planes fail independently
@@ -35,7 +35,7 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 **Acceptance Criteria:**
 - [ ] Hub VNet (10.0.0.0/16) in West Europe with Azure Firewall Premium deployed
 - [ ] Hub VNet in North Europe peered to WE hub
-- [ ] Spoke VNets for mgmt-we (10.1/16), aks-prod-we (10.2/16), aks-staging-we (10.3/16), aks-dev-we (10.4/16), aks-prod-ne (10.5/16)
+- [ ] Spoke VNets for mgmt-we (10.1/16), aks-prod-we (10.2/16), aks-staging-we (10.3/16), aks-dev-we (10.4/16), mgmt-ne (10.5/16), aks-prod-ne (10.6/16)
 - [ ] Azure Firewall FQDN allow-list for Bitbucket/Atlassian, ACR, Azure services
 - [ ] Private DNS Zones for AKV, SQL, Cosmos, Service Bus, ACR, Blob Storage
 - [ ] Azure Bastion deployed for break-glass operator access
@@ -100,8 +100,8 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 **Acceptance Criteria:**
 - [ ] ArgoCD installed via Helm with HA values: 3 application-controllers (sharded by cluster), 2 repo-servers, 3 redis-ha, 2 servers
 - [ ] ArgoCD configured with SSH deploy key for `platform-gitops` Bitbucket repo
-- [ ] All cluster Secrets registered with mandatory labels (`env`, `region`, `role`, `argocd.argoproj.io/secret-type: cluster`)
-- [ ] Kyverno policy `K8sRequiredClusterSecretLabels` enforces label schema
+- [ ] All cluster Secrets registered with mandatory labels (`env`, `region`, `role`, `lease-status`, `argocd.argoproj.io/secret-type: cluster`)
+- [ ] Kyverno policy `KyvernoRequiredClusterSecretLabels` enforces label schema
 - [ ] ArgoCD accessible only via private endpoint (no public Ingress)
 - [ ] ArgoCD bootstrap ApplicationSet deployed that manages itself (App-of-Apps)
 
@@ -122,7 +122,7 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 
 **Acceptance Criteria:**
 - [ ] `mgmt-leader-lease` Go controller deployed as single-replica Deployment on both mgmt-we and mgmt-ne
-- [ ] Controller acquires Azure Storage Blob Lease (TTL 15s, renewal every 5s)
+- [ ] Controller acquires Azure Storage Blob Lease (TTL 60s, renewal every 15s)
 - [ ] On lease acquisition: writes identity to ConfigMap `mgmt-leader-status` in `kube-system`
 - [ ] On lease loss: updates ConfigMap to reflect non-leader status
 - [ ] Prometheus metrics exposed: `mgmt_leader_lease_renewed_seconds`
@@ -133,10 +133,11 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 
 **Acceptance Criteria:**
 - [ ] `controller-scaler` watches `mgmt-leader-status` ConfigMap
-- [ ] On lease-acquisition: scales ArgoCD controllers → 3/2/2, Crossplane → 1, ESO → 1, Argo Rollouts → 1, jira-bridge → 1
-- [ ] On lease-loss: scales all above → 0
+- [ ] On lease-acquisition: scales ArgoCD controllers → 3/2/2, Crossplane → 1, ESO → 1, jira-bridge → 1; updates cluster Secret label `lease-status=active`
+- [ ] On lease-loss: scales all above → 0; updates cluster Secret label `lease-status=standby`
+- [ ] Argo Rollouts is NOT managed by controller-scaler (runs in workload clusters independently)
 - [ ] mgmt-ne confirmed at 0 replicas for all controllers in steady state
-- [ ] Failover tested: kill mgmt-we lease → mgmt-ne scales up within 75s
+- [ ] Failover tested: kill mgmt-we lease → mgmt-ne scales up within 120s
 
 #### US-010: Install External Secrets Operator
 **Description:** As a platform engineer, I want ESO installed on all clusters so that secrets flow from AKV to Kubernetes Secrets automatically.
@@ -148,15 +149,25 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 - [ ] No `ClusterSecretStore` deployed anywhere
 - [ ] ESO healthy and reconciling on all clusters
 
-#### US-011: Deploy Gatekeeper/Kyverno Policies
+#### US-011: Deploy Kyverno Policies
 **Description:** As a platform engineer, I want admission policies enforced so that management clusters reject workloads and production clusters reject plain Deployments.
 
 **Acceptance Criteria:**
-- [ ] Gatekeeper/Kyverno installed on all clusters
+- [ ] Kyverno installed on all clusters
 - [ ] `tier=platform` label required on all mgmt cluster namespaces; pods in non-conformant namespaces rejected
-- [ ] `K8sProdRequiresRollout` constraint rejects `Deployment` in prod cluster namespaces
-- [ ] `K8sRequiredClusterSecretLabels` enforces ArgoCD cluster Secret labels
+- [ ] `KyvernoProdRequiresRollout` policy rejects `Deployment` in prod cluster namespaces
+- [ ] `KyvernoRequiredClusterSecretLabels` enforces ArgoCD cluster Secret labels (including `lease-status`)
 - [ ] Policies tested with both conformant and non-conformant resources
+
+#### US-011b: Deploy Supply Chain Image Verification Policy
+**Description:** As a platform engineer, I want a Kyverno policy that verifies Cosign image signatures so that only signed images from our ACR can run on workload clusters (per ADR-008).
+
+**Acceptance Criteria:**
+- [ ] Kyverno `ClusterPolicy` deployed on all workload clusters that verifies Cosign signatures on container images
+- [ ] Policy references the Cosign public key stored in AKV
+- [ ] Unsigned images rejected at admission on staging and production clusters
+- [ ] Dev clusters configured in `Audit` mode (warn but don't block) during initial rollout
+- [ ] Policy excludes system namespaces (kube-system, kyverno, external-secrets)
 
 ---
 
@@ -188,6 +199,17 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 - [ ] Pipeline uses `git -c user.name=PlatformBot` for commits
 - [ ] End-to-end test: commit to service repo → image built → image tag updated in platform-gitops
 
+#### US-013b: Implement Cosign Image Signing in CI Pipeline
+**Description:** As a platform engineer, I want Jenkins to sign all container images with Cosign using an AKV-backed key so that supply chain integrity is enforced (per ADR-008).
+
+**Acceptance Criteria:**
+- [ ] Cosign signing key provisioned in AKV (HSM-backed if compliance requires)
+- [ ] Jenkins pipeline signs every image after push to ACR using `cosign sign --key azurekms://...`
+- [ ] Signature attestation stored alongside image in ACR
+- [ ] Signing step uses Workload Identity (no static key material on disk)
+- [ ] Verification: `cosign verify` succeeds for all pipeline-produced images
+- [ ] End-to-end test: unsigned image rejected by Kyverno policy on staging cluster
+
 #### US-014: Configure Inbound Webhook Path
 **Description:** As a platform engineer, I want Bitbucket webhooks to reach Jenkins securely so that pushes trigger CI immediately.
 
@@ -206,7 +228,7 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 - [ ] `workloads-set` ApplicationSet deployed with Matrix generator (clusters with `role: workload` × git directories under `apps/*/workload/overlays/`)
 - [ ] Workload Applications have: `prune: true`, `selfHeal: true`, retry limit 5, max backoff 5m
 - [ ] Application naming: `<svc>-infra-<env>` and `<svc>-app-<env>-<cluster>`
-- [ ] Sync waves configured per blueprint (infra: -1 to 1; workload: -1 to 4)
+- [ ] Sync waves configured per blueprint (infra: 0 to 1; workload: -1 to 4)
 - [ ] Workload Application blocks sync if corresponding infra Application is not Healthy
 - [ ] `ServerSideApply=true` and `ApplyOutOfSyncOnly=true` on both tiers
 
@@ -247,10 +269,12 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 - [ ] Tested: provision SQL → both vaults contain identical secret
 
 #### US-019: Deploy Argo Rollouts with SLO-Class Analysis Templates
-**Description:** As a platform engineer, I want Argo Rollouts deployed on production clusters with auto-generated AnalysisTemplates so that canary deployments are validated against SLO metrics.
+**Description:** As a platform engineer, I want Argo Rollouts deployed on workload clusters with auto-generated AnalysisTemplates (via `NamespaceRolloutPolicy` Composition) so that canary deployments are validated against SLO metrics.
 
 **Acceptance Criteria:**
-- [ ] Argo Rollouts controller installed on `aks-prod-we` and `aks-prod-ne`
+- [ ] Argo Rollouts controller installed on all workload clusters (aks-dev-we, aks-staging-we, aks-prod-we, aks-prod-ne) via bootstrap ApplicationSet
+- [ ] Argo Rollouts is NOT in the management cluster and NOT managed by controller-scaler
+- [ ] New XRD `NamespaceRolloutPolicy` (separate from NamespaceVaultBinding) generates AnalysisTemplates per SLO class
 - [ ] Gold AnalysisTemplate: success-rate ≥ 99%, p99-latency ≤ 500ms, canary steps 5/25/50/100 with 5m pauses
 - [ ] Silver AnalysisTemplate: success-rate ≥ 99%, canary steps 25/100
 - [ ] Bronze: no analysis, direct cutover `[setWeight: 100]`
@@ -263,13 +287,13 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 **Description:** As a platform engineer, I want automated rotation of Bitbucket and Jira tokens so that static SaaS credentials have a quarterly lifecycle.
 
 **Acceptance Criteria:**
-- [ ] `bitbucket-token-rotator` CronJob deployed (lease-aware — only runs on active mgmt)
-- [ ] Rotator mints new workspace token via Bitbucket API, writes to both regional AKVs
+- [ ] `saas-token-rotator` binary deployed as two CronJobs (one for Bitbucket, one for Jira) — lease-aware, only runs on active mgmt
+- [ ] Bitbucket rotator mints new workspace token via Bitbucket API, writes to both regional AKVs
+- [ ] Jira rotator mints new service-account token, writes to both regional AKVs
 - [ ] Reloader detects new Secret hash; rolls Jenkins controller pod
-- [ ] Previous token revoked after 24-hour grace period
-- [ ] Prometheus metric `saas_token_age_days{token="bitbucket-workspace"}` exposed
+- [ ] Previous tokens revoked after 24-hour grace period
+- [ ] Prometheus metric `saas_token_age_days{token="bitbucket-workspace|jira-sa"}` exposed
 - [ ] `SaaSTokenAgeExceeded` alert fires if token age > 100 days
-- [ ] Same pattern for Jira service-account token
 
 ---
 
@@ -299,16 +323,17 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 - [ ] mgmt-ne configured as Velero restore target
 
 #### US-023: Validate DR Runbook — Management Plane Failover
-**Description:** As a platform engineer, I want the automated DR failover validated end-to-end so that we have confidence in the 90-second RTO claim.
+**Description:** As a platform engineer, I want the automated DR failover validated end-to-end so that we have confidence in the 120-second RTO claim.
 
 **Acceptance Criteria:**
 - [ ] Simulate mgmt-we failure (cordon + drain + delete lease)
-- [ ] mgmt-ne acquires lease within 20s of TTL expiry
-- [ ] controller-scaler scales up mgmt-ne controllers within 25s
-- [ ] ArgoCD on mgmt-ne re-establishes cluster connections within 75s
+- [ ] mgmt-ne acquires lease within 65s of TTL expiry (60s TTL + 5s poll)
+- [ ] controller-scaler scales up mgmt-ne controllers within 70s
+- [ ] ArgoCD on mgmt-ne re-establishes cluster connections within 120s
 - [ ] All workload Applications return to Healthy/Synced state
 - [ ] Crossplane re-adopts cloud resources (no duplicate provisioning)
-- [ ] Total failover RTO measured ≤ 90s
+- [ ] Argo Rollouts in workload clusters unaffected throughout (no disruption to in-flight canaries)
+- [ ] Total failover RTO measured ≤ 120s
 - [ ] Failback via `mgmt-cli failback --to mgmt-we --confirm` validated
 - [ ] No split-brain observed at any point during test
 
@@ -342,28 +367,31 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 ## Functional Requirements
 
 - FR-1: The system must provision and manage 7 AKS clusters across 3 Azure regions (WE, NE, WUS2) with private API servers
-- FR-2: Exactly one management cluster must be active at any time, enforced by an Azure Storage Blob Lease singleton lock
-- FR-3: Management-plane failover must complete automatically within 90 seconds of lease expiry
+- FR-2: Exactly one management cluster must be active at any time, enforced by an Azure Storage Blob Lease singleton lock (60s TTL)
+- FR-3: Management-plane failover must complete automatically within 120 seconds of lease expiry
 - FR-4: All platform controllers on the standby management cluster must be at zero replicas
-- FR-5: Crossplane must be the sole cloud provisioning engine, with XRDs for SQL, Cosmos, Service Bus, DNS, and NamespaceVaultBinding
+- FR-5: Crossplane must be the sole cloud provisioning engine, with XRDs for SQL, Cosmos, Service Bus, DNS, NamespaceVaultBinding, and NamespaceRolloutPolicy
 - FR-6: Every Crossplane Composition that emits secrets must write to both regional AKVs simultaneously
 - FR-7: ESO must use per-namespace `SecretStore` (not `ClusterSecretStore`) with per-namespace UAMI and ABAC-scoped access
 - FR-8: A compromised namespace must not be able to read secrets belonging to another namespace (enforced by AKV ABAC)
 - FR-9: ArgoCD must manage two separate Applications per service: slow-lifecycle infra and fast-lifecycle workload
 - FR-10: The workload Application must not sync if its corresponding infra Application is not Healthy
-- FR-11: Argo Rollouts must be mandatory for all workloads on production clusters; Gatekeeper rejects `Deployment` resources
-- FR-12: Canary analysis strategy must be auto-generated from the service's SLO class (bronze/silver/gold)
+- FR-11: Argo Rollouts must be mandatory for all workloads on production clusters; Kyverno rejects `Deployment` resources
+- FR-12: Canary analysis strategy must be auto-generated from the service's SLO class (bronze/silver/gold) via `NamespaceRolloutPolicy` Composition
 - FR-13: Jenkins must be the sole CI engine, running only on mgmt-we as a single-replica StatefulSet
 - FR-14: The Jenkins pipeline must never trigger on PlatformBot commits (author filter is primary; `[ci skip]` is defensive)
 - FR-15: The Jenkins pipeline must only modify `apps/<svc>/workload/overlays/dev/` — never the `infra/` subtree
 - FR-16: Bitbucket webhooks must traverse: Front Door → WAF (Atlassian CIDR pin) → Azure Firewall DNAT → Jenkins
-- FR-17: SaaS API tokens (Bitbucket workspace token, Jira service-account token) must be rotated quarterly via automated CronJob
+- FR-17: SaaS API tokens (Bitbucket workspace token, Jira service-account token) must be rotated quarterly via the `saas-token-rotator` CronJob
 - FR-18: Reloader must restart affected pods when mounted Secrets change hash
 - FR-19: The "Create New IDP Service" workflow must be triggered by a Jira ticket and produce a fully-scaffolded service with all Crossplane claims and workload manifests
 - FR-20: Velero must back up the management cluster (etcd + PVCs) every 6 hours to GRS storage with 30-day retention
 - FR-21: Front Door must route user traffic Active-Active for reads across both prod regions
 - FR-22: Cosmos must use Active-Passive writes with `multipleWriteLocationsEnabled: false` and automatic failover
 - FR-23: All clusters must enforce naming convention `<role>-<env>-<region>` or `<role>-<region>` with label validation
+- FR-24: Argo Rollouts controllers must run locally in workload clusters, not in management clusters
+- FR-25: All container images must be signed with Cosign (AKV-backed key) and verified by Kyverno policy at admission (per ADR-008)
+- FR-26: The `controller-scaler` must update the `lease-status` label on ArgoCD cluster Secrets to enable platform-component ApplicationSet gating
 
 ---
 
@@ -401,8 +429,11 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 - ADR-001: Jenkins over Bamboo (failure-domain isolation)
 - ADR-004: Active-Passive writes with Cosmos
 - ADR-005: Per-namespace SecretStore with ABAC
+- ADR-008: Supply Chain — Cosign + AKV + Kyverno verification
 - ADR-013: Two-tier ApplicationSet (infra vs workload)
-- ADR-022: Azure Storage Blob Lease for mgmt singleton
+- ADR-017: Controllers scaled to zero in standby; Argo Rollouts in workload clusters only
+- ADR-021: Progressive delivery via Argo Rollouts; AnalysisTemplate from separate `NamespaceRolloutPolicy` Composition
+- ADR-022: Azure Storage Blob Lease for mgmt singleton (60s TTL)
 
 ---
 
@@ -422,21 +453,23 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 - Azure ABAC for Key Vault requires RBAC authorization mode (`enableRbacAuthorization: true`)
 - Crossplane provider-azure version must support all required resource kinds
 - ArgoCD version must support ApplicationSet Matrix generators with goTemplate
+- Kyverno is the sole policy engine (Gatekeeper is NOT used); all policies use `kyverno.io/v1` API
+- Argo Rollouts controllers run in workload clusters only; management cluster does NOT run Rollouts
 
 ### Performance Requirements
 - Time-to-deploy (workload tier): p95 ≤ 5 minutes
 - Time-to-provision (infra tier): p95 ≤ 30 minutes
 - Drift-correction MTTR (workload): p95 ≤ 3 minutes
 - Secret freshness: p95 ≤ 90 seconds
-- Management-plane failover RTO: p99 ≤ 90 seconds
+- Management-plane failover RTO: p99 ≤ 120 seconds
 
 ### Custom Components to Build
 | Component | Language | Purpose |
 |---|---|---|
-| `mgmt-leader-lease` | Go | Acquire/renew Azure Blob Lease; write ConfigMap |
-| `controller-scaler` | Go | Watch ConfigMap; scale controllers up/down |
+| `mgmt-leader-lease` | Go | Acquire/renew Azure Blob Lease (60s TTL, 15s renewal); write ConfigMap |
+| `controller-scaler` | Go | Watch ConfigMap; scale controllers up/down; update `lease-status` label |
 | `argocd-jira-bridge` | Go/Python | Sync ArgoCD events to Jira tickets |
-| `bitbucket-token-rotator` | Go/Python | Quarterly rotation of workspace tokens |
+| `saas-token-rotator` | Go/Python | Quarterly rotation of Bitbucket + Jira workspace tokens (one binary, two CronJob configs) |
 | `mgmt-cli` | Go | Operator CLI for failback and diagnostics |
 
 ### Integration Points
@@ -455,7 +488,7 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 
 ## Success Metrics
 
-- **Platform availability**: Management-plane failover completes in ≤ 90s with zero workload impact (validated by DR drill)
+- **Platform availability**: Management-plane failover completes in ≤ 120s with zero workload impact (validated by DR drill)
 - **Time-to-first-deploy**: New service from Jira ticket to running in dev ≤ 45 minutes (infra provision + workload sync)
 - **Secret isolation**: Penetration test confirms no cross-namespace secret access possible
 - **Progressive delivery confidence**: 100% of production deployments go through canary analysis; auto-rollback fires correctly on degraded metrics
@@ -474,10 +507,9 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 4. **Bitbucket workspace**: Is the workspace already created? Do we have admin access to create workspace access tokens?
 5. **Cosmos consistency default**: The blueprint defaults to `session` consistency — is this confirmed as the correct default for the organization's workloads?
 6. **Observability stack choice**: Prometheus + Grafana, or Azure Monitor + Managed Grafana? The blueprint implies self-hosted Prometheus.
-7. **Kyverno vs Gatekeeper**: The blueprint mentions both — which should be the primary policy engine?
-8. **DNS provider**: Which DNS zone and provider will be used for workload ingress (Azure DNS, external)?
-9. **Seed cluster location**: West US 2 is specified — is this confirmed as an acceptable DR region given data residency requirements?
-10. **Budget/quota**: Are Azure quotas sufficient for 7 AKS clusters with Premium SKUs across 3 regions?
+7. **DNS provider**: Which DNS zone and provider will be used for workload ingress (Azure DNS, external)?
+8. **Seed cluster location**: West US 2 is specified — is this confirmed as an acceptable DR region given data residency requirements?
+9. **Budget/quota**: Are Azure quotas sufficient for 7 AKS clusters with Premium SKUs across 3 regions?
 
 ---
 
@@ -485,10 +517,10 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 
 | Phase | Focus | Key Deliverables |
 |---|---|---|
-| **Phase 1** | Foundation Infrastructure | Network topology, AKS clusters, AKVs, Storage, ACR |
-| **Phase 2** | Control Plane Bootstrap | ArgoCD, Crossplane + XRDs, mgmt-leader-lease, controller-scaler, ESO, policies |
-| **Phase 3** | CI Pipeline & GitOps Engine | Jenkins, pipeline config, webhooks, two-tier ApplicationSets, jira-bridge |
-| **Phase 4** | Security, Secrets & Progressive Delivery | NamespaceVaultBinding, dual-write, Argo Rollouts, token rotation |
-| **Phase 5** | Day-2 Operations & DR Validation | Observability, Velero, DR drills, seed job, catastrophic recovery test |
+| **Phase 1** | Foundation Infrastructure | Network topology (incl. mgmt-ne spoke), AKS clusters, AKVs, Storage, ACR |
+| **Phase 2** | Control Plane Bootstrap | ArgoCD, Crossplane + XRDs, mgmt-leader-lease, controller-scaler, ESO, Kyverno policies, image verification policy |
+| **Phase 3** | CI Pipeline & GitOps Engine | Jenkins, pipeline config, Cosign image signing, webhooks, two-tier ApplicationSets, jira-bridge |
+| **Phase 4** | Security, Secrets & Progressive Delivery | NamespaceVaultBinding, NamespaceRolloutPolicy, dual-write, Argo Rollouts (workload clusters), saas-token-rotator |
+| **Phase 5** | Day-2 Operations & DR Validation | Observability, Velero, DR drills (120s RTO target), seed job, catastrophic recovery test |
 
 Each phase builds on the previous one. Phase 1 must complete before Phase 2 can start. Phases within a milestone can be parallelized where dependencies allow.

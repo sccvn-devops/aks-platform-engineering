@@ -23,7 +23,7 @@ This v2 pack:
 | ADR-005-v2 | Secret Management — ESO + Per-Region AKV Pair + Per-Namespace SecretStore | Accepted (supersedes v1) |
 | ADR-006-v2 | Identity Model — Workload Identity for Azure; Vaulted Rotating Tokens for SaaS (Bitbucket, Jira) | Accepted (supersedes v1) |
 | ADR-007 | GitOps Engine — ArgoCD with ApplicationSet | Accepted (unchanged) |
-| ADR-008 | Supply Chain — Cosign + AKV + Gatekeeper | Accepted (unchanged) |
+| ADR-008 | Supply Chain — Cosign + AKV + Kyverno | Accepted (unchanged) |
 | ADR-009 | Network Posture — Private AKS + Private Endpoints + Hub-Spoke (SaaS via Firewall + WAF) | Accepted (unchanged in spirit; §1.4 of blueprint clarifies SaaS path) |
 | ADR-010-v2 | Race-Free GitOps Update — Author Filter Primary; `[ci skip]` Defensive | Accepted (supersedes v1) |
 | ADR-011 | Source of Truth — Monorepo `platform-gitops` | Accepted (unchanged) |
@@ -127,23 +127,39 @@ ADR-003 (v1) established the three-tier cluster topology and stated "the managem
 
 ## Decision
 
-Adopt the cluster topology of v1 unchanged. Add a **formal definition** of "workload" vs "platform component" (see ADR-016) and **enforce it by Gatekeeper**:
+Adopt the cluster topology of v1 unchanged. Add a **formal definition** of "workload" vs "platform component" (see ADR-016) and **enforce it by Kyverno**:
 
 ```yaml
-apiVersion: constraints.gatekeeper.sh/v1beta1
-kind: K8sBlockNonPlatformNamespacesOnMgmt
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
 metadata:
   name: mgmt-only-platform
 spec:
-  match:
-    kinds:
-      - apiGroups: [""]
-        kinds: ["Pod"]
-    excludedNamespaces: [kube-system, gatekeeper-system]
-  parameters:
-    requiredLabel: "tier"
-    requiredValue: "platform"
-    applyToClusters: ["mgmt-we", "mgmt-ne"]
+  validationFailureAction: Enforce
+  background: false
+  rules:
+  - name: require-tier-platform
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+          namespaceSelector:
+            matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: NotIn
+              values: [kube-system, kyverno]
+        clusterSelector:
+          matchLabels:
+            role: management
+    validate:
+      message: "Pods on management clusters require namespace label tier=platform"
+      deny:
+        conditions:
+          any:
+          - key: "{{ request.object.metadata.namespace }}"
+            operator: AnyNotIn
+            value: "{{ namespaces | filter(@, 'tier', 'platform') }}"
 ```
 
 Every namespace in a management cluster must carry `tier=platform`. Workload namespaces (which lack this label) cannot schedule pods on mgmt clusters.
@@ -160,10 +176,10 @@ Every namespace in a management cluster must carry `tier=platform`. Workload nam
 
 **Harder:**
 - Adding a new platform component requires labeling its namespace correctly; a missing label is a surprising deployment failure during initial rollout.
-- The Gatekeeper constraint must be in the bootstrap manifests so mgmt rebuilds reapply it.
+- The Kyverno policy must be in the bootstrap manifests so mgmt rebuilds reapply it.
 
 ## Action Items
-1. [ ] Apply the Gatekeeper constraint to both mgmt clusters as a bootstrap manifest.
+1. [ ] Apply the Kyverno policy to both mgmt clusters as a bootstrap manifest.
 2. [ ] Update onboarding docs for adding new platform components.
 3. [ ] Cross-reference with ADR-016 (canonical glossary).
 
@@ -189,7 +205,7 @@ State precisely what is actually built:
 
 - **Data plane reads:** Active-Active. Front Door routes user traffic to the geographically nearer region. Both `aks-prod-we` and `aks-prod-ne` serve read traffic continuously.
 - **Data plane writes:** Active-Passive with auto-failover. Cosmos has a single write region (WE primary, NE failover priority 1). All writes traverse to the active write region. On WE-region loss, Cosmos auto-promotes NE to primary (RTO ~30-60s for forced failover).
-- **Management plane:** Active-Passive with Azure Storage Blob Lease arbitration (ADR-022). RTO ~75s for automatic promotion.
+- **Management plane:** Active-Passive with Azure Storage Blob Lease arbitration (ADR-022). RTO ~120s for automatic promotion.
 
 `multipleWriteLocationsEnabled` remains `false` for Cosmos because:
 - Most workloads do not require sub-100ms writes from the secondary region.
@@ -328,7 +344,7 @@ Narrow ADR-006 to:
 - Audit trail is unified (AKV access logs).
 
 **Harder:**
-- A new component (`bitbucket-token-rotator`, `jira-token-rotator`) to operate.
+- A new component (`saas-token-rotator` with per-token CronJob configs) to operate.
 - Annual review of "should this token still exist? still have these scopes?"
 
 ## Action Items
@@ -464,7 +480,8 @@ Adopt a canonical glossary (full text in §0.1 of the v2 blueprint). Key definit
 
 - **Workload** — any application serving customer/business traffic. Lives in workload clusters only.
 - **Platform component** — any service supporting the developer or operator experience (ArgoCD, Crossplane, ESO, Jenkins controller and agents, Velero, observability stack, lease/scaler controllers, jira-bridge). Lives in management clusters only.
-- **Management cluster** — `mgmt-<region>`. `tier=platform` required on every namespace, enforced by Gatekeeper.
+- **Workload-cluster operator** — a small set of controllers that run locally in workload clusters to support workloads (ESO agent, Reloader, Argo Rollouts controller, Kyverno). These are NOT "workloads" but are NOT "platform components" either — they are local operators.
+- **Management cluster** — `mgmt-<region>`. `tier=platform` required on every namespace, enforced by Kyverno.
 - **Workload cluster** — `aks-<env>-<region>`.
 - **Active management cluster** — the one currently holding the Azure Storage Blob Lease (exactly one at a time).
 
@@ -472,7 +489,7 @@ Adopt a canonical glossary (full text in §0.1 of the v2 blueprint). Key definit
 
 | Option | Why |
 |---|---|
-| A — Formal glossary + Gatekeeper enforcement (chosen) | Definitions become enforceable, not just documentation |
+| A — Formal glossary + Kyverno enforcement (chosen) | Definitions become enforceable, not just documentation |
 | B — Documentation only | Words drift; ambiguities re-emerge |
 | C — Per-service glossary | Inconsistency across services |
 
@@ -483,7 +500,7 @@ Adopt a canonical glossary (full text in §0.1 of the v2 blueprint). Key definit
 - Onboarding new platform engineers is faster.
 
 **Harder:**
-- New platform components must be labeled correctly at creation; misses cause Gatekeeper denials.
+- New platform components must be labeled correctly at creation; misses cause Kyverno denials.
 
 ## Action Items
 1. [ ] Publish §0 of the v2 blueprint as the canonical glossary; reference from every other doc.
@@ -511,12 +528,13 @@ In the standby management cluster (`mgmt-ne` during normal operation):
 - All Crossplane providers are scaled to 0 replicas.
 - All ArgoCD controllers (application-controller, server, repo-server) are scaled to 0 replicas.
 - ESO controller is scaled to 0 replicas.
-- Argo Rollouts controller is scaled to 0 replicas.
 - `argocd-jira-bridge` is scaled to 0 replicas.
+
+Note: **Argo Rollouts controllers run in workload clusters, not management clusters** (see ADR-021). They are not managed by `controller-scaler`.
 
 Scaling is driven by `controller-scaler` (see ADR-022), which reacts to the lease state. This is fully automated.
 
-The ApplicationSet's cluster generator filters on `role=active`; only the lease-holding cluster matches and receives platform-level resources (XRCs, ProviderConfigs).
+The `controller-scaler` also updates the `lease-status` label on the cluster's ArgoCD Secret (`lease-status: active` or `lease-status: standby`). A platform-components ApplicationSet uses this label to gate deployment of platform-level resources (XRCs, ProviderConfigs) to only the active management cluster.
 
 ## Options Considered
 
@@ -527,7 +545,7 @@ The ApplicationSet's cluster generator filters on `role=active`; only the lease-
 ## Consequences
 
 **Easier:**
-- DR promotion is a controller-scale operation, taking ~75s total.
+- DR promotion is a controller-scale operation, taking ~120s total.
 - No state cleanup needed during failback.
 - Standby cost is rounding error (idle CRDs + 0-replica deployments).
 
@@ -538,7 +556,7 @@ The ApplicationSet's cluster generator filters on `role=active`; only the lease-
 ## Action Items
 1. [ ] Author `controller-scaler` Go binary; deploy in both mgmt clusters.
 2. [ ] Configure standby state for all platform components.
-3. [ ] DR rehearsal: validate scale-up RTO ≤ 90s.
+3. [ ] DR rehearsal: validate scale-up RTO ≤ 120s.
 
 ## Related ADRs
 - ADR-022 (lease lock) — provides the trigger for scale-up/down.
@@ -736,7 +754,7 @@ V1 referenced Argo Rollouts in §6.4 but did not formally adopt it. Without prog
 Adopt **Argo Rollouts** as the platform default for production workloads.
 
 - All workloads in `aks-prod-we` and `aks-prod-ne` must deploy as `Rollout` (not `Deployment`).
-- A Gatekeeper constraint `K8sProdRequiresRollout` rejects `Deployment` resources in any namespace residing on a prod cluster.
+- A Kyverno policy `KyvernoProdRequiresRollout` rejects `Deployment` resources in any namespace residing on a prod cluster.
 - Dev and staging may use either `Deployment` or `Rollout`.
 - Canary strategy defaults to platform-issued templates per SLO class:
   - Bronze: single step (effectively direct cutover, but using the Rollout primitive for uniformity).
@@ -771,10 +789,10 @@ Traffic shifting uses NGINX Ingress Controller — no service mesh requirement.
 - A service mesh becomes platform-standard (then consider Flagger).
 
 ## Action Items
-1. [ ] Install Argo Rollouts controller in every workload cluster (via bootstrap ApplicationSet).
-2. [ ] Apply Gatekeeper constraint `K8sProdRequiresRollout`.
+1. [ ] Install Argo Rollouts controller in every workload cluster (via bootstrap ApplicationSet). Note: Rollouts runs locally in workload clusters, NOT in the management cluster.
+2. [ ] Apply Kyverno policy `KyvernoProdRequiresRollout`.
 3. [ ] Update Cookiecutter templates: prod overlay generates `Rollout`; dev/staging optional.
-4. [ ] Author AnalysisTemplate generators in the Composition.
+4. [ ] Author AnalysisTemplate generators in the `NamespaceRolloutPolicy` Composition (separate from NamespaceVaultBinding).
 5. [ ] Migrate existing prod workloads one service at a time.
 
 ## Related ADRs
@@ -791,7 +809,7 @@ Traffic shifting uses NGINX Ingress Controller — no service mesh requirement.
 
 ## Context
 
-ADR-017 establishes that the standby mgmt cluster has all controllers scaled to 0. ADR-004-v2 promises ~75s mgmt-plane failover. But there's a split-brain risk: under partition, both clusters could believe they're active, and operators could mis-flip labels under incident stress. Two active Crossplane controllers cause ARM thrash; two active ArgoCD instances cause sync races; two active ESOs cause AKV write contention.
+ADR-017 establishes that the standby mgmt cluster has all controllers scaled to 0. ADR-004-v2 promises ~120s mgmt-plane failover. But there's a split-brain risk: under partition, both clusters could believe they're active, and operators could mis-flip labels under incident stress. Two active Crossplane controllers cause ARM thrash; two active ArgoCD instances cause sync races; two active ESOs cause AKV write contention.
 
 Operator discipline alone is not enough.
 
@@ -800,18 +818,18 @@ Operator discipline alone is not enough.
 Adopt a **singleton lock** mechanism:
 
 - A small in-house Go controller, **`mgmt-leader-lease`**, runs in every mgmt cluster.
-- It acquires and continuously renews an **Azure Storage Blob Lease** (15s TTL, renewed every 5s) on a dedicated, geo-redundant storage account `stplatleaseplat<random>/leases/mgmt-active`.
+- It acquires and continuously renews an **Azure Storage Blob Lease** (60s TTL, renewed every 15s) on a dedicated, geo-redundant storage account `stplatleaseplat<random>/leases/mgmt-active`.
 - The lease holder writes its identity to ConfigMap `mgmt-leader-status` in `kube-system`.
 - A second controller, **`controller-scaler`**, watches that ConfigMap and reconciles all platform controllers' replica counts: scale up when the local cluster holds the lease; scale to 0 otherwise.
 - Failback (planned operator-initiated promotion) is via a CLI `mgmt-cli failback --to <cluster> --confirm` that breaks the lease.
 
-The lease blob is the **authoritative** source of "who is active." Cluster labels (`role=active|standby`) remain as debugging aids but are not authoritative.
+The lease blob is the **authoritative** source of "who is active." Cluster labels (`lease-status=active|standby`) remain as operational aids but are not authoritative — the lease is.
 
 ## Behavior Across Failure Modes
 
 | Scenario | Outcome |
 |---|---|
-| mgmt-we hard crash | Lease expires in ≤60s; mgmt-ne acquires; controllers scale up; total RTO ~75s |
+| mgmt-we hard crash | Lease expires in ≤65s; mgmt-ne acquires; controllers scale up; total RTO ~120s |
 | Network partition between mgmt-we and Azure Storage | mgmt-we cannot renew; lease expires; mgmt-ne acquires; mgmt-we's controllers scale to 0 |
 | Both mgmt clusters can't reach Storage | Neither renews; both scale to 0; control plane frozen; workloads keep running; operator restores connectivity |
 | Operator failback | `mgmt-cli failback` breaks the lease; target cluster acquires; previous holder's controllers scale to 0 |
@@ -829,14 +847,14 @@ The lease blob is the **authoritative** source of "who is active." Cluster label
 
 - The lease blob storage account uses a private endpoint reachable from both regions via VNet peering.
 - The Storage Account has soft-delete on for the lease blob (recovery if accidentally deleted).
-- `mgmt-leader-lease` has a hardcoded 1-replica Deployment (no HA) — if it crashes, the lease expires in 15s and another cluster takes over. Self-healing by design.
+- `mgmt-leader-lease` has a hardcoded 1-replica Deployment (no HA) — if it crashes, the lease expires in 60s and another cluster takes over. Self-healing by design.
 - `controller-scaler` similarly runs as a 1-replica Deployment.
 - Both controllers' code is under platform-engineering ownership; ~150 lines of Go each.
 
 ## Consequences
 
 **Easier:**
-- DR auto-promotion is fully automated, with a documented RTO of ~75s.
+- DR auto-promotion is fully automated, with a documented RTO of ~120s.
 - Split-brain is impossible by construction.
 - Operator failback is one CLI call.
 - Failback procedure tested on every release.
