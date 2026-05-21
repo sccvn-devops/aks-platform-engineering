@@ -25,3 +25,16 @@
   - `dr_location` variable defaults to `westus2` for seed-wus
   - Private endpoint subnets for each spoke are created in networking.tf as `azurerm_subnet.spoke_private_endpoints`
 ---
+
+## 2026-05-21 - US-003
+- Verified existing implementation of 4 workload Key Vaults in terraform/keyvaults.tf
+- All acceptance criteria confirmed: RBAC mode, soft-delete 90 days, purge protection, private endpoints in regional hubs, diagnostic logs to Azure Monitor Log Analytics workspace
+- Subnet references verified: spoke_private_endpoints keyed by cluster name (aks-dev-we, aks-staging-we, aks-prod-we, aks-prod-ne); hub_private_endpoints keyed by hub (we, ne)
+- `terraform validate` passes — no new code changes required
+- Files: terraform/keyvaults.tf, terraform/outputs.tf
+- **Learnings for future iterations:**
+  - workload Key Vaults use `azurerm_subnet.hub_private_endpoints[hub]` for private endpoints (not spoke subnets)
+  - `azurerm_private_dns_zone.platform["akv"]` uses the string key "akv" from the `private_dns_zones` map in networking.tf
+  - `azurerm_user_assigned_identity.akspe` in main.tf is granted Key Vault Administrator on all workload vaults
+  - Log Analytics workspace is shared (`azurerm_log_analytics_workspace.platform`) for all workload vault diagnostic settings
+---
