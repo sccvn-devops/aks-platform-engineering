@@ -52,17 +52,20 @@ locals {
   cluster_metadata = merge(local.environment_metadata, local.addons_metadata)
 
   environment_metadata = {
-    infrastructure_provider          = var.infrastructure_provider
-    akspe_identity_id                = azurerm_user_assigned_identity.akspe.client_id
-    crossplane_identity_client_id    = azurerm_user_assigned_identity.crossplane.client_id
-    git_public_ssh_key               = var.git_public_ssh_key
-    jenkins_bitbucket_server_url     = var.jenkins_bitbucket_server_url
-    jenkins_bitbucket_repo_owner     = var.jenkins_bitbucket_repo_owner
-    jenkins_service_repository       = var.jenkins_service_repository
-    jenkins_platform_gitops_repo_url = var.jenkins_platform_gitops_repo_url
-    jira_base_url                    = var.jira_base_url
-    jira_project_key                 = var.jira_project_key
-    jira_service_account_email       = var.jira_service_account_email
+    infrastructure_provider                = var.infrastructure_provider
+    akspe_identity_id                      = azurerm_user_assigned_identity.akspe.client_id
+    crossplane_identity_client_id          = azurerm_user_assigned_identity.crossplane.client_id
+    git_public_ssh_key                     = var.git_public_ssh_key
+    jenkins_bitbucket_server_url           = var.jenkins_bitbucket_server_url
+    jenkins_bitbucket_repo_owner           = var.jenkins_bitbucket_repo_owner
+    jenkins_service_repository             = var.jenkins_service_repository
+    jenkins_platform_gitops_repo_url       = var.jenkins_platform_gitops_repo_url
+    jira_base_url                          = var.jira_base_url
+    jira_project_key                       = var.jira_project_key
+    jira_service_account_email             = var.jira_service_account_email
+    kv_prod_we_url                         = azurerm_key_vault.platform["prod-we"].vault_uri
+    kv_prod_ne_url                         = azurerm_key_vault.platform["prod-ne"].vault_uri
+    akv_sync_exporter_identity_client_id   = azurerm_user_assigned_identity.akv_sync_exporter.client_id
   }
 
   addons_metadata = {

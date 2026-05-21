@@ -63,3 +63,57 @@ spec:
               map:
                 westeurope: azure-westeurope
                 northeurope: azure-northeurope
+
+    - name: secret-prod-we
+      base:
+        apiVersion: keyvault.azure.upbound.io/v1beta1
+        kind: Secret
+        spec:
+          forProvider:
+            keyVaultId: placeholder
+            value: placeholder
+            contentType: application/json
+          providerConfigRef:
+            name: azure-westeurope
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.keyVaultWeId
+          toFieldPath: spec.forProvider.keyVaultId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secretName
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.value
+          transforms:
+            - type: string
+              string:
+                type: Format
+                fmt: '{"namespace":"%s.servicebus.windows.net"}'
+
+    - name: secret-prod-ne
+      base:
+        apiVersion: keyvault.azure.upbound.io/v1beta1
+        kind: Secret
+        spec:
+          forProvider:
+            keyVaultId: placeholder
+            value: placeholder
+            contentType: application/json
+          providerConfigRef:
+            name: azure-northeurope
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.keyVaultNeId
+          toFieldPath: spec.forProvider.keyVaultId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secretName
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.value
+          transforms:
+            - type: string
+              string:
+                type: Format
+                fmt: '{"namespace":"%s.servicebus.windows.net"}'

@@ -1,0 +1,32 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "akv-sync-exporter.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: akv-sync-exporter
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: akv-dual-write
+      interval: 60s
+      rules:
+        - alert: PerRegionAKVDualWriteSkew
+          expr: akv_dual_write_skew_seconds > {{ .Values.prometheusRule.skewThresholdSeconds }}
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "AKV dual-write skew: {{ "{{ $labels.secret_name }}" }}"
+            description: >-
+              Secret {{ "{{ $labels.secret_name }}" }} has drifted
+              {{ "{{ $value | humanizeDuration }}" }} between the West Europe and
+              North Europe prod Key Vaults (threshold:
+              {{ .Values.prometheusRule.skewThresholdSeconds }}s).
+              This means workload clusters in one region may read a stale connection string.
+            runbook_url: https://github.com/gitops-bridge-dev/aks-platform-engineering/wiki/runbook-akv-skew
+{{- end }}

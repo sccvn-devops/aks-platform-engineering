@@ -50,9 +50,21 @@ spec:
                     maxSizeGb:
                       type: integer
                       default: 5
+                    secretName:
+                      type: string
+                      description: Name used for the AKV secret in both regional vaults (e.g. payments-sql-conn)
+                    keyVaultWeId:
+                      type: string
+                      description: Azure Resource ID of the West Europe prod Key Vault for dual-write
+                    keyVaultNeId:
+                      type: string
+                      description: Azure Resource ID of the North Europe prod Key Vault for dual-write
                   required:
                     - region
                     - resourceGroupName
                     - serverName
+                    - secretName
+                    - keyVaultWeId
+                    - keyVaultNeId
               required:
                 - parameters

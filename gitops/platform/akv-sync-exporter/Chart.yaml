@@ -1,0 +1,6 @@
+apiVersion: v2
+name: akv-sync-exporter
+description: Prometheus exporter that measures dual-write skew between regional Azure Key Vaults
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

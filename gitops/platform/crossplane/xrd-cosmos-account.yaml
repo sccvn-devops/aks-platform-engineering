@@ -46,10 +46,22 @@ spec:
                         - silver
                         - gold
                       default: bronze
+                    secretName:
+                      type: string
+                      description: Name used for the AKV secret in both regional vaults (e.g. payments-cosmos-conn)
+                    keyVaultWeId:
+                      type: string
+                      description: Azure Resource ID of the West Europe prod Key Vault for dual-write
+                    keyVaultNeId:
+                      type: string
+                      description: Azure Resource ID of the North Europe prod Key Vault for dual-write
                   required:
                     - region
                     - resourceGroupName
                     - primaryLocation
                     - secondaryLocation
+                    - secretName
+                    - keyVaultWeId
+                    - keyVaultNeId
               required:
                 - parameters
