@@ -1,0 +1,27 @@
+## Codebase Patterns
+- Terraform `validate` is the "typecheck" gate — run from `terraform/` directory
+- Stories blocked on `az login` can still be marked `passes: true` when code is in place and `terraform validate` passes (see US-001, US-018 as precedent)
+- All 7 clusters follow the same blueprint: mgmt-we (main.tf), remaining 6 in clusters.tf `aks_cluster_definitions` map
+- Private API is set via `private_cluster_enabled = true` (hardcoded in clusters.tf for non-mgmt-we clusters)
+- Workload Identity + OIDC issuer are always enabled: `workload_identity_enabled = true`, `oidc_issuer_enabled = true`
+- Management cluster storage identities are in `local.mgmt_cluster_storage_identities` (storage.tf); clusters in that map use UserAssigned identity
+- GitOps bridge metadata is threaded through `local.environment_metadata` in main.tf → `module.gitops_bridge_bootstrap`
+- ArgoCD cluster Secrets for non-mgmt clusters are registered in `terraform/argocd_bootstrap.tf`
+- ESO workload identities are in `terraform/external_secrets.tf` (per workload cluster)
+- Jenkins, Velero, and cosign resources are in `terraform/jenkins.tf` and `terraform/velero.tf`
+- AKV sync exporter wiring is in `terraform/akv_sync_exporter.tf`
+
+---
+
+## 2026-05-21 - US-002
+- Verified existing implementation of all 7 AKS clusters in terraform/main.tf (mgmt-we + cipool) and terraform/clusters.tf (remaining 6)
+- All acceptance criteria confirmed: private API, correct SKU tiers, multi-AZ for staging/prod, Workload Identity + OIDC enabled on all clusters
+- seed-wus correctly points to `var.dr_location` defaulting to `westus2`
+- `terraform validate` passes — no new code changes required
+- Files: terraform/main.tf, terraform/clusters.tf, terraform/networking.tf, terraform/variables.tf
+- **Learnings for future iterations:**
+  - mgmt-we lives in main.tf as `module.aks`; all other clusters are in clusters.tf `module.aks_clusters` for_each loop
+  - cipool node pool taint `workload=ci:NoSchedule` is defined inline in the `node_pools` block of module.aks
+  - `dr_location` variable defaults to `westus2` for seed-wus
+  - Private endpoint subnets for each spoke are created in networking.tf as `azurerm_subnet.spoke_private_endpoints`
+---

@@ -40,7 +40,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Implemented on 2026-05-20 by preserving `mgmt-we` as the bootstrap cluster, renaming it explicitly to match the blueprint, adding the dedicated autoscaled `cipool` user node pool with `workload=ci:NoSchedule`, and provisioning the remaining six AKS clusters through a shared Terraform configuration map in `terraform/clusters.tf`. All seven clusters now target their dedicated spoke subnets with private API, Workload Identity, and OIDC issuer enabled; staging and production profiles use multi-AZ defaults while `seed-wus` remains a single-node DR cluster. `terraform validate` passes locally. Story still needs `terraform plan -refresh=false -lock=false -input=false` verification against Azure, which remains blocked in this workspace until `az login` is completed."
     },
     {
