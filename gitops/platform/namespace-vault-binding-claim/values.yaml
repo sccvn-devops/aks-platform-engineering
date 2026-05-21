@@ -1,0 +1,19 @@
+claim:
+  name: ""
+  namespace: default
+
+parameters:
+  serviceName: ""
+  namespace: ""
+  serviceAccountName: azure-keyvault-reader
+  clusterName: ""
+  clusterEnv: ""
+  subscriptionId: ""
+  tenantId: ""
+  resourceGroupName: ""
+  workloadRegion: ""
+  workloadOidcIssuerUrl: ""
+  keyVaultId: ""
+  vaultUrl: ""
+  secretPrefix: ""
+  kubernetesProviderConfigName: ""

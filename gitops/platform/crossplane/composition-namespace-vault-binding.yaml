@@ -9,109 +9,210 @@ spec:
     apiVersion: platform.cityos.io/v1alpha1
     kind: XNamespaceVaultBinding
   resources:
-    - name: primary-policy
+    - name: workload-identity
       base:
-        apiVersion: keyvault.azure.upbound.io/v1beta1
-        kind: AccessPolicy
+        apiVersion: managedidentity.azure.upbound.io/v1beta1
+        kind: UserAssignedIdentity
         spec:
           forProvider:
-            certificatePermissions:
-              - Get
-              - List
-            keyPermissions:
-              - Get
-              - List
-            keyVaultId: placeholder
-            objectId: placeholder
-            secretPermissions:
-              - Get
-              - List
-              - Set
-            tenantId: placeholder
+            location: placeholder
+            name: placeholder
+            resourceGroupName: placeholder
+          providerConfigRef:
+            name: azure-westeurope
+      patches:
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.parameters.namespace
+              - fromFieldPath: spec.parameters.clusterName
+            strategy: string
+            string:
+              fmt: "uami-%s-%s"
+          toFieldPath: spec.forProvider.name
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.parameters.namespace
+              - fromFieldPath: spec.parameters.clusterName
+            strategy: string
+            string:
+              fmt: "uami-%s-%s"
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.workloadRegion
+          toFieldPath: spec.forProvider.location
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.resourceGroupName
+          toFieldPath: spec.forProvider.resourceGroupName
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.workloadRegion
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: map
+              map:
+                westeurope: azure-westeurope
+                northeurope: azure-northeurope
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.clientId
+          toFieldPath: status.identityClientId
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.principalId
+          toFieldPath: status.identityPrincipalId
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.id
+          toFieldPath: status.identityResourceId
+    - name: federated-credential
+      base:
+        apiVersion: managedidentity.azure.upbound.io/v1beta1
+        kind: FederatedIdentityCredential
+        spec:
+          forProvider:
+            audience:
+              - api://AzureADTokenExchange
+            issuer: placeholder
+            name: placeholder
+            parentId: placeholder
+            subject: placeholder
+          providerConfigRef:
+            name: azure-westeurope
+      patches:
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.parameters.namespace
+              - fromFieldPath: spec.parameters.clusterName
+            strategy: string
+            string:
+              fmt: "fic-%s-%s"
+          toFieldPath: spec.forProvider.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: status.identityResourceId
+          toFieldPath: spec.forProvider.parentId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.workloadOidcIssuerUrl
+          toFieldPath: spec.forProvider.issuer
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.parameters.namespace
+              - fromFieldPath: spec.parameters.serviceAccountName
+            strategy: string
+            string:
+              fmt: "system:serviceaccount:%s:%s"
+          toFieldPath: spec.forProvider.subject
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.workloadRegion
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: map
+              map:
+                westeurope: azure-westeurope
+                northeurope: azure-northeurope
+    - name: keyvault-role-assignment
+      base:
+        apiVersion: authorization.azure.upbound.io/v1beta1
+        kind: RoleAssignment
+        metadata:
+          annotations:
+            platform.cityos.io/secret-prefix: placeholder
+        spec:
+          forProvider:
+            principalId: placeholder
+            roleDefinitionName: Key Vault Secrets User
+            scope: placeholder
           providerConfigRef:
             name: azure-westeurope
       patches:
         - type: FromCompositeFieldPath
-          fromFieldPath: metadata.name
-          toFieldPath: spec.forProvider.name
-          transforms:
-            - type: string
-              string:
-                fmt: "%s-primary"
+          fromFieldPath: spec.parameters.keyVaultId
+          toFieldPath: spec.forProvider.scope
         - type: FromCompositeFieldPath
-          fromFieldPath: metadata.name
-          toFieldPath: metadata.annotations[crossplane.io/external-name]
-          transforms:
-            - type: string
-              string:
-                fmt: "%s-primary"
+          fromFieldPath: spec.parameters.secretPrefix
+          toFieldPath: metadata.annotations[platform.cityos.io/secret-prefix]
         - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.primaryVaultId
-          toFieldPath: spec.forProvider.keyVaultId
+          fromFieldPath: status.identityPrincipalId
+          toFieldPath: spec.forProvider.principalId
         - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.objectId
-          toFieldPath: spec.forProvider.objectId
-        - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.tenantId
-          toFieldPath: spec.forProvider.tenantId
-        - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.primaryRegion
+          fromFieldPath: spec.parameters.workloadRegion
           toFieldPath: spec.providerConfigRef.name
           transforms:
             - type: map
               map:
                 westeurope: azure-westeurope
                 northeurope: azure-northeurope
-    - name: secondary-policy
+    - name: secret-reader-serviceaccount
       base:
-        apiVersion: keyvault.azure.upbound.io/v1beta1
-        kind: AccessPolicy
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
         spec:
           forProvider:
-            certificatePermissions:
-              - Get
-              - List
-            keyPermissions:
-              - Get
-              - List
-            keyVaultId: placeholder
-            objectId: placeholder
-            secretPermissions:
-              - Get
-              - List
-              - Set
-            tenantId: placeholder
+            manifest:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                annotations:
+                  azure.workload.identity/client-id: placeholder
+                  azure.workload.identity/tenant-id: placeholder
+                labels:
+                  platform.cityos.io/managed-by: crossplane
+                name: placeholder
+                namespace: placeholder
           providerConfigRef:
-            name: azure-northeurope
+            name: placeholder
       patches:
         - type: FromCompositeFieldPath
-          fromFieldPath: metadata.name
-          toFieldPath: spec.forProvider.name
-          transforms:
-            - type: string
-              string:
-                fmt: "%s-secondary"
+          fromFieldPath: spec.parameters.kubernetesProviderConfigName
+          toFieldPath: spec.providerConfigRef.name
         - type: FromCompositeFieldPath
-          fromFieldPath: metadata.name
-          toFieldPath: metadata.annotations[crossplane.io/external-name]
-          transforms:
-            - type: string
-              string:
-                fmt: "%s-secondary"
+          fromFieldPath: spec.parameters.serviceAccountName
+          toFieldPath: spec.forProvider.manifest.metadata.name
         - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.secondaryVaultId
-          toFieldPath: spec.forProvider.keyVaultId
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
         - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.objectId
-          toFieldPath: spec.forProvider.objectId
+          fromFieldPath: status.identityClientId
+          toFieldPath: spec.forProvider.manifest.metadata.annotations[azure.workload.identity/client-id]
         - type: FromCompositeFieldPath
           fromFieldPath: spec.parameters.tenantId
-          toFieldPath: spec.forProvider.tenantId
+          toFieldPath: spec.forProvider.manifest.metadata.annotations[azure.workload.identity/tenant-id]
+      readinessChecks:
+        - type: None
+    - name: namespace-secret-store
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
+        spec:
+          forProvider:
+            manifest:
+              apiVersion: external-secrets.io/v1
+              kind: SecretStore
+              metadata:
+                labels:
+                  platform.cityos.io/managed-by: crossplane
+                name: azure-keyvault
+                namespace: placeholder
+              spec:
+                provider:
+                  azurekv:
+                    authType: WorkloadIdentity
+                    serviceAccountRef:
+                      name: placeholder
+                    vaultUrl: placeholder
+          providerConfigRef:
+            name: placeholder
+      patches:
         - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.secondaryRegion
+          fromFieldPath: spec.parameters.kubernetesProviderConfigName
           toFieldPath: spec.providerConfigRef.name
-          transforms:
-            - type: map
-              map:
-                westeurope: azure-westeurope
-                northeurope: azure-northeurope
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.serviceAccountName
+          toFieldPath: spec.forProvider.manifest.spec.provider.azurekv.serviceAccountRef.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.vaultUrl
+          toFieldPath: spec.forProvider.manifest.spec.provider.azurekv.vaultUrl
+      readinessChecks:
+        - type: None

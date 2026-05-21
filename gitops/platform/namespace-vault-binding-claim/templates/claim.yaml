@@ -1,0 +1,23 @@
+apiVersion: platform.cityos.io/v1alpha1
+kind: NamespaceVaultBinding
+metadata:
+  name: {{ .Values.claim.name | quote }}
+  namespace: {{ .Values.claim.namespace | quote }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  parameters:
+    serviceName: {{ .Values.parameters.serviceName | quote }}
+    namespace: {{ .Values.parameters.namespace | quote }}
+    serviceAccountName: {{ .Values.parameters.serviceAccountName | quote }}
+    clusterName: {{ .Values.parameters.clusterName | quote }}
+    clusterEnv: {{ .Values.parameters.clusterEnv | quote }}
+    subscriptionId: {{ .Values.parameters.subscriptionId | quote }}
+    tenantId: {{ .Values.parameters.tenantId | quote }}
+    resourceGroupName: {{ .Values.parameters.resourceGroupName | quote }}
+    workloadRegion: {{ .Values.parameters.workloadRegion | quote }}
+    workloadOidcIssuerUrl: {{ .Values.parameters.workloadOidcIssuerUrl | quote }}
+    keyVaultId: {{ .Values.parameters.keyVaultId | quote }}
+    vaultUrl: {{ .Values.parameters.vaultUrl | quote }}
+    secretPrefix: {{ .Values.parameters.secretPrefix | quote }}
+    kubernetesProviderConfigName: {{ .Values.parameters.kubernetesProviderConfigName | quote }}

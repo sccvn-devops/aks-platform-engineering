@@ -1,0 +1,7 @@
+providerConfig:
+  name: ""
+
+credentialsSecret:
+  name: ""
+  namespace: argocd
+  key: kubeconfig

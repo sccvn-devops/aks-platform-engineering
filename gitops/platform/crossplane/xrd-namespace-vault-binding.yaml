@@ -18,6 +18,8 @@ spec:
     - name: v1alpha1
       served: true
       referenceable: true
+      subresources:
+        status: {}
       schema:
         openAPIV3Schema:
           type: object
@@ -28,30 +30,64 @@ spec:
                 parameters:
                   type: object
                   properties:
+                    serviceName:
+                      type: string
+                    namespace:
+                      type: string
+                    serviceAccountName:
+                      type: string
+                      default: azure-keyvault-reader
+                    clusterName:
+                      type: string
+                    clusterEnv:
+                      type: string
+                      enum:
+                        - dev
+                        - staging
+                        - prod
+                    subscriptionId:
+                      type: string
                     tenantId:
                       type: string
-                    objectId:
+                    resourceGroupName:
                       type: string
-                    primaryRegion:
-                      type: string
-                      enum:
-                        - westeurope
-                        - northeurope
-                    secondaryRegion:
+                    workloadRegion:
                       type: string
                       enum:
                         - westeurope
                         - northeurope
-                    primaryVaultId:
+                    workloadOidcIssuerUrl:
                       type: string
-                    secondaryVaultId:
+                    keyVaultId:
+                      type: string
+                    vaultUrl:
+                      type: string
+                    secretPrefix:
+                      type: string
+                    kubernetesProviderConfigName:
                       type: string
                   required:
+                    - serviceName
+                    - namespace
+                    - clusterName
+                    - clusterEnv
+                    - subscriptionId
                     - tenantId
-                    - objectId
-                    - primaryRegion
-                    - secondaryRegion
-                    - primaryVaultId
-                    - secondaryVaultId
-              required:
-                - parameters
+                    - resourceGroupName
+                    - workloadRegion
+                    - workloadOidcIssuerUrl
+                    - keyVaultId
+                    - vaultUrl
+                    - secretPrefix
+                    - kubernetesProviderConfigName
+            status:
+              type: object
+              properties:
+                identityClientId:
+                  type: string
+                identityPrincipalId:
+                  type: string
+                identityResourceId:
+                  type: string
+          required:
+            - spec
