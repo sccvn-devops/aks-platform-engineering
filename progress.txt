@@ -64,3 +64,18 @@
   - Jenkins UAMI `azurerm_user_assigned_identity.jenkins` is defined in acr.tf (not jenkins.tf) since it's ACR-scoped
   - ACR private endpoint uses subresource_names = ["registry"] (not "blob" or "vault")
 ---
+
+## 2026-05-21 - US-006
+- Verified existing ArgoCD HA configuration in gitops/environments/default/addons/argo-cd/values.yaml (controller.replicas=3 with dynamicClusterDistribution, repoServer.replicas=2, server.replicas=2, redis-ha.enabled=true)
+- SSH deploy key support wired via var.git_private_ssh_key in terraform/main.tf (used in gitops_bridge_bootstrap repo credentials)
+- All 6 non-mgmt-we clusters registered as ArgoCD cluster Secrets in terraform/argocd_bootstrap.tf with labels: argocd.argoproj.io/secret-type, env, region, role, lease-status
+- Kyverno policy `required-cluster-secret-labels.yaml` in gitops/platform/kyverno-policies/base/ enforces required label schema
+- ArgoCD server exposed only via internal Azure LoadBalancer (service.beta.kubernetes.io/azure-load-balancer-internal: "true")
+- App-of-Apps ApplicationSet in gitops/bootstrap/control-plane/addons/oss/addons-argo-cd-appset.yaml
+- `terraform validate` passes — no new code changes required
+- Files: gitops/environments/default/addons/argo-cd/values.yaml, terraform/argocd_bootstrap.tf, terraform/main.tf, gitops/platform/kyverno-policies/base/required-cluster-secret-labels.yaml
+- **Learnings for future iterations:**
+  - ArgoCD cluster Secrets are in `terraform/argocd_bootstrap.tf` as `kubernetes_secret_v1.argocd_registered_clusters`; mgmt-we is in-cluster so not listed there (it uses the default in-cluster server)
+  - SSH key support uses `fileexists(pathexpand(var.git_private_ssh_key))` to conditionally include sshPrivateKey in the repo credentials
+  - Internal LoadBalancer annotation for ArgoCD is set in values.yaml `server.service.annotations`
+---

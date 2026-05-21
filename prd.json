@@ -108,7 +108,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Implemented on 2026-05-20 by hardening the Argo CD addon values in `gitops/environments/default/addons/argo-cd/values.yaml` for HA (`controller.replicas=3` with dynamic cluster distribution, `repoServer.replicas=2`, `server.replicas=2`, `redis-ha.enabled=true`) and private-only exposure through an internal Azure LoadBalancer. Added Terraform bootstrap support in `terraform/main.tf`, `terraform/variables.tf`, and `terraform/argocd_bootstrap.tf` to register all seven AKS clusters as Argo CD cluster Secrets with the required `env`, `region`, `role`, and `lease-status` labels, plus SSH repo credentials support via `gitops_addons_repo_url` and `git_private_ssh_key`. Added Kyverno addon values in `gitops/environments/default/addons/kyverno/values.yaml` and the enforcing policy manifest `gitops/bootstrap/control-plane/addons/oss/kyverno-required-cluster-secret-labels.yaml`. `terraform validate` passes locally. Runtime verification is still blocked in this workspace because no Azure-authenticated apply has been run (`az login` required), so Argo CD component health and live repo access with a real deploy key remain unverified."
     },
     {
