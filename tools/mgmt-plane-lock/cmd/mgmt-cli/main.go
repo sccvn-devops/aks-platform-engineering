@@ -22,7 +22,7 @@ var newFailbackManager = func(ctx context.Context, cfg config.CLI) (failbackMana
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatalf("usage: mgmt-cli failback --to <cluster> --confirm")
+		log.Fatalf("usage: mgmt-cli <failback|break-lease> [flags]")
 	}
 
 	cfg, err := config.LoadCLI()
@@ -33,6 +33,8 @@ func main() {
 	switch os.Args[1] {
 	case "failback":
 		runFailback(cfg, os.Args[2:])
+	case "break-lease":
+		runBreakLease(cfg, os.Args[2:])
 	default:
 		log.Fatalf("unknown command %q", os.Args[1])
 	}
@@ -65,4 +67,26 @@ func runFailback(cfg config.CLI, args []string) {
 	}
 
 	fmt.Printf("Failback requested for %s via %s\n", *target, cfg.LeaseBlobURL)
+}
+
+func runBreakLease(cfg config.CLI, args []string) {
+	fs := flag.NewFlagSet("break-lease", flag.ExitOnError)
+	confirm := fs.Bool("confirm", false, "confirm the lease break request")
+	fs.Parse(args)
+
+	if !*confirm {
+		log.Fatal("--confirm is required")
+	}
+
+	ctx := context.Background()
+	manager, err := newFailbackManager(ctx, cfg)
+	if err != nil {
+		log.Fatalf("create blob lease manager: %v", err)
+	}
+
+	if err := manager.Break(ctx); err != nil {
+		log.Fatalf("break active lease: %v", err)
+	}
+
+	fmt.Printf("Lease break requested via %s\n", cfg.LeaseBlobURL)
 }

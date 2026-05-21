@@ -23,15 +23,22 @@ MGMT_NE_CONTEXT=mgmt-ne-admin \
 ./scripts/dr-validation/validate-mgmt-failover.sh --failback
 ```
 
+By default the script performs the `US-023` outage drill literally: it cordons and drains all schedulable nodes on `mgmt-we`, deletes the `mgmt-leader-lease` pod so lease renewal stops, waits for passive takeover on `mgmt-ne`, then uncordons `mgmt-we` after the failover measurement completes. Use `--planned-failover` only for a non-disruptive smoke test that asks `mgmt-cli` to transfer leadership without simulating cluster loss.
+
 ## What The Script Verifies
 
 - `mgmt-we` starts as the only active leader.
-- `mgmt-cli failback --to mgmt-ne --confirm` breaks the active lease and requests promotion.
+- The drill can simulate `mgmt-we` failure by cordoning and draining the active cluster, then deleting the `mgmt-leader-lease` pod so the Azure blob lease expires naturally.
 - `mgmt-ne` becomes leader within the 65 second lease-acquisition window.
 - `mgmt-we` transitions to standby and split-brain is not observed.
 - `controller-scaler` effects are visible on `mgmt-ne`: Argo CD and Crossplane controllers become ready and Argo CD cluster Secrets are relabeled to `lease-status=active`.
 - Argo CD Applications on `mgmt-ne` return to `Healthy` and `Synced` inside the 120 second failover target.
-- Optional operator failback to `mgmt-we` also completes cleanly.
+- Optional operator failback to `mgmt-we` uses `mgmt-cli failback --to mgmt-we --confirm` and completes cleanly.
+
+## Emergency Commands
+
+- `mgmt-cli failback --to mgmt-we --confirm` requests an operator-driven failback after `mgmt-we` has recovered.
+- `mgmt-cli break-lease --confirm` force-breaks the Azure blob lease without changing the preferred target. This is for emergency recovery and should not be used for the timed RTO drill because it bypasses the natural 60-second lease expiry window.
 
 ## Manual Checks Still Required
 

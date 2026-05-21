@@ -7,6 +7,7 @@
 #
 # Usage:
 #   ./validate-mgmt-failover.sh
+#   ./validate-mgmt-failover.sh --planned-failover
 #   ./validate-mgmt-failover.sh --failback
 
 set -euo pipefail
@@ -22,25 +23,81 @@ LEASE_ACQUIRE_TIMEOUT_SECONDS=65
 CONTROLLER_SCALE_TIMEOUT_SECONDS=70
 APPLICATION_HEALTH_TIMEOUT_SECONDS=120
 FAILBACK_TIMEOUT_SECONDS=120
+DRAIN_TIMEOUT_SECONDS="${DRAIN_TIMEOUT_SECONDS:-180s}"
 
 FAILBACK_AFTER_TEST=false
-if [[ "${1:-}" == "--failback" ]]; then
-  FAILBACK_AFTER_TEST=true
-elif [[ $# -gt 0 ]]; then
-  echo "usage: $0 [--failback]" >&2
-  exit 1
-fi
+FAILURE_MODE="cluster-outage"
+CORDONED_NODES=()
 
 TOTAL_RTO=-1
 FAILBACK_RTO=-1
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --failback)
+      FAILBACK_AFTER_TEST=true
+      ;;
+    --planned-failover)
+      FAILURE_MODE="planned-failover"
+      ;;
+    *)
+      echo "usage: $0 [--failback] [--planned-failover]" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
 
 log() {
   echo "[$(date -u '+%H:%M:%S')] $*" >&2
 }
 
+restore_cordoned_nodes() {
+  if [[ ${#CORDONED_NODES[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  for node in "${CORDONED_NODES[@]}"; do
+    kubectl --context="$MGMT_WE_CONTEXT" uncordon "$node" >/dev/null 2>&1 || true
+  done
+}
+
+cleanup() {
+  restore_cordoned_nodes
+}
+
+trap cleanup EXIT
+
+require_command() {
+  local command_name=$1
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "FAIL: required command not found in PATH: $command_name" >&2
+    exit 1
+  fi
+}
+
 jsonpath_or_empty() {
   local context=$1 namespace=$2 kind=$3 name=$4 jsonpath=$5
   kubectl --context="$context" get "$kind" "$name" -n "$namespace" -o "jsonpath=${jsonpath}" 2>/dev/null || true
+}
+
+wait_for_pods_gone() {
+  local context=$1 namespace=$2 selector=$3 timeout_seconds=$4 description=$5
+  local remaining
+
+  for _ in $(seq 1 "$timeout_seconds"); do
+    remaining=$(kubectl --context="$context" get pods -n "$namespace" -l "$selector" \
+      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null || true)
+    if [[ -z "$remaining" ]]; then
+      log "$description no longer has running pods on $context"
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "FAIL: $description still has pods after ${timeout_seconds}s" >&2
+  kubectl --context="$context" get pods -n "$namespace" -l "$selector" || true
+  exit 1
 }
 
 get_leadership_status() {
@@ -208,12 +265,66 @@ assert_rollouts_present() {
 print_summary() {
   cat <<EOF
 Validation summary
+  Failure mode: ${FAILURE_MODE}
   Lease acquired on mgmt-ne in: ${LEASE_ACQUIRE_SECS}s
   Controllers ready on mgmt-ne in: ${CONTROLLER_READY_SECS}s
   All Applications Healthy/Synced in: ${TOTAL_RTO}s
   Failback RTO: ${FAILBACK_RTO}s
 EOF
 }
+
+simulate_mgmt_we_failure() {
+  local node_lines node
+
+  mapfile -t node_lines < <(kubectl --context="$MGMT_WE_CONTEXT" get nodes -o jsonpath='{range .items[?(@.spec.unschedulable!=true)]}{.metadata.name}{"\n"}{end}')
+  if [[ ${#node_lines[@]} -eq 0 ]]; then
+    echo "FAIL: no schedulable nodes found on $MGMT_WE_CONTEXT to cordon/drain" >&2
+    exit 1
+  fi
+
+  for node in "${node_lines[@]}"; do
+    [[ -z "$node" ]] && continue
+    log "Cordoning node $node on $MGMT_WE_CONTEXT"
+    kubectl --context="$MGMT_WE_CONTEXT" cordon "$node" >/dev/null
+    CORDONED_NODES+=("$node")
+  done
+
+  for node in "${CORDONED_NODES[@]}"; do
+    log "Draining node $node on $MGMT_WE_CONTEXT"
+    kubectl --context="$MGMT_WE_CONTEXT" drain "$node" \
+      --ignore-daemonsets \
+      --delete-emptydir-data \
+      --force \
+      --grace-period=30 \
+      --timeout="$DRAIN_TIMEOUT_SECONDS" >/dev/null
+  done
+
+  log "Deleting mgmt leader pods on $MGMT_WE_CONTEXT to stop lease renewals"
+  kubectl --context="$MGMT_WE_CONTEXT" delete pods -n "$STATUS_NAMESPACE" \
+    -l 'app.kubernetes.io/name=mgmt-leader-lease' \
+    --ignore-not-found \
+    --wait=false >/dev/null
+
+  wait_for_pods_gone "$MGMT_WE_CONTEXT" "$STATUS_NAMESPACE" 'app.kubernetes.io/name=mgmt-leader-lease' 30 "mgmt-leader-lease"
+}
+
+planned_failover_to_mgmt_ne() {
+  log "Requesting planned failover to mgmt-ne"
+  LEASE_BLOB_URL="$LEASE_BLOB_URL" mgmt-cli failback --to mgmt-ne --confirm
+}
+
+restore_mgmt_we_capacity() {
+  if [[ ${#CORDONED_NODES[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  log "Restoring schedulability on mgmt-we after the failover drill"
+  restore_cordoned_nodes
+  CORDONED_NODES=()
+}
+
+require_command kubectl
+require_command mgmt-cli
 
 log "Step 1: confirming mgmt-we is active before drill"
 assert_leader "$MGMT_WE_CONTEXT" active
@@ -229,9 +340,13 @@ if [[ -z "$LEASE_BLOB_URL" ]]; then
 fi
 log "Using lease blob URL: $LEASE_BLOB_URL"
 
-log "Step 3: simulating mgmt-we loss via planned failover request to mgmt-ne"
+log "Step 3: simulating mgmt-we loss"
 FAILOVER_START=$(date +%s)
-LEASE_BLOB_URL="$LEASE_BLOB_URL" mgmt-cli failback --to mgmt-ne --confirm
+if [[ "$FAILURE_MODE" == "planned-failover" ]]; then
+  planned_failover_to_mgmt_ne
+else
+  simulate_mgmt_we_failure
+fi
 
 log "Step 4: waiting for mgmt-ne to acquire the lease"
 LEASE_ACQUIRE_SECS=$(wait_for_leader "$MGMT_NE_CONTEXT" active "$LEASE_ACQUIRE_TIMEOUT_SECONDS" "$FAILOVER_START" "mgmt-ne")
@@ -259,6 +374,7 @@ if [[ "$TOTAL_RTO" -gt "$MAX_FAILOVER_SECONDS" ]]; then
 fi
 
 log "SUCCESS: automatic failover completed within target RTO"
+restore_mgmt_we_capacity
 
 if [[ "$FAILBACK_AFTER_TEST" == "true" ]]; then
   log "Step 9: validating operator-driven failback to mgmt-we"

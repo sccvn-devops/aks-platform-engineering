@@ -9,6 +9,7 @@ controller:
     - plain-credentials:199.v9f8e1f741799
     - credentials-binding:702.vfe613e537e88
     - job-dsl:3654.vdf58f53e2d15
+    - generic-webhook-trigger:1.93.2
     - bitbucket:307.va_9f30d0b_8f0d
     - cloudbees-bitbucket-branch-source:937.3.1
     - config-file-provider:1006.vc7366c201f57

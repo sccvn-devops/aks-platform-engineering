@@ -375,6 +375,135 @@ EOF
                                 traits << "org.jenkinsci.plugins.scm_filter.BitbucketBranchCommitSkipTrait" {}
                               }
                             }
+                        - script: >
+                            pipelineJob("platform-service-seed") {
+                              description("Seeds a new service repository from Jira and opens infra/workload PRs in platform-gitops.")
+                              properties {
+                                pipelineTriggers {
+                                  triggers {
+                                    genericTrigger {
+                                      genericVariables {
+                                        genericVariable {
+                                          key("JIRA_ISSUE_KEY")
+                                          value("$.issue.key")
+                                          expressionType("JSONPath")
+                                        }
+                                        genericVariable {
+                                          key("JIRA_ISSUE_TYPE")
+                                          value("$.issue.fields.issuetype.name")
+                                          expressionType("JSONPath")
+                                        }
+                                        genericVariable {
+                                          key("SERVICE_NAME")
+                                          value("$.issue.fields.summary")
+                                          expressionType("JSONPath")
+                                        }
+                                        genericVariable {
+                                          key("SLO_CLASS")
+                                          value("$.issue.fields.customfield_slo_class")
+                                          expressionType("JSONPath")
+                                        }
+                                      }
+                                      token("platform-service-seed")
+                                      printContributedVariables(true)
+                                      printPostContent(false)
+                                      regexpFilterText("$JIRA_ISSUE_TYPE")
+                                      regexpFilterExpression("^IDP Service Request$")
+                                      causeString("Jira seed request for $JIRA_ISSUE_KEY")
+                                    }
+                                  }
+                                }
+                              }
+                              definition {
+                                cps {
+                                  sandbox(true)
+                                  script("""
+pipeline {
+  agent {
+    kubernetes {
+      defaultContainer 'azure-cli'
+      yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    azure.workload.identity/use: "true"
+spec:
+  serviceAccountName: jenkins-agent
+  nodeSelector:
+    nodepool: cipool
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ci
+      effect: NoSchedule
+  containers:
+    - name: azure-cli
+      image: mcr.microsoft.com/azure-cli:2.64.0
+      command:
+        - cat
+      tty: true
+'''
+    }
+  }
+  options {
+    disableConcurrentBuilds()
+    skipDefaultCheckout(true)
+  }
+  parameters {
+    string(name: 'JIRA_ISSUE_KEY', defaultValue: '', description: 'Jira issue key')
+    string(name: 'JIRA_ISSUE_TYPE', defaultValue: '', description: 'Jira issue type')
+    string(name: 'SERVICE_NAME', defaultValue: '', description: 'Optional service name override')
+    string(name: 'SLO_CLASS', defaultValue: '', description: 'Optional SLO class override')
+  }
+  environment {
+    PLATFORM_REPO = "{{metadata.annotations.addons_repo_url}}"
+    PLATFORM_REPO_REVISION = "{{metadata.annotations.addons_repo_revision}}"
+    BITBUCKET_WORKSPACE = "{{metadata.annotations.jenkins_bitbucket_repo_owner}}"
+    PLATFORM_GITOPS_REPO = "{{metadata.annotations.jenkins_platform_gitops_repo_url}}"
+    JIRA_BASE_URL = "{{metadata.annotations.jira_base_url}}"
+  }
+  stages {
+    stage('Seed service') {
+      steps {
+        withCredentials([
+          usernamePassword(credentialsId: 'bitbucket-workspace-token', usernameVariable: 'BITBUCKET_USERNAME', passwordVariable: 'BITBUCKET_TOKEN'),
+          string(credentialsId: 'jira-service-account-token', variable: 'JIRA_TOKEN')
+        ]) {
+          container('azure-cli') {
+            sh '''
+              set -euo pipefail
+              python3 -m pip install --user --quiet cookiecutter
+
+              workdir="$(mktemp -d)"
+              trap 'rm -rf "$workdir"' EXIT
+              export PATH="$HOME/.local/bin:$PATH"
+
+              platform_repo_with_auth="$(printf '%s' "$PLATFORM_REPO" | sed "s#^https://#https://$BITBUCKET_USERNAME:$BITBUCKET_TOKEN@#")"
+              git clone "$platform_repo_with_auth" "$workdir/platform"
+              cd "$workdir/platform"
+              git checkout "$PLATFORM_REPO_REVISION"
+
+              python3 "$workdir/platform/tools/service_seed/seed_job.py" seed-from-jira \
+                --jira-base-url "$JIRA_BASE_URL" \
+                --jira-issue-key "$JIRA_ISSUE_KEY" \
+                --jira-issue-type "$JIRA_ISSUE_TYPE" \
+                --service-name "${SERVICE_NAME:-}" \
+                --slo-class "${SLO_CLASS:-}" \
+                --bitbucket-workspace "$BITBUCKET_WORKSPACE" \
+                --cookiecutter-template "$workdir/platform/tools/service_seed/cookiecutter-service" \
+                --platform-gitops-repo-url "$PLATFORM_GITOPS_REPO"
+            '''
+          }
+        }
+      }
+    }
+  }
+}
+                                  """.stripIndent())
+                                }
+                              }
+                            }
               serviceAccount:
                 name: jenkins-controller
                 annotations:

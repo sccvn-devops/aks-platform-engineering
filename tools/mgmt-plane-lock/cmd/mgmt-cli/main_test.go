@@ -44,3 +44,26 @@ func TestRunFailbackSetsTargetAndBreaksLease(t *testing.T) {
 		t.Fatal("breakCalled = false, want true")
 	}
 }
+
+func TestRunBreakLeaseBreaksActiveLease(t *testing.T) {
+	originalFactory := newFailbackManager
+	fakeManager := &fakeFailbackManager{}
+	newFailbackManager = func(context.Context, config.CLI) (failbackManager, error) {
+		return fakeManager, nil
+	}
+	defer func() {
+		newFailbackManager = originalFactory
+	}()
+
+	runBreakLease(config.CLI{
+		LeaseBlobURL:     "https://example.blob.core.windows.net/leases/mgmt-active",
+		PreferredMetaKey: "preferred-cluster",
+	}, []string{"--confirm"})
+
+	if !fakeManager.breakCalled {
+		t.Fatal("breakCalled = false, want true")
+	}
+	if fakeManager.preferredCluster != "" {
+		t.Fatalf("preferredCluster = %q, want empty", fakeManager.preferredCluster)
+	}
+}

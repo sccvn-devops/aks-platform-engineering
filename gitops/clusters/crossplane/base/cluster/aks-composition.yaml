@@ -18,7 +18,12 @@ spec:
       patches:
       - type: FromCompositeFieldPath
         fromFieldPath: metadata.annotations
-        toFieldPath: metadata.annotations     
+        toFieldPath: metadata.annotations
+    - name: metadata-labels-patch
+      patches:
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.labels
+        toFieldPath: metadata.labels
   resources:
     - name: aks-cluster
       connectionDetails:
@@ -331,14 +336,19 @@ spec:
             chart:
               name: argo-cd
               repository: https://argoproj.github.io/argo-helm
-              version:  '{{metadata.labels.argocd_chart_version}}'
+              version: "7.8.25"
             namespace: argocd
           providerConfigRef:
             name: helm-provider	
       patches:
         - type: FromCompositeFieldPath
           fromFieldPath: metadata.name
-          toFieldPath: spec.providerConfigRef.name                 
+          toFieldPath: spec.providerConfigRef.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.labels[argocd_chart_version]
+          toFieldPath: spec.forProvider.chart.version
+          policy:
+            fromFieldPath: Optional
     - name: kubernetes-provider-config
       base:
         apiVersion: kubernetes.crossplane.io/v1alpha1
@@ -353,6 +363,10 @@ spec:
       patches:
         - fromFieldPath: metadata.name
           toFieldPath: metadata.name
+        - type: PatchSet
+          patchSetName: metadata-patch
+        - type: PatchSet
+          patchSetName: metadata-labels-patch
         - fromFieldPath: "metadata.uid"
           toFieldPath: spec.credentials.secretRef.name
           transforms:
@@ -360,7 +374,34 @@ spec:
               string:
                 fmt: "%s-secret" 
       readinessChecks:
-        - type: None                             
+        - type: None
+    - name: argocd-cluster-registration
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
+        spec:
+          forProvider:
+            manifest:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: managed-cluster
+                namespace: argocd
+              stringData:
+                name: managed-cluster
+                server: https://kubernetes.default.svc
+                config: '{"tlsClientConfig":{"insecure":false}}'
+      patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.providerConfigRef.name
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.manifest.metadata.name
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.manifest.stringData.name
+        - type: PatchSet
+          patchSetName: metadata-patch
+        - type: PatchSet
+          patchSetName: metadata-labels-patch
     - name: deploy-infra-apps
       base:
         apiVersion: kubernetes.crossplane.io/v1alpha1
@@ -386,7 +427,22 @@ spec:
                   server: https://kubernetes.default.svc
       patches:
         - fromFieldPath: metadata.name
-          toFieldPath: spec.providerConfigRef.name 
+          toFieldPath: spec.providerConfigRef.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.annotations[addons_repo_url]
+          toFieldPath: spec.forProvider.manifest.spec.source.repoURL
+          policy:
+            fromFieldPath: Optional
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.annotations[addons_repo_revision]
+          toFieldPath: spec.forProvider.manifest.spec.source.targetRevision
+          policy:
+            fromFieldPath: Optional
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.annotations[bootstrap_repo_path]
+          toFieldPath: spec.forProvider.manifest.spec.source.path
+          policy:
+            fromFieldPath: Optional
   compositeTypeRef:
     apiVersion: kubernetes.example.com/v1alpha1
     kind: XAksCluster

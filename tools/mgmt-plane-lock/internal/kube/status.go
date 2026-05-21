@@ -25,19 +25,22 @@ type Status struct {
 func UpsertStatus(ctx context.Context, client kubernetes.Interface, status Status) error {
 	configMaps := client.CoreV1().ConfigMaps(status.Namespace)
 	existing, err := configMaps.Get(ctx, status.ConfigMapName, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("get status configmap: %w", err)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get status configmap: %w", err)
+		}
+		existing = nil
 	}
 
 	data := map[string]string{
-		"clusterName":       status.ClusterName,
-		"holderIdentity":    status.ClusterName,
-		"leaseBlobURL":      status.LeaseBlobURL,
-		"leadershipStatus":  status.LeadershipStatus,
-		"leaseID":           status.LeaseID,
-		"preferredCluster":  status.PreferredCluster,
-		"lastObservedAt":    time.Now().UTC().Format(time.RFC3339),
-		"lastRenewedAt":     status.LastRenewedAt.UTC().Format(time.RFC3339),
+		"clusterName":      status.ClusterName,
+		"holderIdentity":   status.ClusterName,
+		"leaseBlobURL":     status.LeaseBlobURL,
+		"leadershipStatus": status.LeadershipStatus,
+		"leaseID":          status.LeaseID,
+		"preferredCluster": status.PreferredCluster,
+		"lastObservedAt":   time.Now().UTC().Format(time.RFC3339),
+		"lastRenewedAt":    status.LastRenewedAt.UTC().Format(time.RFC3339),
 	}
 
 	if existing == nil {

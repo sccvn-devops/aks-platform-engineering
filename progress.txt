@@ -223,3 +223,52 @@
   - velero_bsl_access_mode + velero_schedules_disabled annotations are cluster-specific, set via Terraform per mgmt cluster
   - Backup schedules use `disabled` field to avoid running on standby cluster
 ---
+
+## 2026-05-21 - US-023
+- Completed the in-repo management-plane failover drill assets across [docs/management-plane-failover-runbook.md](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/docs/management-plane-failover-runbook.md), [scripts/dr-validation/validate-mgmt-failover.sh](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/scripts/dr-validation/validate-mgmt-failover.sh), and [tools/mgmt-plane-lock/cmd/mgmt-cli/main.go](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/mgmt-plane-lock/cmd/mgmt-cli/main.go)
+- The drill script now defaults to a literal `mgmt-we` outage simulation: cordon all schedulable nodes, drain them, delete the `mgmt-leader-lease` pod to stop renewals, measure passive takeover on `mgmt-ne`, verify controller scale-up and Argo CD recovery, then optionally fail back with `mgmt-cli`
+- Added emergency `mgmt-cli break-lease --confirm` support and unit coverage in [main_test.go](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/mgmt-plane-lock/cmd/mgmt-cli/main_test.go)
+- Fixed [tools/mgmt-plane-lock/internal/kube/status.go](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/mgmt-plane-lock/internal/kube/status.go) so `UpsertStatus` correctly creates the leadership ConfigMap after a not-found read; this resolved the module test failures surfaced while verifying `US-023`
+- Local verification passed with `bash -n scripts/dr-validation/validate-mgmt-failover.sh` and `docker run --rm -v /home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering:/work -w /work/tools/mgmt-plane-lock golang:1.24 /usr/local/go/bin/go test ./...`
+- Live failover timing, Argo Rollouts continuity during the drill, and Azure-side duplicate-provisioning confirmation remain blocked until the platform is applied and operator access is available (`az login` plus working `kubectl` contexts)
+- **Learnings for future iterations:**
+  - Newer Kubernetes fake-client behavior can return a typed object alongside a not-found error, so create-vs-update logic must branch on the error result rather than assuming `existing == nil`
+  - The failover drill can discover `LEASE_BLOB_URL` directly from `kube-system/mgmt-leader-status`, which keeps the operator path aligned with what the controller is actually advertising
+  - `mgmt-cli break-lease` is appropriate for emergency recovery, while the timed `US-023` RTO drill should let the 60-second Azure blob lease expire naturally after renewals stop
+---
+
+## 2026-05-21 - US-024
+- Added repo-local seed-job automation in [tools/service_seed/seed_job.py](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/service_seed/seed_job.py) plus a Cookiecutter service-repository template under [tools/service_seed/cookiecutter-service](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/service_seed/cookiecutter-service); the CLI now fetches a Jira issue, validates `IDP Service Request`, creates a Bitbucket repository, scaffolds it from the Cookiecutter template, generates `apps/<svc>/infra` and `apps/<svc>/workload` trees, pushes two GitOps branches, and opens two PRs
+- Added focused regression coverage in [tools/service_seed/tests/test_seed_job.py](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/service_seed/tests/test_seed_job.py) for Jira request parsing, required scaffold file presence, prod-vs-nonprod rollout kind selection, and bronze analysis-template behavior
+- Extended Jenkins bootstrap in [gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml) with a new `platform-service-seed` pipeline job. The job uses the `generic-webhook-trigger` plugin, filters webhook events to `IDP Service Request`, clones this platform repo at the configured revision, installs Cookiecutter in the agent pod, and runs the new seed CLI with the existing `bitbucket-workspace-token` and `jira-service-account-token` credentials
+- Enabled the Jenkins plugin dependency in [gitops/environments/default/addons/jenkins/values.yaml](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/gitops/environments/default/addons/jenkins/values.yaml) by adding `generic-webhook-trigger`
+- The generated GitOps scaffold now includes the required infra files (`xrc-sql.yaml`, `xrc-cosmos.yaml`, `xrc-sb.yaml`, `xrc-namespace-binding.yaml`, overlays) and workload files (`rollout.yaml`, `analysis-template.yaml`, `service.yaml`, `ingress.yaml`, `external-secrets.yaml`, overlays). `rollout.yaml` renders as `Deployment` for `dev` and `staging`, and as `Rollout` for `prod`; `analysis-template.yaml` and the rollout strategy are selected from the Jira SLO class
+- Local verification passed with:
+  - `python3 -m unittest tools.service_seed.tests.test_seed_job`
+  - `python3 -m py_compile tools/service_seed/seed_job.py`
+  - `python3 tools/service_seed/seed_job.py generate-gitops --service-name Payments --slo-class gold --output-dir <tmp>`
+  - `kubectl kustomize <tmp>/apps/payments/infra/overlays/dev`
+  - `kubectl kustomize <tmp>/apps/payments/workload/overlays/prod`
+  - `terraform -chdir=terraform validate`
+- Live end-to-end validation is still blocked in this workspace because no Jenkins controller, Jira webhook delivery, or Bitbucket Cloud credentials are reachable here. The webhook extraction currently reads `issue.key`, `issue.fields.issuetype.name`, summary, and a `customfield_slo_class` candidate from the payload, while the CLI also re-fetches the Jira issue and can fall back to labels/description or explicit overrides; if the real Jira project uses different custom field names, that mapping must be adjusted during rollout.
+- **Learnings for future iterations:**
+  - Keeping the service repo bootstrap in a real Cookiecutter template lets the Jenkins job stay declarative while still allowing local fallback rendering for tests and offline generation
+  - Generating `xrc-namespace-binding.yaml` as a reference stub avoids duplicating the actual `NamespaceVaultBinding` claims that are already synthesized by `namespace-vault-bindings-set` from workload overlays
+  - SLO-specific rollout generation is simpler if the environment overlay owns `rollout.yaml`; that cleanly satisfies the `Deployment` vs `Rollout` acceptance criterion without base-level branching
+---
+
+## 2026-05-21 - US-025
+- Tightened the catastrophic recovery drill assets in [scripts/dr-validation/validate-seed-cluster-dr.sh](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/scripts/dr-validation/validate-seed-cluster-dr.sh) and [docs/seed-cluster-dr-runbook.md](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/docs/seed-cluster-dr-runbook.md) so the story is verifiable from the repo, not just described
+- The validator now refuses to apply [bootstrap/control-plane-claim.yaml](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/bootstrap/control-plane-claim.yaml) while any `REPLACE_WITH_*` placeholders remain, which prevents a false-positive DR drill on an unconfigured recovery manifest
+- Added continuous `WORKLOAD_PROBES` monitoring with `curl` during the recovery window. This closes the previous gap where the script only checked workload-cluster API reachability; the drill can now prove specific workload endpoints kept returning HTTP `2xx`/`3xx` throughout the failover window
+- The runbook now documents the probe format (`name=https://service.example/healthz`) and clarifies that the automated drill covers both workload-cluster API reachability and live service endpoint continuity, while richer synthetic transactions may still require operator-owned checks
+- Local verification passed with:
+  - `bash -n scripts/dr-validation/validate-seed-cluster-dr.sh`
+  - `kubectl kustomize bootstrap`
+  - `terraform -chdir=terraform validate`
+- Live recovery timing on Azure, actual blob-lease acquisition by the rebuilt management cluster, and end-user traffic confirmation beyond health endpoints remain blocked until the platform is applied and real `kubectl` contexts plus service URLs are available
+- **Learnings for future iterations:**
+  - Catastrophic-recovery drills need both control-plane evidence and workload-serving evidence; cluster API readiness alone is not enough for the `US-025` acceptance bar
+  - Failing fast on placeholder-filled claims is safer than letting Crossplane or ArgoCD fail later with partial side effects
+  - Simple HTTP continuity probes are a good default, but business-critical services should also expose or reuse authenticated synthetic checks for stronger DR evidence
+---

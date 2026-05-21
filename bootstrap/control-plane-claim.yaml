@@ -1,0 +1,118 @@
+apiVersion: kubernetes.example.com/v1alpha1
+kind: AksClusterClaim
+metadata:
+  name: mgmt-we
+  namespace: crossplane-system
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    akuity.io/argo-cd-cluster-name: mgmt-we
+    argocd_chart_version: "7.8.25"
+    argo_rollouts_chart_version: "2.39.5"
+    enable_argocd: "true"
+    enable_argo_rollouts: "true"
+    enable_crossplane: "true"
+    enable_external_secrets: "true"
+    enable_kyverno: "true"
+    environment: control-plane
+    env: control-plane
+    lease-status: active
+    region: westeurope
+    role: management
+  annotations:
+    crossplane.io/external-name: mgmt-we
+    addons_repo_url: https://github.com/sccvn-devops/aks-platform-engineering
+    addons_repo_basepath: gitops/
+    addons_repo_revision: HEAD
+    bootstrap_repo_path: gitops/bootstrap/control-plane/addons
+    infrastructure_provider: crossplane
+    akspe_identity_id: REPLACE_WITH_AKSPE_CLIENT_ID
+    crossplane_identity_client_id: REPLACE_WITH_CROSSPLANE_CLIENT_ID
+    subscription_id: REPLACE_WITH_SUBSCRIPTION_ID
+    tenant_id: REPLACE_WITH_TENANT_ID
+    resource_group_name: aks-gitops
+    mgmt_lease_blob_url: REPLACE_WITH_MGMT_LEASE_BLOB_URL
+    mgmt_lease_identity_client_id: REPLACE_WITH_MGMT_WE_LEASE_CLIENT_ID
+    velero_identity_client_id: REPLACE_WITH_VELERO_CLIENT_ID
+    velero_backup_storage_account_name: REPLACE_WITH_VELERO_STORAGE_ACCOUNT
+    velero_backup_container_name: REPLACE_WITH_VELERO_CONTAINER
+    velero_backup_resource_group_name: aks-gitops
+    velero_bsl_access_mode: ReadWrite
+    velero_schedules_disabled: "false"
+    kv_prod_we_url: REPLACE_WITH_KV_PROD_WE_URL
+    kv_prod_ne_url: REPLACE_WITH_KV_PROD_NE_URL
+    akv_sync_exporter_identity_client_id: REPLACE_WITH_AKV_SYNC_EXPORTER_CLIENT_ID
+    saas_rotator_identity_client_id: REPLACE_WITH_SAAS_ROTATOR_CLIENT_ID
+    jira_base_url: REPLACE_WITH_JIRA_BASE_URL
+    jira_project_key: REPLACE_WITH_JIRA_PROJECT_KEY
+    jira_service_account_email: REPLACE_WITH_JIRA_SERVICE_ACCOUNT_EMAIL
+    jenkins_bitbucket_server_url: REPLACE_WITH_BITBUCKET_SERVER_URL
+    jenkins_bitbucket_repo_owner: REPLACE_WITH_BITBUCKET_REPO_OWNER
+    jenkins_service_repository: REPLACE_WITH_SERVICE_REPOSITORY
+    jenkins_platform_gitops_repo_url: REPLACE_WITH_PLATFORM_GITOPS_REPO_URL
+spec:
+  writeConnectionSecretToRef:
+    name: mgmt-we-recovery-kubeconfig
+  location: "West Europe"
+  aks:
+    defaultNodePool:
+      name: system
+      vmSize: Standard_D2s_v3
+      enableAutoScaling: false
+      nodeCount: 1
+      minCount: 1
+      maxCount: 1
+      maxPods: 30
+      nodeLabels:
+        nodepool: defaultnodepool
+        cluster: mgmt-we
+      onlyCriticalAddonsEnabled: false
+      osDiskSizeGb: 128
+      osDiskType: Managed
+      osSku: AzureLinux
+      type: VirtualMachineScaleSets
+    roleBasedAccessControlEnabled: true
+    oidcIssuerEnabled: true
+    workloadIdentityEnabled: true
+    privateClusterEnabled: false
+    azurePolicyEnabled: true
+    networkProfile:
+      - networkPlugin: azure
+        networkPolicy: azure
+        outboundType: loadBalancer
+        dnsServiceIp: 172.16.0.10
+        serviceCidr: 172.16.0.0/16
+    workloadAutoscalerProfile:
+      - kedaEnabled: true
+        verticalPodAutoscalerEnabled: true
+    tags:
+      environment: control-plane
+      provisionedBy: Crossplane
+  userNodePool:
+    name: cipool
+    vmSize: Standard_D2s_v3
+    enableAutoScaling: true
+    nodeCount: 1
+    minCount: 1
+    maxCount: 5
+    maxPods: 30
+    nodeLabels:
+      workload: ci
+      nodepool: cipool
+    nodeTaints:
+      - workload=ci:NoSchedule
+    osDiskSizeGb: 128
+    osDiskType: Managed
+    osSku: AzureLinux
+    osType: Linux
+  subnet:
+    name: mgmt-we-subnet
+    privateEndpointNetworkPoliciesEnabled: true
+    privateLinkServiceNetworkPoliciesEnabled: false
+    addressPrefixes:
+      - 10.1.0.0/16
+  virtualNetwork:
+    addressSpace:
+      - 10.1.0.0/16
+    tags:
+      environment: control-plane
+      provisionedBy: Crossplane
