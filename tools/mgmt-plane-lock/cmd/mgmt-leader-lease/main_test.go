@@ -79,6 +79,9 @@ func TestReconcileAcquiresLeaseAndWritesActiveStatus(t *testing.T) {
 	if got := status.Data["leadershipStatus"]; got != "active" {
 		t.Fatalf("leadershipStatus = %q, want active", got)
 	}
+	if got := status.Data["leaseBlobURL"]; got != "https://example.blob.core.windows.net/leases/mgmt-active" {
+		t.Fatalf("leaseBlobURL = %q, want management blob URL", got)
+	}
 	if got := status.Data["leaseID"]; got != "lease-123" {
 		t.Fatalf("leaseID = %q, want lease-123", got)
 	}

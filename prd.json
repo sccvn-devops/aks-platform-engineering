@@ -453,7 +453,7 @@
       ],
       "priority": 25,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented the in-repo automation needed for the drill on 2026-05-21 without marking the story complete. `tools/mgmt-plane-lock` now writes `leaseBlobURL` into `kube-system/mgmt-leader-status`, the Helm seed ConfigMap exports the same field, and `scripts/dr-validation/validate-mgmt-failover.sh` now validates leader transition timing, split-brain absence, controller scale-up, Argo CD lease-status labels, Crossplane readiness, application recovery, and optional operator failback. Added `docs/management-plane-failover-runbook.md` to document prerequisites and the drill flow. Local verification passed with `bash -n scripts/dr-validation/validate-mgmt-failover.sh` and `helm template mgmt-plane-lock gitops/platform/mgmt-plane-lock`, but the live Azure/Kubernetes failover drill, workload-canary continuity check, and Azure-side duplicate-provisioning confirmation remain blocked in this workspace until applied clusters and credentials are available."
     },
     {
       "id": "US-024",

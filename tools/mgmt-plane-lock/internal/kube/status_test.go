@@ -17,6 +17,7 @@ func TestUpsertStatusCreatesConfigMap(t *testing.T) {
 		Namespace:        "kube-system",
 		ConfigMapName:    "mgmt-leader-status",
 		ClusterName:      "mgmt-we",
+		LeaseBlobURL:     "https://example.blob.core.windows.net/leases/mgmt-active",
 		LeadershipStatus: "active",
 		LeaseID:          "lease-123",
 		PreferredCluster: "",
@@ -37,6 +38,9 @@ func TestUpsertStatusCreatesConfigMap(t *testing.T) {
 	if cm.Data["leadershipStatus"] != "active" {
 		t.Fatalf("leadershipStatus = %q, want active", cm.Data["leadershipStatus"])
 	}
+	if cm.Data["leaseBlobURL"] != "https://example.blob.core.windows.net/leases/mgmt-active" {
+		t.Fatalf("leaseBlobURL = %q, want management blob URL", cm.Data["leaseBlobURL"])
+	}
 }
 
 func TestUpsertStatusUpdatesExistingConfigMap(t *testing.T) {
@@ -54,6 +58,7 @@ func TestUpsertStatusUpdatesExistingConfigMap(t *testing.T) {
 		Namespace:        "kube-system",
 		ConfigMapName:    "mgmt-leader-status",
 		ClusterName:      "mgmt-ne",
+		LeaseBlobURL:     "https://example.blob.core.windows.net/leases/mgmt-active",
 		LeadershipStatus: "standby",
 		LeaseID:          "",
 		PreferredCluster: "mgmt-we",

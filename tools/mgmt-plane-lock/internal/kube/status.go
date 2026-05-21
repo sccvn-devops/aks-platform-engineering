@@ -15,6 +15,7 @@ type Status struct {
 	Namespace        string
 	ConfigMapName    string
 	ClusterName      string
+	LeaseBlobURL     string
 	LeadershipStatus string
 	LeaseID          string
 	PreferredCluster string
@@ -31,6 +32,7 @@ func UpsertStatus(ctx context.Context, client kubernetes.Interface, status Statu
 	data := map[string]string{
 		"clusterName":       status.ClusterName,
 		"holderIdentity":    status.ClusterName,
+		"leaseBlobURL":      status.LeaseBlobURL,
 		"leadershipStatus":  status.LeadershipStatus,
 		"leaseID":           status.LeaseID,
 		"preferredCluster":  status.PreferredCluster,
@@ -70,4 +72,3 @@ func UpsertStatus(ctx context.Context, client kubernetes.Interface, status Statu
 
 	return nil
 }
-

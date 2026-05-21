@@ -99,4 +99,6 @@ _docs/
 .github/skills
 .github/agents
 # private scripts
-scripts/
+scripts/*
+!scripts/dr-validation/
+!scripts/dr-validation/validate-mgmt-failover.sh

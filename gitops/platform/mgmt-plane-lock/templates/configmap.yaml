@@ -8,9 +8,9 @@ metadata:
 data:
   clusterName: {{ .Values.clusterName | quote }}
   holderIdentity: {{ .Values.clusterName | quote }}
+  leaseBlobURL: {{ .Values.leaseBlobUrl | quote }}
   leadershipStatus: standby
   leaseID: ""
   preferredCluster: ""
   lastObservedAt: ""
   lastRenewedAt: ""
-
