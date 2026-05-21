@@ -177,7 +177,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Implemented on 2026-05-21 by adding workload-scoped Azure Workload Identity plumbing in `terraform/external_secrets.tf` for the four workload clusters, including per-cluster user-assigned identities, federated identity credentials, `Key Vault Secrets User` role assignments, and seeded `eso-smoke-test` secrets in each workload Key Vault. Extended Argo CD cluster registration metadata in `terraform/argocd_bootstrap.tf` so workload clusters advertise the ESO identity client ID, vault URL, and smoke-test secret name, and enabled the addon through cluster labels. Added GitOps packaging for the ESO operator in `gitops/bootstrap/control-plane/addons/oss/addons-external-secrets-appset.yaml` with cluster-scoped store features disabled, plus a workload bootstrap chart in `gitops/platform/external-secrets-bootstrap/` and `gitops/bootstrap/control-plane/addons/oss/addons-external-secrets-bootstrap.yaml` that creates a namespace-scoped `SecretStore`, workload-identity `ServiceAccount`, and smoke-test `ExternalSecret` per workload cluster. Local verification is limited to static rendering and `terraform validate`; live reconciliation on AKS and confirmation that the `ExternalSecret` syncs from Azure Key Vault remain blocked until the stack is applied against Azure (`az login` required)."
     },
     {

@@ -120,3 +120,16 @@
   - Workloads marked Optional=true (ESO, jira-bridge) don't fail reconcile if not present
   - ClusterName env var identifies this cluster for the ArgoCD Secret label patch
 ---
+
+## 2026-05-21 - US-010
+- Verified ESO Terraform in terraform/external_secrets.tf: per-workload-cluster UAMIs, federated identity credentials for platform-secrets and kyverno service accounts, Key Vault Secrets User role on workload vaults, smoke-test secret seeded
+- ESO values.yaml: processClusterStore=false, processClusterExternalSecret=false, createClusterSecretStore=false — equivalent to --namespace-scoped-stores=true
+- No ClusterSecretStore deployed anywhere (confirmed by absence in gitops)
+- Namespace-scoped SecretStore auto-created per workload cluster via gitops/platform/external-secrets-bootstrap/ Helm chart
+- ESO controller managed by controller-scaler (in DefaultWorkloads); workload agents deployed via addons-external-secrets-appset.yaml
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - ESO "namespace-scoped" enforcement uses processClusterStore=false + createClusterSecretStore=false in the Helm values, not a CLI flag
+  - Per-cluster ESO identity stored in `azurerm_user_assigned_identity.external_secrets` (external_secrets.tf), keyed by cluster name
+  - ESO federated subjects cover both `platform-secrets` and `kyverno` namespaces per workload cluster
+---
