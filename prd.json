@@ -74,7 +74,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Implemented on 2026-05-20 by adding `terraform/storage.tf` with a geo-redundant management lease storage account (`stplatformmgmtlease`), private `leases` container, seeded `mgmt-active` blob, and a blob private endpoint in the West Europe hub registered against `privatelink.blob.core.windows.net`. Added dedicated user-assigned managed identities for `mgmt-we` and `mgmt-ne`, attached them to the corresponding AKS clusters in `terraform/main.tf` and `terraform/clusters.tf`, and granted both identities `Storage Blob Data Contributor` on the lease container scope. Exposed storage and identity outputs in `terraform/outputs.tf`. `terraform validate` passes locally. `terraform plan -refresh=false -lock=false -input=false` is still blocked in this workspace because Azure CLI authentication is missing (`az login` required), so the story remains open until plan can be verified."
     },
     {

@@ -38,3 +38,16 @@
   - `azurerm_user_assigned_identity.akspe` in main.tf is granted Key Vault Administrator on all workload vaults
   - Log Analytics workspace is shared (`azurerm_log_analytics_workspace.platform`) for all workload vault diagnostic settings
 ---
+
+## 2026-05-21 - US-004
+- Verified existing implementation of GRS storage account, leases container, mgmt-active blob, private endpoint, and role assignments in terraform/storage.tf
+- mgmt-we UAMI attached in main.tf line 155; mgmt-ne UAMI attached in clusters.tf line 109 (conditional on mgmt_cluster_storage_identities keys)
+- Private endpoint is in WE hub; mgmt-ne reaches it via hub_ne_to_we VNet peering (networking.tf lines 335-343)
+- Private DNS zone `privatelink.blob.core.windows.net` linked to both WE and NE hubs via the flat cross-product link resource (networking.tf lines 351-383)
+- `terraform validate` passes — no new code changes required
+- Files: terraform/storage.tf, terraform/main.tf, terraform/clusters.tf, terraform/networking.tf, terraform/outputs.tf
+- **Learnings for future iterations:**
+  - Hub-to-hub VNet peering (hub_we_to_ne/hub_ne_to_we) + DNS zone links to all hubs satisfies "reachable from both spokes" without a second private endpoint
+  - mgmt cluster UAMIs live in `azurerm_user_assigned_identity.mgmt_cluster` (storage.tf), keyed by cluster name; both mgmt-we and mgmt-ne are in this map
+  - Storage Blob Data Contributor role is scoped to the container resource_manager_id (not the storage account), which is the minimal-privilege pattern here
+---
