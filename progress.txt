@@ -93,3 +93,17 @@
   - health.lua covers ALL XR types under *.platform.cityos.io/* group using wildcard key in resource.customizations
   - Crossplane platform ApplicationSet only targets clusters with role=management, lease-status=active, enable_crossplane=true
 ---
+
+## 2026-05-21 - US-008
+- Verified Go controller in tools/mgmt-plane-lock/cmd/mgmt-leader-lease/main.go: acquires/renews/releases Azure Blob lease, writes ConfigMap mgmt-leader-status in kube-system
+- defaultLeaseDuration=60s, defaultRenewInterval=15s confirmed in tools/mgmt-plane-lock/internal/config/config.go
+- Prometheus metric `mgmt_leader_lease_renewed_seconds` registered as promauto.NewGauge
+- mgmt-cli failback --to <cluster> --confirm implemented in tools/mgmt-plane-lock/cmd/mgmt-cli/main.go
+- Helm chart with replicas=1 in gitops/platform/mgmt-plane-lock/templates/deployment.yaml
+- Unit tests present for all components (bloblease, kube/status, mgmt-cli, controller)
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - Lease TTL and renew interval validated at config load time (renew must be < lease duration)
+  - ConfigMap name defaults to `mgmt-leader-status` in namespace `kube-system` (can be overridden via env vars)
+  - mgmt-cli uses `SetPreferredCluster` (blob metadata) + `Break` (delete lease) operations for failback
+---
