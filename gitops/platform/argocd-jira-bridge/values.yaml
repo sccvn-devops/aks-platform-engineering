@@ -1,0 +1,31 @@
+clusterName: ""
+
+image:
+  repository: acrplatformprod.azurecr.io/platform/argocd-jira-bridge
+  tag: latest
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  name: jira-bridge
+
+argocdNamespace: argocd
+pollIntervalSeconds: 15
+stateConfigMapName: jira-bridge-state
+
+jira:
+  baseUrl: ""
+  projectKey: ""
+  userEmail: ""
+  issueTypeName: Task
+  infoIssueLabels:
+    - argocd
+    - platform
+    - informational
+  sev1IssueLabels:
+    - argocd
+    - platform
+    - sev1
+
+secret:
+  name: jira-service-account-token
+  tokenKey: token

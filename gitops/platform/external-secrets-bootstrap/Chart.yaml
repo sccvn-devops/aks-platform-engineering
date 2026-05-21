@@ -1,0 +1,6 @@
+apiVersion: v2
+name: external-secrets-bootstrap
+description: Namespace-scoped Azure Key Vault bootstrap resources for External Secrets.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

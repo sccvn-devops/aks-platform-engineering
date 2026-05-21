@@ -81,6 +81,14 @@ output "mgmt_cluster_uami_client_ids" {
   }
 }
 
+output "external_secrets_uami_client_ids" {
+  description = "User-assigned managed identity client IDs for workload-cluster External Secrets access."
+  value = {
+    for key, identity in azurerm_user_assigned_identity.external_secrets :
+    key => identity.client_id
+  }
+}
+
 output "log_analytics_workspace_id" {
   description = "Log Analytics workspace ID used for platform diagnostics."
   value       = azurerm_log_analytics_workspace.platform.id
@@ -106,14 +114,49 @@ output "jenkins_uami_client_id" {
   value       = azurerm_user_assigned_identity.jenkins.client_id
 }
 
+output "management_ci_key_vault_name" {
+  description = "Management-plane Key Vault name used for Jenkins and management CI secrets."
+  value       = azurerm_key_vault.management_ci.name
+}
+
+output "management_ci_cosign_signing_key_id" {
+  description = "Versionless Azure Key Vault key ID used by Jenkins Cosign signing."
+  value       = azurerm_key_vault_key.management_ci_cosign.versionless_id
+}
+
+output "external_secrets_mgmt_we_client_id" {
+  description = "Client ID for the management-cluster External Secrets workload identity."
+  value       = azurerm_user_assigned_identity.external_secrets_mgmt_we.client_id
+}
+
+output "velero_uami_client_id" {
+  description = "Client ID for the Velero workload identity."
+  value       = azurerm_user_assigned_identity.velero.client_id
+}
+
+output "velero_backup_storage_account_name" {
+  description = "Storage account name for management-cluster Velero backups."
+  value       = azurerm_storage_account.mgmt_backup.name
+}
+
 output "hub_we_firewall_private_ip" {
   description = "Private IP address of the West Europe Azure Firewall."
   value       = azurerm_firewall.we.ip_configuration[0].private_ip_address
 }
 
+output "hub_we_firewall_public_ip" {
+  description = "Public IP address of the West Europe Azure Firewall."
+  value       = azurerm_public_ip.firewall_we.ip_address
+}
+
 output "hub_we_bastion_id" {
   description = "Azure Bastion host deployed in the West Europe hub."
   value       = azurerm_bastion_host.we.id
+}
+
+output "jenkins_webhook_frontdoor_hostname" {
+  description = "Front Door hostname that accepts Bitbucket webhook traffic for Jenkins."
+  value       = azurerm_cdn_frontdoor_endpoint.jenkins_webhook.host_name
 }
 
 output "aks_cluster_ids" {

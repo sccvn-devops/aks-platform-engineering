@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-bridge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: jira-bridge
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jira-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jira-bridge
+        app.kubernetes.io/component: controller
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: jira-bridge
+          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+            - name: ARGOCD_NAMESPACE
+              value: {{ .Values.argocdNamespace | quote }}
+            - name: STATE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: STATE_CONFIGMAP_NAME
+              value: {{ .Values.stateConfigMapName | quote }}
+            - name: POLL_INTERVAL_SECONDS
+              value: {{ .Values.pollIntervalSeconds | quote }}
+            - name: JIRA_BASE_URL
+              value: {{ .Values.jira.baseUrl | quote }}
+            - name: JIRA_PROJECT_KEY
+              value: {{ .Values.jira.projectKey | quote }}
+            - name: JIRA_USER_EMAIL
+              value: {{ .Values.jira.userEmail | quote }}
+            - name: JIRA_ISSUE_TYPE_NAME
+              value: {{ .Values.jira.issueTypeName | quote }}
+            - name: JIRA_INFO_ISSUE_LABELS
+              value: {{ join "," .Values.jira.infoIssueLabels | quote }}
+            - name: JIRA_SEV1_ISSUE_LABELS
+              value: {{ join "," .Values.jira.sev1IssueLabels | quote }}
+            - name: JIRA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name | quote }}
+                  key: {{ .Values.secret.tokenKey | quote }}
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

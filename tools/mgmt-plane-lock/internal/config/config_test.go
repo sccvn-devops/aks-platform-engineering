@@ -65,3 +65,39 @@ func TestLoadScalerRejectsMissingClusterName(t *testing.T) {
 		t.Fatal("LoadScaler() error = nil, want validation error")
 	}
 }
+
+func TestLoadJiraBridgeDefaults(t *testing.T) {
+	t.Setenv("CLUSTER_NAME", "mgmt-we")
+	t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+	t.Setenv("JIRA_PROJECT_KEY", "IDP")
+	t.Setenv("JIRA_TOKEN", "token")
+
+	cfg, err := LoadJiraBridge()
+	if err != nil {
+		t.Fatalf("LoadJiraBridge() error = %v", err)
+	}
+
+	if cfg.ArgoCDNamespace != "argocd" {
+		t.Fatalf("ArgoCDNamespace = %q, want argocd", cfg.ArgoCDNamespace)
+	}
+	if cfg.StateNamespace != "jira-bridge" {
+		t.Fatalf("StateNamespace = %q, want jira-bridge", cfg.StateNamespace)
+	}
+	if cfg.StateConfigMapName != "jira-bridge-state" {
+		t.Fatalf("StateConfigMapName = %q, want jira-bridge-state", cfg.StateConfigMapName)
+	}
+	if cfg.JiraIssueTypeName != "Task" {
+		t.Fatalf("JiraIssueTypeName = %q, want Task", cfg.JiraIssueTypeName)
+	}
+	if cfg.PollInterval != 5*time.Second {
+		t.Fatalf("PollInterval = %s, want 5s", cfg.PollInterval)
+	}
+}
+
+func TestLoadJiraBridgeRejectsMissingRequiredValues(t *testing.T) {
+	t.Setenv("CLUSTER_NAME", "mgmt-we")
+
+	if _, err := LoadJiraBridge(); err == nil {
+		t.Fatal("LoadJiraBridge() error = nil, want validation error")
+	}
+}

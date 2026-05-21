@@ -1,0 +1,13 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: myapp-default-deny-ingress
+  namespace: placeholder-workload
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: myapp
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress

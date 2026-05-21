@@ -1,0 +1,29 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: prod-workload-policies
+policies:
+  - ../../overlays/prod-workload
+resources:
+  - ./resources/platform-acr-image.yaml
+  - ./resources/prod-deployment.yaml
+  - ./resources/prod-rollout.yaml
+results:
+  - policy: kyverno-verify-acr-images
+    rule: verify-platform-acr-images-with-cosign
+    resources:
+      - storefront
+    kind: Pod
+    result: fail
+  - policy: kyverno-prod-requires-rollout
+    rule: reject-deployments-in-prod-application-namespaces
+    resources:
+      - storefront
+    kind: Deployment
+    result: fail
+  - policy: kyverno-prod-requires-rollout
+    rule: reject-deployments-in-prod-application-namespaces
+    resources:
+      - storefront
+    kind: Rollout
+    result: skip

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: argocd-jira-bridge
+description: Watches Argo CD Application state and opens Jira issues for failures and drift correction events.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

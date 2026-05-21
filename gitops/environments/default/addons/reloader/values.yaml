@@ -1,0 +1,12 @@
+reloader:
+  watchGlobally: false
+  namespaceSelector: "kubernetes.io/metadata.name=jenkins"
+
+  deployment:
+    nodeSelector:
+      nodepool: cipool
+    tolerations:
+      - key: workload
+        operator: Equal
+        value: ci
+        effect: NoSchedule

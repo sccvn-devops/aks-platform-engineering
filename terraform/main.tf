@@ -37,6 +37,7 @@ locals {
     enable_kargo                           = try(var.addons.enable_kargo, true) # installed by default
     kargo_chart_version                    = var.addons_versions[0].kargo_chart_version
     enable_kyverno                         = true
+    enable_external_secrets                = true
     enable_kube_prometheus_stack           = try(var.addons.enable_kube_prometheus_stack, false)
     enable_metrics_server                  = try(var.addons.enable_metrics_server, false)
     enable_prometheus_adapter              = try(var.addons.enable_prometheus_adapter, false)
@@ -51,10 +52,17 @@ locals {
   cluster_metadata = merge(local.environment_metadata, local.addons_metadata)
 
   environment_metadata = {
-    infrastructure_provider       = var.infrastructure_provider
-    akspe_identity_id             = azurerm_user_assigned_identity.akspe.client_id
-    crossplane_identity_client_id = azurerm_user_assigned_identity.crossplane.client_id
-    git_public_ssh_key            = var.git_public_ssh_key
+    infrastructure_provider          = var.infrastructure_provider
+    akspe_identity_id                = azurerm_user_assigned_identity.akspe.client_id
+    crossplane_identity_client_id    = azurerm_user_assigned_identity.crossplane.client_id
+    git_public_ssh_key               = var.git_public_ssh_key
+    jenkins_bitbucket_server_url     = var.jenkins_bitbucket_server_url
+    jenkins_bitbucket_repo_owner     = var.jenkins_bitbucket_repo_owner
+    jenkins_service_repository       = var.jenkins_service_repository
+    jenkins_platform_gitops_repo_url = var.jenkins_platform_gitops_repo_url
+    jira_base_url                    = var.jira_base_url
+    jira_project_key                 = var.jira_project_key
+    jira_service_account_email       = var.jira_service_account_email
   }
 
   addons_metadata = {
@@ -535,11 +543,30 @@ module "gitops_bridge_bootstrap" {
     environment  = local.environment
     metadata = merge(local.cluster_metadata,
       {
-        kubelet_identity_client_id    = module.aks.kubelet_identity[0].client_id
-        subscription_id               = data.azurerm_subscription.current.subscription_id
-        tenant_id                     = data.azurerm_subscription.current.tenant_id
-        mgmt_lease_blob_url           = azurerm_storage_blob.mgmt_active.url
-        mgmt_lease_identity_client_id = azurerm_user_assigned_identity.mgmt_cluster["mgmt-we"].client_id
+        aks_node_resource_group                     = module.aks.node_resource_group
+        kubelet_identity_client_id                  = module.aks.kubelet_identity[0].client_id
+        subscription_id                             = data.azurerm_subscription.current.subscription_id
+        tenant_id                                   = data.azurerm_subscription.current.tenant_id
+        mgmt_lease_blob_url                         = azurerm_storage_blob.mgmt_active.url
+        mgmt_lease_identity_client_id               = azurerm_user_assigned_identity.mgmt_cluster["mgmt-we"].client_id
+        external_secrets_identity_client_id         = azurerm_user_assigned_identity.external_secrets_mgmt_we.client_id
+        external_secrets_vault_url                  = azurerm_key_vault.management_ci.vault_uri
+        management_ci_key_vault_name                = azurerm_key_vault.management_ci.name
+        jenkins_admin_username_secret_name          = azurerm_key_vault_secret.jenkins_admin_username.name
+        jenkins_admin_password_secret_name          = azurerm_key_vault_secret.jenkins_admin_password.name
+        jenkins_bitbucket_token_secret_name         = azurerm_key_vault_secret.jenkins_bitbucket_workspace_token.name
+        jenkins_jira_token_secret_name              = azurerm_key_vault_secret.jenkins_jira_service_account_token.name
+        jenkins_https_keystore_secret_name          = azurerm_key_vault_secret.jenkins_webhook_https_keystore.name
+        jenkins_https_keystore_password_secret_name = azurerm_key_vault_secret.jenkins_webhook_https_keystore_password.name
+        jenkins_identity_client_id                  = azurerm_user_assigned_identity.jenkins.client_id
+        jenkins_webhook_internal_lb_ip              = var.jenkins_webhook_internal_load_balancer_ip
+        jenkins_webhook_frontend_hostname           = azurerm_cdn_frontdoor_endpoint.jenkins_webhook.host_name
+        cosign_signing_key_name                     = azurerm_key_vault_key.management_ci_cosign.name
+        cosign_signing_key_versionless_id           = azurerm_key_vault_key.management_ci_cosign.versionless_id
+        velero_identity_client_id                   = azurerm_user_assigned_identity.velero.client_id
+        velero_backup_storage_account_name          = azurerm_storage_account.mgmt_backup.name
+        velero_backup_container_name                = azurerm_storage_container.mgmt_backup.name
+        velero_backup_resource_group_name           = azurerm_resource_group.this.name
     })
     addons = merge(local.addons, {
       "env"                            = "control-plane"

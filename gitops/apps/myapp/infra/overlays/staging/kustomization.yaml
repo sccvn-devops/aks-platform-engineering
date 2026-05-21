@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target:
+      kind: Namespace
+      name: placeholder-infra
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: myapp-infra-staging
+      - op: add
+        path: /metadata/labels/environment
+        value: staging
+  - target:
+      kind: ConfigMap
+      name: myapp-infra-config
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: myapp-infra-staging
+      - op: add
+        path: /metadata/labels/environment
+        value: staging
+      - op: replace
+        path: /data/environment
+        value: staging

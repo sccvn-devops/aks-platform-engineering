@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - platform-namespaces.yaml
+  - require-management-namespace-tier-platform.yaml
+  - reject-pods-without-platform-namespace.yaml

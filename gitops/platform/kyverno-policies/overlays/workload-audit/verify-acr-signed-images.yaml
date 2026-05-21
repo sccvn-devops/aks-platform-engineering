@@ -1,0 +1,44 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kyverno-verify-acr-images
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  background: false
+  webhookConfiguration:
+    timeoutSeconds: 30
+  rules:
+    - name: verify-platform-acr-images-with-cosign
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - kyverno
+                - external-secrets
+      verifyImages:
+        - imageReferences:
+            - "acrplatformprod.azurecr.io/*"
+          failureAction: Audit
+          required: true
+          mutateDigest: false
+          verifyDigest: false
+          imageRegistryCredentials:
+            helpers:
+              - azure
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    publicKeys: "k8s://kyverno/cosign-public-key"
+                    rekor:
+                      ignoreTlog: true

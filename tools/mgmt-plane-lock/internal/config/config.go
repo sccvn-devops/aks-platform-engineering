@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,21 @@ type Scaler struct {
 	StatusConfigMap string
 	ArgoCDNamespace string
 	PollInterval    time.Duration
+}
+
+type JiraBridge struct {
+	ClusterName         string
+	ArgoCDNamespace     string
+	StateNamespace      string
+	StateConfigMapName  string
+	PollInterval        time.Duration
+	JiraBaseURL         string
+	JiraProjectKey      string
+	JiraUserEmail       string
+	JiraToken           string
+	JiraIssueTypeName   string
+	JiraInfoIssueLabels []string
+	JiraSev1IssueLabels []string
 }
 
 func LoadController() (Controller, error) {
@@ -104,6 +120,41 @@ func LoadScaler() (Scaler, error) {
 	return cfg, nil
 }
 
+func LoadJiraBridge() (JiraBridge, error) {
+	cfg := JiraBridge{
+		ClusterName:         os.Getenv("CLUSTER_NAME"),
+		ArgoCDNamespace:     getEnv("ARGOCD_NAMESPACE", defaultArgoCDNamespace),
+		StateNamespace:      getEnv("STATE_NAMESPACE", "jira-bridge"),
+		StateConfigMapName:  getEnv("STATE_CONFIGMAP_NAME", "jira-bridge-state"),
+		PollInterval:        getDurationEnv("POLL_INTERVAL_SECONDS", defaultPollInterval),
+		JiraBaseURL:         os.Getenv("JIRA_BASE_URL"),
+		JiraProjectKey:      os.Getenv("JIRA_PROJECT_KEY"),
+		JiraUserEmail:       os.Getenv("JIRA_USER_EMAIL"),
+		JiraToken:           os.Getenv("JIRA_TOKEN"),
+		JiraIssueTypeName:   getEnv("JIRA_ISSUE_TYPE_NAME", "Task"),
+		JiraInfoIssueLabels: getCSVEnv("JIRA_INFO_ISSUE_LABELS", []string{"argocd", "platform", "informational"}),
+		JiraSev1IssueLabels: getCSVEnv("JIRA_SEV1_ISSUE_LABELS", []string{"argocd", "platform", "sev1"}),
+	}
+
+	if cfg.ClusterName == "" {
+		return JiraBridge{}, errors.New("CLUSTER_NAME is required")
+	}
+	if cfg.PollInterval <= 0 {
+		return JiraBridge{}, fmt.Errorf("POLL_INTERVAL_SECONDS must be positive, got %s", cfg.PollInterval)
+	}
+	if cfg.JiraBaseURL == "" {
+		return JiraBridge{}, errors.New("JIRA_BASE_URL is required")
+	}
+	if cfg.JiraProjectKey == "" {
+		return JiraBridge{}, errors.New("JIRA_PROJECT_KEY is required")
+	}
+	if cfg.JiraToken == "" {
+		return JiraBridge{}, errors.New("JIRA_TOKEN is required")
+	}
+
+	return cfg, nil
+}
+
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -123,4 +174,25 @@ func getDurationEnv(key string, fallback time.Duration) time.Duration {
 	}
 
 	return time.Duration(seconds) * time.Second
+}
+
+func getCSVEnv(key string, fallback []string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return append([]string(nil), fallback...)
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	if len(result) == 0 {
+		return append([]string(nil), fallback...)
+	}
+
+	return result
 }

@@ -178,7 +178,7 @@
       ],
       "priority": 10,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by adding workload-scoped Azure Workload Identity plumbing in `terraform/external_secrets.tf` for the four workload clusters, including per-cluster user-assigned identities, federated identity credentials, `Key Vault Secrets User` role assignments, and seeded `eso-smoke-test` secrets in each workload Key Vault. Extended Argo CD cluster registration metadata in `terraform/argocd_bootstrap.tf` so workload clusters advertise the ESO identity client ID, vault URL, and smoke-test secret name, and enabled the addon through cluster labels. Added GitOps packaging for the ESO operator in `gitops/bootstrap/control-plane/addons/oss/addons-external-secrets-appset.yaml` with cluster-scoped store features disabled, plus a workload bootstrap chart in `gitops/platform/external-secrets-bootstrap/` and `gitops/bootstrap/control-plane/addons/oss/addons-external-secrets-bootstrap.yaml` that creates a namespace-scoped `SecretStore`, workload-identity `ServiceAccount`, and smoke-test `ExternalSecret` per workload cluster. Local verification is limited to static rendering and `terraform validate`; live reconciliation on AKS and confirmation that the `ExternalSecret` syncs from Azure Key Vault remain blocked until the stack is applied against Azure (`az login` required)."
     },
     {
       "id": "US-011",
@@ -195,7 +195,7 @@
       ],
       "priority": 11,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by enabling Kyverno in `terraform/argocd_bootstrap.tf` for every registered cluster, updating `gitops/bootstrap/control-plane/addons/oss/addons-kyverno-appset.yaml` so the addon targets all clusters carrying the bootstrap labels (including the in-cluster management plane), and adding a companion `addons-kyverno-policies` `ApplicationSet` to roll out policy bundles from `gitops/platform/kyverno-policies/`. The new policy package applies `kyverno-required-cluster-secret-labels` everywhere, labels core management namespaces with `tier=platform`, enforces `tier=platform` on management namespaces and rejects Pods in unlabeled management namespaces, and adds `kyverno-prod-requires-rollout` on production clusters to block `Deployment` resources outside exempt system namespaces. Added Kyverno CLI regression fixtures under `gitops/platform/kyverno-policies/tests/` for conformant and non-conformant cluster Secret, Namespace, Pod, and prod Deployment cases. Local verification remains limited to static rendering (`terraform validate`, `kubectl kustomize`); live policy activation on AKS and `kyverno test` execution are still blocked in this workspace because Azure access (`az login`) and the Kyverno CLI are not available."
     },
     {
       "id": "US-011b",
@@ -212,7 +212,7 @@
       ],
       "priority": 12,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by extending `terraform/external_secrets.tf`, `terraform/variables.tf`, and `terraform/argocd_bootstrap.tf` so each workload Key Vault now stores a `cosign-public-key` secret, the shared External Secrets workload identity is federated for both `platform-secrets` and `kyverno` service accounts, and Argo CD cluster registration advertises the ACR login server plus the Cosign secret name. Generalized `gitops/platform/external-secrets-bootstrap/` to render multiple `ExternalSecret` resources per release, kept the workload smoke-test bootstrap in `addons-external-secrets-bootstrap.yaml`, and added `addons-kyverno-cosign-key-bootstrap.yaml` so each workload cluster syncs a `kyverno/cosign-public-key` Secret with the required `cosign.pub` key from AKV. Added workload-specific Kyverno policy overlays in `gitops/platform/kyverno-policies/overlays/` and updated `addons-kyverno-policies-appset.yaml` so dev clusters get the ACR Cosign verification policy in `Audit` mode while staging and prod clusters get `Enforce`, with prod also retaining the existing rollout-only admission guard. Local verification passed with `terraform validate`, `helm template gitops/platform/external-secrets-bootstrap`, and `kubectl kustomize` against the new workload overlays. Live unsigned-image rejection on AKS and `kyverno test` execution remain blocked in this workspace because Azure runtime access (`az login`) and the Kyverno CLI are not available."
     },
     {
       "id": "US-012",
@@ -234,7 +234,7 @@
       ],
       "priority": 13,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by adding management-cluster Jenkins infrastructure and GitOps packaging for `mgmt-we`. Terraform now provisions a dedicated management CI Key Vault (`kv-platform-mgmt-we`) with private access, seeded Jenkins admin / Bitbucket / Jira secrets, a management-cluster External Secrets workload identity for the `jenkins` namespace, federated workload identity bindings for the Jenkins controller and agent service accounts, and a GRS Velero backup storage account plus Velero workload identity scoped for blob access and snapshots (`terraform/jenkins.tf`, `terraform/velero.tf`, `terraform/main.tf`, `terraform/variables.tf`, `terraform/outputs.tf`). GitOps now bootstraps Jenkins secrets from AKV via ESO, deploys Reloader, deploys Jenkins from the upstream Helm chart with a single controller replica, `ReadWriteOnce` Premium Azure Disk persistence, `terminationGracePeriodSeconds: 300`, `/login` liveness and `/whoAmI/api/json` readiness probes, controller and ephemeral agent scheduling onto `cipool`, and JCasC-managed Bitbucket/Jira string credentials sourced from synced Kubernetes Secrets (`gitops/bootstrap/control-plane/addons/oss/addons-jenkins-secrets-bootstrap.yaml`, `addons-reloader-appset.yaml`, `addons-jenkins-appset.yaml`, `gitops/environments/default/addons/jenkins/values.yaml`, `gitops/environments/default/addons/reloader/values.yaml`). Added a Jenkins-scoped Velero addon with a 6-hour backup schedule, 30-day retention, and Azure workload identity against GRS blob storage (`gitops/bootstrap/control-plane/addons/oss/addons-velero-appset.yaml`, `gitops/environments/default/addons/velero/values.yaml`). Local verification passed with `terraform validate`, `helm template jenkins jenkins/jenkins`, `helm template velero velero/velero`, and `helm template` for the `external-secrets-bootstrap` chart. Live verification in AKS, Azure-authenticated plan/apply (`az login` required), and the browser-based acceptance check remain blocked in this workspace; the `dev-browser` skill referenced by the PRD is also not available in this session."
     },
     {
       "id": "US-013",
@@ -251,7 +251,7 @@
       ],
       "priority": 14,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by extending the Jenkins addon bootstrap in `gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml` and `gitops/environments/default/addons/jenkins/values.yaml`. Jenkins now installs the Bitbucket multibranch support plugins (`cloudbees-bitbucket-branch-source`, `bitbucket`, `pipeline-multibranch-defaults`, `config-file-provider`, and `bitbucket-scm-trait-commit-skip`), converts the Bitbucket workspace token into a `usernamePassword` credential for Bitbucket Cloud access, seeds a centrally managed default multibranch Jenkinsfile, and bootstraps a Bitbucket multibranch job for the configured service repository. The default pipeline commits with `git -c user.name=PlatformBot`, includes the defensive `[ci skip]` marker, only rewrites `apps/<svc>/workload/overlays/dev/`, and retries the GitOps push up to 5 times with `git pull --rebase`. The SCM source is also patched with `WebhookConfigurationTrait.committersToIgnore(\"PlatformBot\")` and `BitbucketBranchCommitSkipTrait` to prevent bot-authored webhook loops. Local verification passed with `terraform validate`, `terraform fmt`, and `helm template jenkins jenkins/jenkins --version 5.9.22 -f gitops/environments/default/addons/jenkins/values.yaml`. The story remains open because live Bitbucket/Jenkins webhook behaviour and the end-to-end image-build-to-GitOps flow have not been exercised in this workspace, and the exact acceptance criterion of a regex-based author filter (`^(?!PlatformBot).*$`) is approximated here via Bitbucket username ignore traits because that is what the installed Jenkins plugins expose."
     },
     {
       "id": "US-013b",
@@ -268,7 +268,7 @@
       ],
       "priority": 15,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by extending the management Jenkins path to sign every ACR image with an Azure Key Vault-backed Cosign key. Terraform now provisions a dedicated `cosign-signing-key` in `kv-platform-mgmt-we`, grants the Jenkins workload identity `Key Vault Crypto User`, exposes the key metadata through GitOps bridge annotations, and derives the workload-cluster `cosign-public-key` secrets directly from the AKV key’s `public_key_pem` so Kyverno verification stays aligned (`terraform/jenkins.tf`, `terraform/external_secrets.tf`, `terraform/main.tf`, `terraform/outputs.tf`). The Jenkins multibranch default pipeline in `gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml` now runs on a workload-identity-enabled Kubernetes agent, logs into Azure with the projected federated token, builds and pushes the image via `az acr build`, signs the pushed digest with `cosign sign --key azurekms://kv-platform-mgmt-we.vault.azure.net/cosign-signing-key`, publishes a build attestation alongside the image in ACR, and immediately verifies the produced signature with `cosign verify`. Local verification is limited to static rendering and `terraform validate`; live ACR build/sign execution, the post-push `cosign verify` path against Azure, and the end-to-end unsigned-image rejection check on a staging cluster remain blocked in this workspace until the stack is applied with Azure credentials (`az login` required)."
     },
     {
       "id": "US-014",
@@ -283,7 +283,7 @@
       ],
       "priority": 16,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by adding a dedicated Jenkins webhook ingress path through Azure Front Door and Azure Firewall. Terraform now provisions a Standard Front Door profile/endpoint/route plus a WAF policy that only allows the current Atlassian Bitbucket Cloud IPv4 egress CIDRs, and adds an Azure Firewall DNAT rule that forwards HTTPS webhook traffic from the firewall public IP to an internal Jenkins load balancer on `mgmt-we` (`terraform/jenkins_webhook.tf`, `terraform/variables.tf`, `terraform/outputs.tf`). Extended the management CI Key Vault bootstrap in `terraform/jenkins.tf` and the GitOps bridge metadata in `terraform/main.tf` so Jenkins HTTPS keystore material can be sourced from AKV through External Secrets. Updated the Jenkins secrets bootstrap and addon ApplicationSet (`gitops/bootstrap/control-plane/addons/oss/addons-jenkins-secrets-bootstrap.yaml`, `addons-jenkins-appset.yaml`) so Jenkins now runs behind an internal Azure load balancer, terminates HTTPS from a mounted keystore secret, advertises the Front Door hostname as its public URL, and keeps Kubernetes agents working over the internal service with TLS verification disabled for the self-managed controller certificate path. Local verification passed with `terraform fmt -recursive`, `terraform validate`, and `helm template jenkins jenkins/jenkins --version 5.9.22 ...` using the new HTTPS and internal-load-balancer overrides. Live end-to-end webhook delivery (`Bitbucket push -> Front Door -> Firewall DNAT -> Jenkins build`) and certificate validation against a real keystore remain blocked in this workspace until Azure credentials are available (`az login`) and real Bitbucket webhook traffic can be exercised."
     },
     {
       "id": "US-015",
@@ -303,7 +303,7 @@
       ],
       "priority": 17,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by adding dedicated Argo CD `AppProject`s and two-tier bootstrap `ApplicationSet`s in `gitops/bootstrap/control-plane/addons/oss/`: `platform-infra-set.yaml` now generates `<svc>-infra-<env>` Applications from `gitops/apps/*/infra/overlays/<env>` with non-pruning automated sync, self-heal, retry limit 10, `ServerSideApply=true`, and `ApplyOutOfSyncOnly=true`; `workloads-set.yaml` now generates `<svc>-app-<env>-<cluster>` Applications for workload clusters selected by `role=workload` and `env`, with pruning enabled, self-heal, retry limit 5, and the same sync options. Added a concrete sample service layout under `gitops/apps/myapp/{infra,workload}/...` so the generators target real overlay directories and the blueprint sync-wave ranges are visible in rendered manifests (`infra` waves `0..1`, workload resource waves `-1..4`). Local verification passed with `kubectl kustomize` for all six sample overlays. Live Argo CD reconciliation, generated Application health, and the runtime dependency behavior between infra and workload tiers remain unverified in this workspace."
     },
     {
       "id": "US-016",
@@ -320,7 +320,7 @@
       ],
       "priority": 18,
       "passes": false,
-      "notes": ""
+      "notes": "Implemented on 2026-05-21 by adding a dedicated `argocd-jira-bridge` controller in `tools/mgmt-plane-lock/cmd/argocd-jira-bridge/main.go` with transition classification logic in `tools/mgmt-plane-lock/internal/jirabridge/`. The bridge polls Argo CD `Application` resources, persists last-seen sync and health state in a namespace-scoped ConfigMap to avoid duplicate tickets, creates Jira issues for failed syncs and drift-correction recoveries, and raises `[SEV1]` issues when a degraded application message indicates rollout or analysis failure. Added GitOps packaging in `gitops/platform/argocd-jira-bridge/` plus management-cluster bootstrap manifests `gitops/bootstrap/control-plane/addons/oss/addons-argocd-jira-bridge*.yaml` so `mgmt-we` syncs the Jira token from Azure Key Vault via External Secrets and deploys the bridge as the `jira-bridge` workload that controller-scaler already manages. Terraform now exposes Jira base URL, project key, and optional Jira account email through cluster metadata (`terraform/variables.tf`, `terraform/main.tf`) so the addon can authenticate against Jira Cloud with either Basic auth or Bearer token flows. Local runtime verification against Jira and live Argo CD event generation remain blocked in this workspace because no Azure-authenticated apply has been run (`az login` required), the Go toolchain is not currently installed here, and no Jira credentials or reachable Jira endpoint are available for an end-to-end exercise."
     },
     {
       "id": "US-017",

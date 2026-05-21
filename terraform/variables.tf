@@ -257,3 +257,157 @@ variable "postgres_password" {
   type        = string
   default     = "secretPassword123!"
 }
+
+variable "jenkins_admin_username" {
+  description = "Bootstrap admin username to seed in the management Key Vault for Jenkins."
+  type        = string
+  default     = "platform-admin"
+}
+
+variable "jenkins_admin_password" {
+  description = "Bootstrap admin password to seed in the management Key Vault for Jenkins."
+  type        = string
+  default     = "ChangeMe-Jenkins-Admin-123!"
+}
+
+variable "jenkins_bitbucket_workspace_token" {
+  description = "Bootstrap Bitbucket workspace token to seed in the management Key Vault for Jenkins."
+  type        = string
+  default     = "replace-me-bitbucket-workspace-token"
+}
+
+variable "jenkins_jira_service_account_token" {
+  description = "Bootstrap Jira service account token to seed in the management Key Vault for Jenkins."
+  type        = string
+  default     = "replace-me-jira-service-account-token"
+}
+
+variable "jira_base_url" {
+  description = "Base URL for the Jira Cloud or Jira Data Center instance used by platform automation."
+  type        = string
+  default     = "https://example.atlassian.net"
+}
+
+variable "jira_project_key" {
+  description = "Jira project key where Argo CD incidents and drift events should be created."
+  type        = string
+  default     = "IDP"
+}
+
+variable "jira_service_account_email" {
+  description = "Optional Jira service account email used for Basic auth flows against Jira Cloud. Leave empty to use Bearer token auth."
+  type        = string
+  default     = ""
+}
+
+variable "jenkins_bitbucket_server_url" {
+  description = "Bitbucket base URL used by the Jenkins multibranch source."
+  type        = string
+  default     = "https://bitbucket.org"
+}
+
+variable "jenkins_bitbucket_repo_owner" {
+  description = "Bitbucket workspace or project owner that hosts service repositories scanned by Jenkins."
+  type        = string
+  default     = "platform-prod"
+}
+
+variable "jenkins_service_repository" {
+  description = "Bootstrap service repository name for the Jenkins multibranch pipeline."
+  type        = string
+  default     = "myapp"
+}
+
+variable "jenkins_platform_gitops_repo_url" {
+  description = "Bitbucket HTTPS URL for the platform-gitops repository updated by Jenkins."
+  type        = string
+  default     = "https://bitbucket.org/platform-prod/platform-gitops.git"
+}
+
+variable "jenkins_webhook_internal_load_balancer_ip" {
+  description = "Static private IP assigned to the internal Jenkins load balancer in the mgmt-we AKS subnet."
+  type        = string
+  default     = "10.1.0.50"
+}
+
+variable "jenkins_webhook_https_keystore_base64" {
+  description = "Base64-encoded Jenkins HTTPS keystore content used by the controller to terminate TLS for Bitbucket webhook ingress."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "jenkins_webhook_https_keystore_password" {
+  description = "Password for the Jenkins HTTPS keystore mounted into the controller pod."
+  type        = string
+  sensitive   = true
+  default     = "changeit"
+}
+
+variable "jenkins_webhook_allowed_ipv4_cidrs" {
+  description = "Current Atlassian Bitbucket Cloud IPv4 egress CIDRs allowed to reach the Jenkins webhook endpoint through Front Door and Azure Firewall."
+  type        = list(string)
+  default = [
+    "104.192.136.0/21",
+    "185.166.140.0/22",
+    "34.218.156.209/32",
+    "34.218.168.212/32",
+    "52.41.219.63/32",
+    "104.192.137.240/28",
+    "104.192.143.240/28",
+    "18.136.214.96/28",
+    "13.236.8.224/28",
+    "18.184.99.224/28",
+    "185.166.143.240/28",
+    "52.215.192.224/28",
+    "185.166.142.240/28",
+    "18.234.32.224/28",
+    "104.192.142.240/28",
+    "13.52.5.96/28",
+    "18.246.31.224/28",
+    "104.192.140.240/28",
+    "13.200.41.128/25",
+    "104.192.137.0/24",
+    "104.192.143.0/24",
+    "185.166.143.0/24",
+    "185.166.142.0/24",
+    "104.192.142.0/24",
+    "104.192.140.0/24",
+    "3.216.235.48/32",
+    "34.231.96.243/32",
+    "44.199.3.254/32",
+    "174.129.205.191/32",
+    "44.199.127.226/32",
+    "44.199.45.64/32",
+    "3.221.151.112/32",
+    "52.205.184.192/32",
+    "52.72.137.240/32",
+    "34.232.119.183/32",
+    "35.155.178.254/32",
+    "34.216.18.129/32",
+    "35.171.175.212/32",
+    "35.160.177.10/32",
+    "34.199.54.113/32",
+    "52.204.96.37/32",
+    "34.232.25.90/32",
+    "52.202.195.162/32",
+    "52.54.90.98/32",
+    "52.203.14.55/32",
+    "34.236.25.177/32",
+    "34.233.65.54/32",
+    "34.196.8.197/32",
+    "44.194.7.14/32",
+  ]
+}
+
+variable "cosign_public_key_pem" {
+  description = "PEM-encoded Cosign public key distributed to workload clusters through Azure Key Vault."
+  type        = string
+  sensitive   = true
+  default     = <<-EOT
+  -----BEGIN PUBLIC KEY-----
+  MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPZrfM
+  5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==
+  -----END PUBLIC KEY-----
+  EOT
+}

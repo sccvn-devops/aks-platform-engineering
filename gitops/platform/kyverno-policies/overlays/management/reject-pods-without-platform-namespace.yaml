@@ -1,0 +1,31 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kyverno-reject-pods-without-platform-namespace
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: reject-pods-when-namespace-is-not-platform
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchExpressions:
+                  - key: kubernetes.io/metadata.name
+                    operator: NotIn
+                    values:
+                      - kube-public
+                      - kube-node-lease
+                  - key: tier
+                    operator: NotIn
+                    values:
+                      - platform
+      validate:
+        message: Pods on management clusters may run only in namespaces labeled tier=platform.
+        deny: {}

@@ -1,0 +1,33 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kyverno-prod-requires-rollout
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: reject-deployments-in-prod-application-namespaces
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - argocd
+                - crossplane-system
+                - external-secrets
+                - kargo
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - kyverno
+                - platform-secrets
+      validate:
+        message: Production workloads must use Argo Rollouts instead of Deployments.
+        deny: {}

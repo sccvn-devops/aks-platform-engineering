@@ -1,0 +1,22 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: prod-policies
+policies:
+  - ../../overlays/prod/require-rollout.yaml
+resources:
+  - ./resources/prod-deployment.yaml
+  - ./resources/prod-rollout.yaml
+results:
+  - policy: kyverno-prod-requires-rollout
+    rule: reject-deployments-in-prod-application-namespaces
+    resources:
+      - storefront
+    kind: Deployment
+    result: fail
+  - policy: kyverno-prod-requires-rollout
+    rule: reject-deployments-in-prod-application-namespaces
+    resources:
+      - storefront
+    kind: Rollout
+    result: skip

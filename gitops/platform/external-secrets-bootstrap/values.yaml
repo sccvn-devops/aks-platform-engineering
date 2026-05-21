@@ -1,0 +1,21 @@
+namespace: platform-secrets
+vaultUrl: ""
+
+azure:
+  clientId: ""
+  tenantId: ""
+
+serviceAccount:
+  name: azure-keyvault-reader
+
+secretStore:
+  name: azure-keyvault
+
+externalSecrets:
+  - name: eso-smoke-test
+    targetName: eso-smoke-test
+    refreshInterval: 1h
+    data:
+      - secretKey: value
+        remoteRef:
+          key: "secret/eso-smoke-test"

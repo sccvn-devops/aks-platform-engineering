@@ -1,0 +1,61 @@
+controller:
+  replicas: 1
+  serviceType: ClusterIP
+  numExecutors: 0
+  installLatestPlugins: false
+  initializeOnce: true
+  overwritePlugins: false
+  additionalPlugins:
+    - plain-credentials:199.v9f8e1f741799
+    - credentials-binding:702.vfe613e537e88
+    - job-dsl:3654.vdf58f53e2d15
+    - bitbucket:307.va_9f30d0b_8f0d
+    - cloudbees-bitbucket-branch-source:937.3.1
+    - config-file-provider:1006.vc7366c201f57
+    - pipeline-multibranch-defaults:2.1
+    - bitbucket-scm-trait-commit-skip:0.4.0
+  healthProbes: true
+  probes:
+    livenessProbe:
+      httpGet:
+        path: /login
+        port: http
+    readinessProbe:
+      httpGet:
+        path: /whoAmI/api/json
+        port: http
+  nodeSelector:
+    nodepool: cipool
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ci
+      effect: NoSchedule
+  terminationGracePeriodSeconds: 300
+  JCasC:
+    defaultConfig: true
+
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 100Gi
+  storageClass: managed-csi-premium
+
+rbac:
+  create: true
+
+agent:
+  enabled: true
+  websocket: true
+  podRetention: Never
+  nodeSelector:
+    nodepool: cipool
+  yamlTemplate: |
+    apiVersion: v1
+    kind: Pod
+    spec:
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: ci
+          effect: NoSchedule

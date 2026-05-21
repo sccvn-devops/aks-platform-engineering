@@ -1,0 +1,71 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform-infra-set
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: platform.ste.io/sync-phase
+              operator: In
+              values: ["0"]
+        - matchExpressions:
+            - key: platform.ste.io/sync-phase
+              operator: In
+              values: ["1"]
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: dev
+                  syncPhase: "0"
+                - env: staging
+                  syncPhase: "0"
+                - env: prod
+                  syncPhase: "1"
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/infra
+  template:
+    metadata:
+      name: '{{index .path.segments 2}}-infra-{{.env}}'
+      labels:
+        platform.ste.io/service: '{{index .path.segments 2}}'
+        platform.ste.io/env: '{{.env}}'
+        platform.ste.io/tier: infra
+        platform.ste.io/sync-phase: '{{.syncPhase}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{.syncPhase}}'
+    spec:
+      project: platform-infra
+      source:
+        repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+        targetRevision: HEAD
+        path: '{{.path.path}}/overlays/{{.env}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{index .path.segments 2}}-infra-{{.env}}'
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: true
+        retry:
+          limit: 10
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 30m
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true
