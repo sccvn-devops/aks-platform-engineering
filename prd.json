@@ -393,8 +393,8 @@
         "Typecheck passes"
       ],
       "priority": 22,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented on 2026-05-21 by adding the saas-token-rotator Go binary in tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go and the akvwriter helper package in tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go. The binary is lease-aware (reads mgmt-leader-status ConfigMap, exits if not active), rotates Bitbucket workspace tokens via OAuth2 client credentials flow or Jira API tokens via Atlassian API, writes to both regional AKVs using direct REST calls with azidentity WorkloadIdentity authentication, disables old versions after the 24-hour grace period, and exposes saas_token_age_days Prometheus metric. Added Helm chart in gitops/platform/saas-token-rotator/ with two CronJobs (quarterly schedule), ServiceAccount with workload identity, and SaaSTokenAgeExceeded PrometheusRule (fires if > 100 days). Terraform provisions uami-saas-token-rotator with Key Vault Secrets Officer on the mgmt and both prod vaults in terraform/saas_token_rotator.tf and wires the identity client ID into environment_metadata. ApplicationSet addons-saas-token-rotator-appset.yaml deploys to active mgmt cluster only. terraform validate and helm template pass."
     },
     {
       "id": "US-021",

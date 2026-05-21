@@ -175,3 +175,22 @@
   - RolloutAnalysisFailed uses for: 0s (immediate alert, no 1m wait) to satisfy the "within 1 minute" criterion
   - rollout_phase metric is exported by the Argo Rollouts controller on :8090/metrics
 ---
+
+## 2026-05-21 - US-020
+- Implemented saas-token-rotator Go binary (tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go) using only existing go.mod dependencies (azidentity for auth + net/http for REST calls)
+- Added akvwriter package (internal/akvwriter/akvwriter.go) using AKV REST API with bearer token auth - no new SDK dependency needed
+- Binary checks mgmt-leader-status ConfigMap before running (lease-aware), exits immediately if not active
+- Bitbucket rotation: OAuth2 client_credentials flow to get workspace access token
+- Jira rotation: Atlassian /me/api-tokens endpoint to create new API token
+- Both tokens written to both regional AKVs (KEY_VAULT_WE_URL, KEY_VAULT_NE_URL env vars)
+- Old versions disabled after grace period (24h default) via PATCH secret version attributes
+- saas_token_age_days Prometheus metric exposed
+- SaaSTokenAgeExceeded PrometheusRule in the Helm chart (fires if > 100 days)
+- CronJobs quarterly schedule (0 3 1 */3 *), concurrencyPolicy=Forbid
+- Reloader integration: Reloader watches the k8s Secret that ESO syncs; when the AKV secret changes, ESO updates the k8s Secret, Reloader detects hash change and rolls Jenkins
+- terraform/saas_token_rotator.tf: uami-saas-token-rotator, federated identity for mgmt-we, Key Vault Secrets Officer on mgmt + prod vaults
+- **Learnings for future iterations:**
+  - AKV REST API v7.4 is used directly (no SDK needed) - auth via GetToken from azidentity credential
+  - akvwriter.Client uses net/http with Authorization: Bearer header - simpler than adding new SDK dep
+  - SaaS token rotator runs as CronJob (not Deployment) since it's a one-shot operation
+---

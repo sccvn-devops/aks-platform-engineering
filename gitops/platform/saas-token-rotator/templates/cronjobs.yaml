@@ -1,0 +1,95 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: saas-token-rotator-bitbucket
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: saas-token-rotator
+    token-type: bitbucket
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: saas-token-rotator
+          restartPolicy: OnFailure
+          containers:
+            - name: rotator
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["--token-type=bitbucket", "--grace-period-hours={{ .Values.gracePeriodHours }}"]
+              env:
+                - name: KEY_VAULT_WE_URL
+                  value: {{ .Values.keyVaultWeUrl | quote }}
+                - name: KEY_VAULT_NE_URL
+                  value: {{ .Values.keyVaultNeUrl | quote }}
+                - name: SECRET_NAME
+                  value: {{ .Values.bitbucket.secretName | quote }}
+                - name: BITBUCKET_WORKSPACE
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.bitbucket.workspaceSecretRef.name }}
+                      key: {{ .Values.bitbucket.workspaceSecretRef.workspaceKey }}
+                - name: BITBUCKET_OAUTH_CLIENT_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.bitbucket.workspaceSecretRef.name }}
+                      key: {{ .Values.bitbucket.workspaceSecretRef.clientIdKey }}
+                - name: BITBUCKET_OAUTH_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.bitbucket.workspaceSecretRef.name }}
+                      key: {{ .Values.bitbucket.workspaceSecretRef.clientSecretKey }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: saas-token-rotator-jira
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: saas-token-rotator
+    token-type: jira
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: saas-token-rotator
+          restartPolicy: OnFailure
+          containers:
+            - name: rotator
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["--token-type=jira", "--grace-period-hours={{ .Values.gracePeriodHours }}"]
+              env:
+                - name: KEY_VAULT_WE_URL
+                  value: {{ .Values.keyVaultWeUrl | quote }}
+                - name: KEY_VAULT_NE_URL
+                  value: {{ .Values.keyVaultNeUrl | quote }}
+                - name: SECRET_NAME
+                  value: {{ .Values.jira.secretName | quote }}
+                - name: JIRA_SERVICE_ACCOUNT_EMAIL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.jira.credentialsSecretRef.name }}
+                      key: {{ .Values.jira.credentialsSecretRef.emailKey }}
+                - name: JIRA_CURRENT_API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.jira.credentialsSecretRef.name }}
+                      key: {{ .Values.jira.credentialsSecretRef.tokenKey }}

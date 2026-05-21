@@ -66,6 +66,7 @@ locals {
     kv_prod_we_url                         = azurerm_key_vault.platform["prod-we"].vault_uri
     kv_prod_ne_url                         = azurerm_key_vault.platform["prod-ne"].vault_uri
     akv_sync_exporter_identity_client_id   = azurerm_user_assigned_identity.akv_sync_exporter.client_id
+    saas_rotator_identity_client_id        = azurerm_user_assigned_identity.saas_token_rotator.client_id
   }
 
   addons_metadata = {
