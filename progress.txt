@@ -51,3 +51,16 @@
   - mgmt cluster UAMIs live in `azurerm_user_assigned_identity.mgmt_cluster` (storage.tf), keyed by cluster name; both mgmt-we and mgmt-ne are in this map
   - Storage Blob Data Contributor role is scoped to the container resource_manager_id (not the storage account), which is the minimal-privilege pattern here
 ---
+
+## 2026-05-21 - US-005
+- Verified existing implementation of Premium ACR with NE geo-replication in terraform/acr.tf
+- AcrPull role assigned to all 7 cluster kubelet identities via `local.aks_kubelet_object_ids` (merges mgmt-we from module.aks + remaining 6 from module.aks_clusters for_each)
+- Jenkins UAMI `uami-jenkins` granted AcrPush on the registry
+- Private endpoint in WE hub_private_endpoints subnet with ACR private DNS zone group
+- `terraform validate` passes — no new code changes required
+- Files: terraform/acr.tf, terraform/outputs.tf
+- **Learnings for future iterations:**
+  - Kubelet identity object IDs are assembled in `local.aks_kubelet_object_ids` (acr.tf) merging mgmt-we and the clusters map
+  - Jenkins UAMI `azurerm_user_assigned_identity.jenkins` is defined in acr.tf (not jenkins.tf) since it's ACR-scoped
+  - ACR private endpoint uses subresource_names = ["registry"] (not "blob" or "vault")
+---

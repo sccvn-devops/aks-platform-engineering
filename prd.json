@@ -90,7 +90,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Implemented on 2026-05-20 by adding `terraform/acr.tf` with a shared Premium Azure Container Registry named `acrplatformprod`, geo-replicated to North Europe, with public network access disabled and a private endpoint in the West Europe hub private-endpoint subnet registered against `privatelink.azurecr.io`. Added a reusable Jenkins user-assigned managed identity (`uami-jenkins`) with `AcrPush` on the registry, and granted `AcrPull` on the registry to the kubelet identity of all seven AKS clusters. Exposed registry and Jenkins identity outputs in `terraform/outputs.tf`. Story still needs `terraform plan -refresh=false -lock=false -input=false` verification against Azure, which remains blocked in this workspace until `az login` is completed."
     },
     {
