@@ -145,3 +145,18 @@
   - workload-audit uses failureAction: Audit on verifyImages; workload-enforce uses Enforce
   - Prod namespaces exempt from KyvernoProdRequiresRollout include: argocd, crossplane-system, external-secrets, kargo, kube-system, kube-public, kube-node-lease, kyverno, platform-secrets
 ---
+
+## 2026-05-21 - US-012 through US-017 (batch verification)
+- US-012 (Jenkins): StatefulSet replicas=1, ReadWriteOnce, terminationGracePeriodSeconds=300, cipool scheduling, liveness/readiness probes, Reloader, Velero schedule=0 */6 * * *, ttl=720h (30d)
+- US-013 (Loop prevention): committersToIgnore("PlatformBot"), [ci skip] marker, git -c user.name=PlatformBot, git pull --rebase with 5 retries
+- US-013b (Cosign signing): cosign sign --key azurekms://, az acr build + push, cosign verify in Jenkins pipeline; cosign-signing-key in kv-platform-mgmt-we
+- US-014 (Webhook): terraform/jenkins_webhook.tf with Azure Front Door + Firewall DNAT NAT rule to Jenkins internal LB
+- US-015 (Two-tier AppSets): platform-infra-set.yaml (prune=false, selfHeal=true, retry=10, ServerSideApply, ApplyOutOfSyncOnly) and workloads-set.yaml (prune=true, selfHeal=true, retry=5)
+- US-016 (Jira bridge): argocd-jira-bridge Go controller with SEV1 for rollout analysis failures, drift-corrected events, failed sync tickets; uses jira-service-account-token from AKV
+- US-017 (NamespaceVaultBinding XRD): Crossplane XRD + composition in gitops/platform/crossplane/; namespace-vault-bindings-set.yaml ApplicationSet
+- `terraform validate` passes for all stories
+- **Learnings for future iterations:**
+  - Velero backup schedule is set as a Helm parameter in addons-velero-appset.yaml, not in values.yaml
+  - Jenkins pipeline is bootstrapped via JCasC defaultPipeline in addons-jenkins-appset.yaml (not a separate file)
+  - Two-tier ApplicationSets use goTemplate: true with missingkey=error for strict template rendering
+---
