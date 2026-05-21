@@ -107,3 +107,16 @@
   - ConfigMap name defaults to `mgmt-leader-status` in namespace `kube-system` (can be overridden via env vars)
   - mgmt-cli uses `SetPreferredCluster` (blob metadata) + `Break` (delete lease) operations for failback
 ---
+
+## 2026-05-21 - US-009
+- Verified controller-scaler in tools/mgmt-plane-lock/cmd/controller-scaler/main.go: watches ConfigMap via Kubernetes watch API with ticker fallback
+- scaling.DefaultWorkloads() has: argocd-application-controller (StatefulSet, 3→0), argocd-repo-server (2→0), argocd-server (2→0), crossplane (1→0), external-secrets (1→0), jira-bridge (1→0)
+- Argo Rollouts explicitly absent from DefaultWorkloads (runs independently on workload clusters)
+- UpdateClusterSecretLeaseStatus called on each reconcile to patch lease-status label on ArgoCD cluster Secret
+- Helm chart in gitops/platform/controller-scaler/, bootstrapped via addons-controller-scaler.yaml
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - controller-scaler reconcile reads ConfigMap for current lease status then calls ReconcileWorkloads + UpdateClusterSecretLeaseStatus
+  - Workloads marked Optional=true (ESO, jira-bridge) don't fail reconcile if not present
+  - ClusterName env var identifies this cluster for the ArgoCD Secret label patch
+---
