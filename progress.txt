@@ -194,3 +194,18 @@
   - akvwriter.Client uses net/http with Authorization: Bearer header - simpler than adding new SDK dep
   - SaaS token rotator runs as CronJob (not Deployment) since it's a one-shot operation
 ---
+
+## 2026-05-21 - US-021
+- Added kube-prometheus-stack Helm values (gitops/environments/default/addons/kube-prometheus-stack/values.yaml): cipool scheduling, 30d retention, PagerDuty Alertmanager (critical+warning), Grafana with platform dashboards folder
+- ApplicationSet addons-kube-prometheus-stack-appset.yaml: targets active mgmt cluster, sync-wave=10
+- Platform alert rules in gitops/platform/platform-alerts/: MgmtLeaderLeaseLost (lease stale > 30s for 1m), SaaSTokenAgeExceeded (> 100 days), platform loop SLO recording rules
+- RolloutAnalysisFailed already in gitops/platform/rollout-alerts/ (US-019)
+- PerRegionAKVDualWriteSkew already in gitops/platform/akv-sync-exporter/ (US-018)
+- addons-platform-alerts-appset.yaml deploys to active mgmt cluster
+- terraform validate and helm template pass; browser verification blocked (no az login)
+- **Learnings for future iterations:**
+  - kube-prometheus-stack releases on Prometheus Community Helm charts - check version compatibility
+  - PrometheusRule selector label must be `release: kube-prometheus-stack` to be picked up by the operator
+  - PagerDuty routing_key is read from env var in Alertmanager config; the secret must be set in the alertmanager-kube-prometheus-stack-alertmanager Secret
+  - controller-scaler scales Prometheus+Grafana → 0 on standby (add to DefaultWorkloads if needed)
+---

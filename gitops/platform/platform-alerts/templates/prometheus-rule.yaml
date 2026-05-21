@@ -1,0 +1,55 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: platform-alerts
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: mgmt-plane-lease
+      interval: 15s
+      rules:
+        - alert: MgmtLeaderLeaseLost
+          expr: |
+            (time() - mgmt_leader_lease_renewed_seconds) > 30
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Management-plane lease renewal stale"
+            description: >-
+              The management-plane lease on {{ "{{ $labels.instance }}" }} has not been
+              renewed for {{ "{{ $value | humanizeDuration }}" }} (threshold: 30s).
+              This may indicate that mgmt-we has failed and mgmt-ne has not yet acquired
+              the lease. Check the mgmt-leader-lease Deployment and Azure Storage account.
+            runbook_url: https://github.com/gitops-bridge-dev/aks-platform-engineering/wiki/runbook-mgmt-lease-lost
+
+    - name: saas-token-age
+      interval: 3600s
+      rules:
+        - alert: SaaSTokenAgeExceeded
+          expr: saas_token_age_days > 100
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "SaaS token age exceeded 100 days: {{ "{{ $labels.token }}" }}"
+            description: >-
+              Token {{ "{{ $labels.token }}" }} has not been rotated in
+              {{ "{{ $value | humanize }}" }} days. Run the saas-token-rotator CronJob
+              or investigate why quarterly rotation did not complete.
+            runbook_url: https://github.com/gitops-bridge-dev/aks-platform-engineering/wiki/runbook-saas-token-age
+
+    - name: platform-loop-slos
+      interval: 60s
+      rules:
+        - record: platform:time_to_deploy_seconds:p95
+          expr: histogram_quantile(0.95, sum(rate(argo_rollout_info_replicas_available_bucket[10m])) by (le))
+        - record: platform:drift_correction_mttr_seconds:p95
+          expr: histogram_quantile(0.95, sum(rate(argocd_app_sync_total_bucket{phase="Succeeded"}[30m])) by (le))

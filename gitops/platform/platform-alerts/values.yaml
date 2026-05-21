@@ -1,0 +1,3 @@
+prometheusRule:
+  labels:
+    release: kube-prometheus-stack

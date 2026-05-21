@@ -1,0 +1,102 @@
+prometheus:
+  prometheusSpec:
+    replicas: 1
+    retention: 30d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    tolerations:
+      - key: workload
+        operator: Equal
+        value: ci
+        effect: NoSchedule
+    nodeSelector:
+      nodepool: cipool
+
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ["alertname", "severity"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: pagerduty-critical
+      routes:
+        - match:
+            severity: critical
+          receiver: pagerduty-critical
+        - match:
+            severity: warning
+          receiver: pagerduty-warning
+    receivers:
+      - name: pagerduty-critical
+        pagerduty_configs:
+          - routing_key: "$(PAGERDUTY_INTEGRATION_KEY_CRITICAL)"
+            description: "{{ .GroupLabels.alertname }}: {{ .Annotations.summary }}"
+      - name: pagerduty-warning
+        pagerduty_configs:
+          - routing_key: "$(PAGERDUTY_INTEGRATION_KEY_WARNING)"
+            description: "{{ .GroupLabels.alertname }}: {{ .Annotations.summary }}"
+  alertmanagerSpec:
+    tolerations:
+      - key: workload
+        operator: Equal
+        value: ci
+        effect: NoSchedule
+    nodeSelector:
+      nodepool: cipool
+
+grafana:
+  enabled: true
+  replicas: 1
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ci
+      effect: NoSchedule
+  nodeSelector:
+    nodepool: cipool
+  service:
+    type: ClusterIP
+  persistence:
+    enabled: true
+    size: 5Gi
+  grafana.ini:
+    server:
+      domain: grafana.mgmt-we.internal
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: platform
+          orgId: 1
+          folder: Platform SLOs
+          type: file
+          options:
+            path: /var/lib/grafana/dashboards/platform
+
+kube-state-metrics:
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ci
+      effect: NoSchedule
+  nodeSelector:
+    nodepool: cipool
+
+prometheus-node-exporter:
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ci
+      effect: NoSchedule
