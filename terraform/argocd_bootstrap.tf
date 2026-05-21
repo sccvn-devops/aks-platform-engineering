@@ -130,7 +130,13 @@ resource "kubernetes_secret_v1" "argocd_registered_clusters" {
       acr_login_server    = azurerm_container_registry.platform.login_server
       mgmt_lease_blob_url = azurerm_storage_blob.mgmt_active.url
       }, each.value.role == "management" ? {
-      mgmt_lease_identity_client_id = azurerm_user_assigned_identity.mgmt_cluster[each.key].client_id
+      mgmt_lease_identity_client_id        = azurerm_user_assigned_identity.mgmt_cluster[each.key].client_id
+      velero_identity_client_id            = azurerm_user_assigned_identity.velero.client_id
+      velero_backup_storage_account_name   = azurerm_storage_account.mgmt_backup.name
+      velero_backup_container_name         = azurerm_storage_container.mgmt_backup.name
+      velero_backup_resource_group_name    = azurerm_resource_group.this.name
+      velero_bsl_access_mode               = each.value.lease_status == "active" ? "ReadWrite" : "ReadOnly"
+      velero_schedules_disabled            = each.value.lease_status == "active" ? "false" : "true"
       } : {}, contains(keys(local.external_secrets_workload_clusters), each.key) ? {
       oidc_issuer_url                         = each.value.oidc_issuer_url
       external_secrets_identity_client_id     = azurerm_user_assigned_identity.external_secrets[each.key].client_id

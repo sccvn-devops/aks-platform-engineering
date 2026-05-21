@@ -10,7 +10,7 @@ spec:
     - clusters:
         selector:
           matchLabels:
-            akuity.io/argo-cd-cluster-name: mgmt-we
+            role: management
   template:
     metadata:
       name: addon-{{name}}-velero
@@ -45,7 +45,8 @@ spec:
                     provider: azure
                     bucket: "{{metadata.annotations.velero_backup_container_name}}"
                     default: true
-                    accessMode: ReadWrite
+                    # mgmt-we (active) is ReadWrite; mgmt-ne (standby) is ReadOnly for restore.
+                    accessMode: "{{metadata.annotations.velero_bsl_access_mode}}"
                     config:
                       resourceGroup: "{{metadata.annotations.velero_backup_resource_group_name}}"
                       storageAccount: "{{metadata.annotations.velero_backup_storage_account_name}}"
@@ -59,13 +60,26 @@ spec:
                       subscriptionId: "{{metadata.annotations.subscription_id}}"
               schedules:
                 jenkins-home:
-                  disabled: false
+                  disabled: "{{metadata.annotations.velero_schedules_disabled}}"
                   schedule: "0 */6 * * *"
                   template:
                     includedNamespaces:
                       - jenkins
                     snapshotVolumes: true
                     defaultVolumesToFsBackup: true
+                    ttl: "720h"
+                mgmt-plane:
+                  disabled: "{{metadata.annotations.velero_schedules_disabled}}"
+                  schedule: "30 */6 * * *"
+                  template:
+                    includedNamespaces:
+                      - argocd
+                      - crossplane-system
+                      - external-secrets
+                      - jira-bridge
+                      - kyverno
+                    snapshotVolumes: false
+                    defaultVolumesToFsBackup: false
                     ttl: "720h"
       destination:
         namespace: velero

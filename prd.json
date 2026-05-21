@@ -431,8 +431,8 @@
         "Typecheck passes"
       ],
       "priority": 24,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented on 2026-05-21 by extending addons-velero-appset.yaml to target both management clusters (role=management), using velero_bsl_access_mode annotation to set BSL to ReadWrite on active mgmt-we and ReadOnly on standby mgmt-ne. Added mgmt-plane backup schedule (every 6 hours, offset 30m from Jenkins backup) covering argocd/crossplane-system/external-secrets/jira-bridge/kyverno namespaces, with velero_schedules_disabled=true on mgmt-ne so it only runs on the active cluster. Added velero metadata annotations to mgmt-ne cluster Secret in terraform/argocd_bootstrap.tf and to mgmt-we in terraform/main.tf. Existing Jenkins backup schedule (6h, 30d TTL, GRS storage) retained. terraform validate passes. Live restore validation and multiple-backup confirmation blocked (no az login)."
     },
     {
       "id": "US-023",

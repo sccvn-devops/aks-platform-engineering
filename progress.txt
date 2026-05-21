@@ -209,3 +209,17 @@
   - PagerDuty routing_key is read from env var in Alertmanager config; the secret must be set in the alertmanager-kube-prometheus-stack-alertmanager Secret
   - controller-scaler scales Prometheus+Grafana → 0 on standby (add to DefaultWorkloads if needed)
 ---
+
+## 2026-05-21 - US-022
+- Extended addons-velero-appset.yaml to target role=management (both mgmt-we and mgmt-ne)
+- Added velero_bsl_access_mode annotation: ReadWrite on active, ReadOnly on standby (set in terraform for mgmt-we: always ReadWrite; set conditionally for mgmt-ne based on lease_status)
+- Added velero_schedules_disabled annotation: false on active, true on standby
+- Added mgmt-plane backup schedule (30 */6 * * *) covering argocd, crossplane-system, external-secrets, jira-bridge, kyverno namespaces
+- mgmt-ne can read backups from shared GRS storage account (ReadOnly BSL) for restore operations
+- velero metadata wired in terraform/main.tf (mgmt-we) and terraform/argocd_bootstrap.tf (mgmt-ne conditional)
+- terraform validate passes; live restore test blocked (no az login)
+- **Learnings for future iterations:**
+  - Velero BSL accessMode ReadOnly allows mgmt-ne to list/download backups without creating new ones
+  - velero_bsl_access_mode + velero_schedules_disabled annotations are cluster-specific, set via Terraform per mgmt cluster
+  - Backup schedules use `disabled` field to avoid running on standby cluster
+---

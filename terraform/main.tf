@@ -571,6 +571,8 @@ module "gitops_bridge_bootstrap" {
         velero_backup_storage_account_name          = azurerm_storage_account.mgmt_backup.name
         velero_backup_container_name                = azurerm_storage_container.mgmt_backup.name
         velero_backup_resource_group_name           = azurerm_resource_group.this.name
+        velero_bsl_access_mode                      = "ReadWrite"
+        velero_schedules_disabled                   = "false"
     })
     addons = merge(local.addons, {
       "env"                            = "control-plane"
