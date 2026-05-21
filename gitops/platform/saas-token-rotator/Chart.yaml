@@ -1,0 +1,5 @@
+apiVersion: v2
+name: saas-token-rotator
+description: Lease-aware CronJobs for rotating Bitbucket and Jira tokens into both regional AKVs.
+type: application
+version: 0.1.0

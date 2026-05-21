@@ -1,0 +1,32 @@
+credentials:
+  useSecret: false
+
+initContainers:
+  - name: velero-plugin-for-microsoft-azure
+    image: velero/velero-plugin-for-microsoft-azure:v1.13.0
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
+
+deployNodeAgent: true
+
+nodeSelector:
+  nodepool: cipool
+tolerations:
+  - key: workload
+    operator: Equal
+    value: ci
+    effect: NoSchedule
+
+nodeAgent:
+  nodeSelector:
+    nodepool: cipool
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ci
+      effect: NoSchedule
+
+metrics:
+  enabled: true

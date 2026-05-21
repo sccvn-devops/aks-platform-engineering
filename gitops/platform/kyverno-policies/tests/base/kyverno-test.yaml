@@ -1,0 +1,22 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: base-policies
+policies:
+  - ../../base/required-cluster-secret-labels.yaml
+resources:
+  - ./resources/cluster-secret-pass.yaml
+  - ./resources/cluster-secret-fail.yaml
+results:
+  - policy: kyverno-required-cluster-secret-labels
+    rule: require-argocd-cluster-secret-labels
+    resources:
+      - aks-prod-we
+    kind: Secret
+    result: pass
+  - policy: kyverno-required-cluster-secret-labels
+    rule: require-argocd-cluster-secret-labels
+    resources:
+      - aks-prod-ne
+    kind: Secret
+    result: fail

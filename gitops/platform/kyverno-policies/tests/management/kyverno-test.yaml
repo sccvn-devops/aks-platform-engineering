@@ -1,0 +1,37 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: management-policies
+policies:
+  - ../../overlays/management/require-management-namespace-tier-platform.yaml
+  - ../../overlays/management/reject-pods-without-platform-namespace.yaml
+resources:
+  - ./resources/platform-namespace.yaml
+  - ./resources/unlabeled-namespace.yaml
+  - ./resources/platform-pod.yaml
+  - ./resources/unlabeled-pod.yaml
+results:
+  - policy: kyverno-require-management-namespace-tier-platform
+    rule: require-tier-platform-label
+    resources:
+      - platform-team
+    kind: Namespace
+    result: pass
+  - policy: kyverno-require-management-namespace-tier-platform
+    rule: require-tier-platform-label
+    resources:
+      - unlabeled-team
+    kind: Namespace
+    result: fail
+  - policy: kyverno-reject-pods-without-platform-namespace
+    rule: reject-pods-when-namespace-is-not-platform
+    resources:
+      - api-pod
+    kind: Pod
+    result: pass
+  - policy: kyverno-reject-pods-without-platform-namespace
+    rule: reject-pods-when-namespace-is-not-platform
+    resources:
+      - stray-pod
+    kind: Pod
+    result: fail

@@ -95,3 +95,10 @@ e2e-test-report/
 
 # private _docs
 _docs/
+.serena
+.github/skills
+.github/agents
+# private scripts
+scripts/*
+!scripts/dr-validation/
+!scripts/dr-validation/validate-mgmt-failover.sh

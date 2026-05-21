@@ -1,0 +1,106 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: namespace-vault-bindings-set
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: dev
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/dev
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: dev
+                  enable_external_secrets: "true"
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: staging
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/staging
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: staging
+                  enable_external_secrets: "true"
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: prod
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/prod
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: prod
+                  enable_external_secrets: "true"
+  template:
+    metadata:
+      name: '{{index .path.segments 2}}-namespace-vault-binding-{{.env}}-{{.name}}'
+      labels:
+        platform.ste.io/service: '{{index .path.segments 2}}'
+        platform.ste.io/env: '{{.env}}'
+        platform.ste.io/cluster: '{{.name}}'
+        platform.ste.io/tier: infra
+      annotations:
+        argocd.argoproj.io/sync-wave: "32"
+    spec:
+      project: platform-infra
+      source:
+        repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+        targetRevision: HEAD
+        path: gitops/platform/namespace-vault-binding-claim
+        helm:
+          releaseName: namespace-vault-binding-claim
+          values: |
+            claim:
+              name: "{{index .path.segments 2}}-{{.env}}-{{.name}}"
+              namespace: "{{index .path.segments 2}}-infra-{{.env}}"
+            parameters:
+              serviceName: "{{index .path.segments 2}}"
+              namespace: "{{index .path.segments 2}}-{{.env}}"
+              serviceAccountName: "azure-keyvault-reader"
+              clusterName: "{{.name}}"
+              clusterEnv: "{{.env}}"
+              subscriptionId: "{{metadata.annotations.subscription_id}}"
+              tenantId: "{{metadata.annotations.tenant_id}}"
+              resourceGroupName: "{{metadata.annotations.resource_group_name}}"
+              workloadRegion: "{{metadata.labels.region}}"
+              workloadOidcIssuerUrl: "{{metadata.annotations.oidc_issuer_url}}"
+              keyVaultId: "{{metadata.annotations.external_secrets_vault_id}}"
+              vaultUrl: "{{metadata.annotations.external_secrets_vault_url}}"
+              secretPrefix: "{{index .path.segments 2}}"
+              kubernetesProviderConfigName: "workload-{{.name}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{index .path.segments 2}}-infra-{{.env}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

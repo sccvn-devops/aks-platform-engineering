@@ -1,0 +1,64 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xservicebuses.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  defaultCompositionRef:
+    name: servicebus.azure.platform.cityos.io
+  group: platform.cityos.io
+  names:
+    kind: XServiceBus
+    plural: xservicebuses
+  claimNames:
+    kind: ServiceBus
+    plural: servicebuses
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    region:
+                      type: string
+                      enum:
+                        - westeurope
+                        - northeurope
+                    location:
+                      type: string
+                    resourceGroupName:
+                      type: string
+                    sloClass:
+                      type: string
+                      enum:
+                        - bronze
+                        - silver
+                        - gold
+                      default: bronze
+                    secretName:
+                      type: string
+                      description: Name used for the AKV secret in both regional vaults (e.g. payments-sb-conn)
+                    keyVaultWeId:
+                      type: string
+                      description: Azure Resource ID of the West Europe prod Key Vault for dual-write
+                    keyVaultNeId:
+                      type: string
+                      description: Azure Resource ID of the North Europe prod Key Vault for dual-write
+                  required:
+                    - region
+                    - location
+                    - resourceGroupName
+                    - secretName
+                    - keyVaultWeId
+                    - keyVaultNeId
+              required:
+                - parameters

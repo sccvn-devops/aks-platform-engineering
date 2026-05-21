@@ -1,0 +1,2 @@
+resources:
+  - control-plane-claim.yaml

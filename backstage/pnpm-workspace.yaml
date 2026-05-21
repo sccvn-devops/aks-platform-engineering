@@ -1,0 +1,9 @@
+allowBuilds:
+  '@parcel/watcher': false
+  '@swc/core': false
+  core-js-pure: false
+  cpu-features: true
+  esbuild: false
+  nx: false
+  protobufjs: false
+  ssh2: false

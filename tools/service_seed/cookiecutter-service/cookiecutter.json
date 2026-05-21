@@ -1,0 +1,5 @@
+{
+  "service_name": "Example Service",
+  "service_slug": "example-service",
+  "service_description": "Example service scaffolded by the platform seed job"
+}

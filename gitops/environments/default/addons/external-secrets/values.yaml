@@ -1,0 +1,33 @@
+installCRDs: true
+
+crds:
+  createClusterExternalSecret: false
+  createClusterSecretStore: false
+  createClusterPushSecret: false
+
+processClusterExternalSecret: false
+processClusterStore: false
+processClusterPushSecret: false
+
+rbac:
+  serviceAccountTokenCreate: true
+
+metrics:
+  service:
+    enabled: true
+    annotations:
+      prometheus.io/scrape: "true"
+
+webhook:
+  metrics:
+    service:
+      enabled: true
+      annotations:
+        prometheus.io/scrape: "true"
+
+certController:
+  metrics:
+    service:
+      enabled: true
+      annotations:
+        prometheus.io/scrape: "true"

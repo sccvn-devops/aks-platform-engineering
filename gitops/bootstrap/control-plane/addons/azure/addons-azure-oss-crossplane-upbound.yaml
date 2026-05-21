@@ -53,10 +53,14 @@ spec:
             releaseName: '{{values.addonChart}}'
             ignoreMissingValueFiles: true
             parameters:
+            - name: "deploymentRuntimeConfig.enabled"
+              value: 'true'
+            - name: "deploymentRuntimeConfig.spec.serviceAccountTemplate.metadata.annotations.azure\\.workload\\.identity/client-id"
+              value: '{{metadata.annotations.crossplane_identity_client_id}}'
             - name: "providerConfig.spec.source"
               value: 'OIDCTokenFile'            
             - name: "providerConfig.spec.clientID"
-              value: '{{metadata.annotations.akspe_identity_id}}'
+              value: '{{metadata.annotations.crossplane_identity_client_id}}'
             - name: "providerConfig.spec.subscriptionID"
               value: '{{metadata.annotations.subscription_id}}'
             - name: "providerConfig.spec.tenantID"

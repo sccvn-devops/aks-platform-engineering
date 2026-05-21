@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mgmt-leader-status
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: mgmt-leader-lease
+data:
+  clusterName: {{ .Values.clusterName | quote }}
+  holderIdentity: {{ .Values.clusterName | quote }}
+  leaseBlobURL: {{ .Values.leaseBlobUrl | quote }}
+  leadershipStatus: standby
+  leaseID: ""
+  preferredCluster: ""
+  lastObservedAt: ""
+  lastRenewedAt: ""

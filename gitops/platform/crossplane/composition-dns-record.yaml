@@ -1,0 +1,62 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: dnsrecord.azure.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.cityos.io/v1alpha1
+    kind: XDnsRecord
+  resources:
+    - name: record
+      base:
+        apiVersion: network.azure.upbound.io/v1beta1
+        kind: DNSARecord
+        spec:
+          forProvider:
+            records:
+              - 127.0.0.1
+            resourceGroupName: placeholder
+            ttl: 300
+            zoneName: placeholder
+          providerConfigRef:
+            name: default
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.resourceGroupName
+          toFieldPath: spec.forProvider.resourceGroupName
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.zoneName
+          toFieldPath: spec.forProvider.zoneName
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.records
+          toFieldPath: spec.forProvider.records
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.ttl
+          toFieldPath: spec.forProvider.ttl
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.sloClass
+          toFieldPath: spec.forProvider.ttl
+          policy:
+            fromFieldPath: Optional
+          transforms:
+            - type: map
+              map:
+                bronze: 300
+                silver: 60
+                gold: 30
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: map
+              map:
+                westeurope: azure-westeurope
+                northeurope: azure-northeurope

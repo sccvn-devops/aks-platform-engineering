@@ -1,0 +1,530 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: addons-jenkins
+spec:
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            akuity.io/argo-cd-cluster-name: mgmt-we
+  template:
+    metadata:
+      name: addon-{{name}}-jenkins
+      annotations:
+        argocd.argoproj.io/sync-wave: "36"
+    spec:
+      project: default
+      sources:
+        - repoURL: '{{metadata.annotations.addons_repo_url}}'
+          targetRevision: '{{metadata.annotations.addons_repo_revision}}'
+          ref: values
+        - chart: jenkins
+          repoURL: https://charts.jenkins.io
+          targetRevision: 5.9.22
+          helm:
+            releaseName: jenkins
+            ignoreMissingValueFiles: true
+            valueFiles:
+              - $values/{{metadata.annotations.addons_repo_basepath}}environments/default/addons/jenkins/values.yaml
+              - $values/{{metadata.annotations.addons_repo_basepath}}environments/{{metadata.labels.environment}}/addons/jenkins/values.yaml
+              - $values/{{metadata.annotations.addons_repo_basepath}}environments/clusters/{{name}}/addons/jenkins/values.yaml
+            values: |
+              controller:
+                admin:
+                  createSecret: false
+                  existingSecret: jenkins-admin
+                  userKey: jenkins-admin-user
+                  passwordKey: jenkins-admin-password
+                serviceType: LoadBalancer
+                servicePort: 443
+                targetPort: 8443
+                loadBalancerIP: "{{metadata.annotations.jenkins_webhook_internal_lb_ip}}"
+                serviceAnnotations:
+                  service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+                  service.beta.kubernetes.io/azure-load-balancer-internal-subnet: "snet-aks"
+                  service.beta.kubernetes.io/azure-load-balancer-resource-group: "{{metadata.annotations.aks_node_resource_group}}"
+                  service.beta.kubernetes.io/azure-load-balancer-ipv4: "{{metadata.annotations.jenkins_webhook_internal_lb_ip}}"
+                jenkinsUrlProtocol: https
+                jenkinsUrl: "https://{{metadata.annotations.jenkins_webhook_frontend_hostname}}"
+                httpsKeyStore:
+                  enable: true
+                  jenkinsHttpsJksSecretName: jenkins-webhook-https
+                  jenkinsHttpsJksSecretKey: jenkins-jks-file
+                  jenkinsHttpsJksPasswordSecretName: jenkins-webhook-https
+                  jenkinsHttpsJksPasswordSecretKey: https-jks-password
+                  httpPort: 8081
+                additionalExistingSecrets:
+                  - name: bitbucket-workspace-token
+                    keyName: token
+                  - name: jira-service-account-token
+                    keyName: token
+                podLabels:
+                  azure.workload.identity/use: "true"
+                statefulSetAnnotations:
+                  secret.reloader.stakater.com/reload: "jenkins-admin,bitbucket-workspace-token,jira-service-account-token,jenkins-webhook-https"
+                JCasC:
+                  configScripts:
+                    platform-credentials: |
+                      credentials:
+                        system:
+                          domainCredentials:
+                            - credentials:
+                                - usernamePassword:
+                                    scope: GLOBAL
+                                    id: bitbucket-workspace-token
+                                    description: Bitbucket workspace token sourced from Azure Key Vault
+                                    username: x-token-auth
+                                    password: "${bitbucket-workspace-token-token}"
+                                - string:
+                                    scope: GLOBAL
+                                    id: jira-service-account-token
+                                    description: Jira service account token sourced from Azure Key Vault
+                                    secret: "${jira-service-account-token-token}"
+                    platform-managed-files: |
+                      unclassified:
+                        globalConfigFiles:
+                          configs:
+                            - custom:
+                                id: platform-service-default-jenkinsfile
+                                name: platform-service-default-jenkinsfile
+                                comment: Default platform multibranch pipeline with GitOps loop prevention
+                                content: |
+                                  pipeline {
+                                    agent {
+                                      kubernetes {
+                                        defaultContainer 'azure-cli'
+                                        yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    azure.workload.identity/use: "true"
+spec:
+  serviceAccountName: jenkins-agent
+  nodeSelector:
+    nodepool: cipool
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ci
+      effect: NoSchedule
+  containers:
+    - name: azure-cli
+      image: mcr.microsoft.com/azure-cli:2.64.0
+      command:
+        - cat
+      tty: true
+      env:
+        - name: HOME
+          value: /home/jenkins/agent
+'''
+                                      }
+                                    }
+                                    options {
+                                      disableConcurrentBuilds()
+                                      skipDefaultCheckout(true)
+                                    }
+                                    environment {
+                                      ACR_LOGIN_SERVER = "{{metadata.annotations.acr_login_server}}"
+                                      COSIGN_KEY_REF = "azurekms://{{metadata.annotations.management_ci_key_vault_name}}.vault.azure.net/{{metadata.annotations.cosign_signing_key_name}}"
+                                      GITOPS_REPO = "{{metadata.annotations.jenkins_platform_gitops_repo_url}}"
+                                      GITOPS_DEFAULT_BRANCH = "main"
+                                      PLATFORM_BOT_NAME = "PlatformBot"
+                                      PLATFORM_BOT_EMAIL = "ci@platform"
+                                      COSIGN_VERSION = "v2.4.1"
+                                    }
+                                    stages {
+                                      stage("Checkout") {
+                                        steps {
+                                          checkout scm
+                                        }
+                                      }
+                                      stage("Build, Sign, and Verify Image") {
+                                        when {
+                                          branch "main"
+                                        }
+                                        steps {
+                                          container("azure-cli") {
+                                            sh '''
+                                              set -euo pipefail
+
+                                              export PATH="$WORKSPACE/bin:$PATH"
+                                              export AZURE_CONFIG_DIR="$WORKSPACE/.azure"
+                                              export COSIGN_YES=true
+
+                                              mkdir -p "$WORKSPACE/bin" "$AZURE_CONFIG_DIR"
+
+                                              if ! command -v cosign >/dev/null 2>&1; then
+                                                curl -fsSL -o "$WORKSPACE/bin/cosign" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+                                                chmod +x "$WORKSPACE/bin/cosign"
+                                              fi
+
+                                              if [ -z "${AZURE_FEDERATED_TOKEN_FILE:-}" ] || [ ! -s "${AZURE_FEDERATED_TOKEN_FILE}" ]; then
+                                                echo "Azure Workload Identity token was not projected into the Jenkins agent pod"
+                                                exit 1
+                                              fi
+
+                                              az login \
+                                                --service-principal \
+                                                --username "${AZURE_CLIENT_ID}" \
+                                                --tenant "${AZURE_TENANT_ID}" \
+                                                --federated-token "$(cat "${AZURE_FEDERATED_TOKEN_FILE}")" \
+                                                >/dev/null
+
+                                              SERVICE_NAME="${JOB_NAME%%/*}"
+                                              IMAGE_TAG="${GIT_COMMIT:0:12}"
+                                              IMAGE_REF="${ACR_LOGIN_SERVER}/${SERVICE_NAME}:${IMAGE_TAG}"
+                                              ACR_NAME="${ACR_LOGIN_SERVER%%.*}"
+
+                                              export SERVICE_NAME IMAGE_TAG IMAGE_REF ACR_NAME
+
+                                              if [ ! -f Dockerfile ]; then
+                                                echo "Expected Dockerfile at repository root for ${SERVICE_NAME}"
+                                                exit 1
+                                              fi
+
+                                              az acr build \
+                                                --registry "${ACR_NAME}" \
+                                                --image "${SERVICE_NAME}:${IMAGE_TAG}" \
+                                                .
+
+                                              IMAGE_DIGEST="$(az acr repository show --name "${ACR_NAME}" --image "${SERVICE_NAME}:${IMAGE_TAG}" --query digest -o tsv)"
+                                              if [ -z "${IMAGE_DIGEST}" ]; then
+                                                echo "Unable to resolve pushed image digest for ${IMAGE_REF}"
+                                                exit 1
+                                              fi
+
+                                              IMAGE_DIGEST_REF="${ACR_LOGIN_SERVER}/${SERVICE_NAME}@${IMAGE_DIGEST}"
+                                              REGISTRY_TOKEN="$(az acr login --name "${ACR_NAME}" --expose-token --query accessToken -o tsv)"
+                                              export COSIGN_REPOSITORY="${ACR_LOGIN_SERVER}/${SERVICE_NAME}"
+
+                                              cat > predicate.json <<EOF
+                                              {
+                                                "buildType": "platform-jenkins-acr-build",
+                                                "builder": {
+                                                  "id": "jenkins/${JOB_NAME}"
+                                                },
+                                                "invocation": {
+                                                  "configSource": {
+                                                    "uri": "${GIT_URL:-unknown}",
+                                                    "digest": {
+                                                      "sha1": "${GIT_COMMIT}"
+                                                    }
+                                                  }
+                                                },
+                                                "metadata": {
+                                                  "service": "${SERVICE_NAME}",
+                                                  "image": "${IMAGE_DIGEST_REF}"
+                                                }
+                                              }
+EOF
+
+                                              cosign sign \
+                                                --key "${COSIGN_KEY_REF}" \
+                                                --tlog-upload=false \
+                                                --registry-username 00000000-0000-0000-0000-000000000000 \
+                                                --registry-password "${REGISTRY_TOKEN}" \
+                                                "${IMAGE_DIGEST_REF}"
+
+                                              cosign attest \
+                                                --key "${COSIGN_KEY_REF}" \
+                                                --type platform.dev/image-build \
+                                                --predicate predicate.json \
+                                                --tlog-upload=false \
+                                                --registry-username 00000000-0000-0000-0000-000000000000 \
+                                                --registry-password "${REGISTRY_TOKEN}" \
+                                                "${IMAGE_DIGEST_REF}"
+
+                                              cosign verify \
+                                                --key "${COSIGN_KEY_REF}" \
+                                                --registry-username 00000000-0000-0000-0000-000000000000 \
+                                                --registry-password "${REGISTRY_TOKEN}" \
+                                                "${IMAGE_DIGEST_REF}" \
+                                                >/dev/null
+                                            '''
+                                          }
+                                          script {
+                                            env.SERVICE_NAME = env.JOB_NAME.tokenize("/")[0]
+                                            env.IMAGE_TAG = env.GIT_COMMIT.take(12)
+                                            env.IMAGE_REF = env.ACR_LOGIN_SERVER + "/" + env.SERVICE_NAME + ":" + env.IMAGE_TAG
+                                          }
+                                        }
+                                      }
+                                      stage("GitOps: Update workload overlay") {
+                                        when {
+                                          branch "main"
+                                        }
+                                        steps {
+                                          script {
+                                            env.SERVICE_NAME = env.JOB_NAME.tokenize("/")[0]
+                                            env.IMAGE_TAG = env.GIT_COMMIT.take(12)
+                                            env.IMAGE_REF = env.ACR_LOGIN_SERVER + "/" + env.SERVICE_NAME + ":" + env.IMAGE_TAG
+                                            env.GITOPS_PATH = "apps/" + env.SERVICE_NAME + "/workload/overlays/dev"
+                                          }
+                                          withCredentials([usernamePassword(credentialsId: "bitbucket-workspace-token", usernameVariable: "BITBUCKET_USERNAME", passwordVariable: "BITBUCKET_TOKEN")]) {
+                                            sh '''
+                                              set -euo pipefail
+
+                                              workdir="$(mktemp -d)"
+                                              trap 'rm -rf "$workdir"' EXIT
+
+                                              remote_with_auth="$(printf '%s' "$GITOPS_REPO" | sed "s#^https://#https://$BITBUCKET_USERNAME:$BITBUCKET_TOKEN@#")"
+                                              git clone --depth 1 --branch "$GITOPS_DEFAULT_BRANCH" "$remote_with_auth" "$workdir/gitops"
+
+                                              cd "$workdir/gitops/$GITOPS_PATH"
+
+                                              image_name="${IMAGE_REF%:*}"
+                                              image_tag="${IMAGE_REF##*:}"
+                                              updated=0
+                                              for file in kustomization.yaml kustomization.yml; do
+                                                if [ ! -f "$file" ]; then
+                                                  continue
+                                                fi
+                                                if ! grep -q 'newTag:' "$file"; then
+                                                  continue
+                                                fi
+                                                sed -i "s#^\([[:space:]]*newName:[[:space:]]*\).*#\1$image_name#" "$file"
+                                                sed -i "s#^\([[:space:]]*newTag:[[:space:]]*\).*#\1$image_tag#" "$file"
+                                                updated=1
+                                                break
+                                              done
+                                              if [ "$updated" -ne 1 ]; then
+                                                echo "No kustomization file with a newTag entry found under $GITOPS_PATH"
+                                                exit 1
+                                              fi
+
+                                              if git diff --quiet; then
+                                                echo "No workload overlay change detected"
+                                                exit 0
+                                              fi
+
+                                              git config user.email "$PLATFORM_BOT_EMAIL"
+                                              for attempt in 1 2 3 4 5; do
+                                                git -c user.name="$PLATFORM_BOT_NAME" commit -am "[ci skip] $SERVICE_NAME: bump dev workload to $IMAGE_TAG"
+                                                if git push origin "$GITOPS_DEFAULT_BRANCH"; then
+                                                  exit 0
+                                                fi
+                                                git reset --soft HEAD~1
+                                                git pull --rebase origin "$GITOPS_DEFAULT_BRANCH"
+                                              done
+
+                                              echo "Push failed after 5 retries"
+                                              exit 1
+                                            '''
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                    platform-jobs: |
+                      jobs:
+                        - script: >
+                            multibranchPipelineJob("{{metadata.annotations.jenkins_service_repository}}-ci") {
+                              displayName("{{metadata.annotations.jenkins_service_repository}}-ci")
+                              description("Builds {{metadata.annotations.jenkins_service_repository}} and updates only apps/<svc>/workload/overlays/dev/ in platform-gitops.")
+                              branchSources {
+                                branchSource {
+                                  source {
+                                    bitbucket {
+                                      id("{{metadata.annotations.jenkins_service_repository}}-ci")
+                                      serverUrl("{{metadata.annotations.jenkins_bitbucket_server_url}}")
+                                      credentialsId("bitbucket-workspace-token")
+                                      repoOwner("{{metadata.annotations.jenkins_bitbucket_repo_owner}}")
+                                      repository("{{metadata.annotations.jenkins_service_repository}}")
+                                      autoRegisterHook(true)
+                                      traits {
+                                        bitbucketBranchDiscovery {
+                                          strategyId(3)
+                                        }
+                                        bitbucketPullRequestDiscovery {
+                                          strategyId(1)
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                              factory {
+                                pipelineBranchDefaultsProjectFactory {
+                                  scriptId("platform-service-default-jenkinsfile")
+                                  useSandbox(true)
+                                }
+                              }
+                              triggers {
+                                periodicFolderTrigger {
+                                  interval("1d")
+                                }
+                                bitBucketMultibranchTrigger {}
+                              }
+                              orphanedItemStrategy {
+                                discardOldItems {
+                                  numToKeep(20)
+                                }
+                              }
+                              configure { job ->
+                                def branchSource = job / sources / data / "jenkins.branch.BranchSource"
+                                def source = branchSource / source
+                                def traits = source / traits
+                                traits << "com.cloudbees.jenkins.plugins.bitbucket.trait.WebhookConfigurationTrait" {
+                                  committersToIgnore("PlatformBot")
+                                }
+                                traits << "org.jenkinsci.plugins.scm_filter.BitbucketBranchCommitSkipTrait" {}
+                              }
+                            }
+                        - script: >
+                            pipelineJob("platform-service-seed") {
+                              description("Seeds a new service repository from Jira and opens infra/workload PRs in platform-gitops.")
+                              properties {
+                                pipelineTriggers {
+                                  triggers {
+                                    genericTrigger {
+                                      genericVariables {
+                                        genericVariable {
+                                          key("JIRA_ISSUE_KEY")
+                                          value("$.issue.key")
+                                          expressionType("JSONPath")
+                                        }
+                                        genericVariable {
+                                          key("JIRA_ISSUE_TYPE")
+                                          value("$.issue.fields.issuetype.name")
+                                          expressionType("JSONPath")
+                                        }
+                                        genericVariable {
+                                          key("SERVICE_NAME")
+                                          value("$.issue.fields.summary")
+                                          expressionType("JSONPath")
+                                        }
+                                        genericVariable {
+                                          key("SLO_CLASS")
+                                          value("$.issue.fields.customfield_slo_class")
+                                          expressionType("JSONPath")
+                                        }
+                                      }
+                                      token("platform-service-seed")
+                                      printContributedVariables(true)
+                                      printPostContent(false)
+                                      regexpFilterText("$JIRA_ISSUE_TYPE")
+                                      regexpFilterExpression("^IDP Service Request$")
+                                      causeString("Jira seed request for $JIRA_ISSUE_KEY")
+                                    }
+                                  }
+                                }
+                              }
+                              definition {
+                                cps {
+                                  sandbox(true)
+                                  script("""
+pipeline {
+  agent {
+    kubernetes {
+      defaultContainer 'azure-cli'
+      yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    azure.workload.identity/use: "true"
+spec:
+  serviceAccountName: jenkins-agent
+  nodeSelector:
+    nodepool: cipool
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ci
+      effect: NoSchedule
+  containers:
+    - name: azure-cli
+      image: mcr.microsoft.com/azure-cli:2.64.0
+      command:
+        - cat
+      tty: true
+'''
+    }
+  }
+  options {
+    disableConcurrentBuilds()
+    skipDefaultCheckout(true)
+  }
+  parameters {
+    string(name: 'JIRA_ISSUE_KEY', defaultValue: '', description: 'Jira issue key')
+    string(name: 'JIRA_ISSUE_TYPE', defaultValue: '', description: 'Jira issue type')
+    string(name: 'SERVICE_NAME', defaultValue: '', description: 'Optional service name override')
+    string(name: 'SLO_CLASS', defaultValue: '', description: 'Optional SLO class override')
+  }
+  environment {
+    PLATFORM_REPO = "{{metadata.annotations.addons_repo_url}}"
+    PLATFORM_REPO_REVISION = "{{metadata.annotations.addons_repo_revision}}"
+    BITBUCKET_WORKSPACE = "{{metadata.annotations.jenkins_bitbucket_repo_owner}}"
+    PLATFORM_GITOPS_REPO = "{{metadata.annotations.jenkins_platform_gitops_repo_url}}"
+    JIRA_BASE_URL = "{{metadata.annotations.jira_base_url}}"
+  }
+  stages {
+    stage('Seed service') {
+      steps {
+        withCredentials([
+          usernamePassword(credentialsId: 'bitbucket-workspace-token', usernameVariable: 'BITBUCKET_USERNAME', passwordVariable: 'BITBUCKET_TOKEN'),
+          string(credentialsId: 'jira-service-account-token', variable: 'JIRA_TOKEN')
+        ]) {
+          container('azure-cli') {
+            sh '''
+              set -euo pipefail
+              python3 -m pip install --user --quiet cookiecutter
+
+              workdir="$(mktemp -d)"
+              trap 'rm -rf "$workdir"' EXIT
+              export PATH="$HOME/.local/bin:$PATH"
+
+              platform_repo_with_auth="$(printf '%s' "$PLATFORM_REPO" | sed "s#^https://#https://$BITBUCKET_USERNAME:$BITBUCKET_TOKEN@#")"
+              git clone "$platform_repo_with_auth" "$workdir/platform"
+              cd "$workdir/platform"
+              git checkout "$PLATFORM_REPO_REVISION"
+
+              python3 "$workdir/platform/tools/service_seed/seed_job.py" seed-from-jira \
+                --jira-base-url "$JIRA_BASE_URL" \
+                --jira-issue-key "$JIRA_ISSUE_KEY" \
+                --jira-issue-type "$JIRA_ISSUE_TYPE" \
+                --service-name "${SERVICE_NAME:-}" \
+                --slo-class "${SLO_CLASS:-}" \
+                --bitbucket-workspace "$BITBUCKET_WORKSPACE" \
+                --cookiecutter-template "$workdir/platform/tools/service_seed/cookiecutter-service" \
+                --platform-gitops-repo-url "$PLATFORM_GITOPS_REPO"
+            '''
+          }
+        }
+      }
+    }
+  }
+}
+                                  """.stripIndent())
+                                }
+                              }
+                            }
+              serviceAccount:
+                name: jenkins-controller
+                annotations:
+                  azure.workload.identity/client-id: "{{metadata.annotations.jenkins_identity_client_id}}"
+              serviceAccountAgent:
+                create: true
+                name: jenkins-agent
+                annotations:
+                  azure.workload.identity/client-id: "{{metadata.annotations.jenkins_identity_client_id}}"
+              agent:
+                namespace: jenkins
+                serviceAccount: jenkins-agent
+                podLabels:
+                  azure.workload.identity/use: "true"
+                jenkinsUrl: "https://jenkins.jenkins.svc.cluster.local:443"
+                skipTlsVerify: true
+      destination:
+        namespace: jenkins
+        name: '{{name}}'
+      syncPolicy:
+        automated: {}
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: namespace-vault-binding-claim
+description: Claim chart that instantiates one NamespaceVaultBinding per workload namespace and cluster.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

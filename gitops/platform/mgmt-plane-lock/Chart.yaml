@@ -1,0 +1,7 @@
+apiVersion: v2
+name: mgmt-plane-lock
+description: Management-plane lease controller for active/standby AKS clusters
+type: application
+version: 0.1.0
+appVersion: 0.1.0
+

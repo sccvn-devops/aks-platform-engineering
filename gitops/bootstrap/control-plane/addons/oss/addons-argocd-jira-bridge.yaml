@@ -1,0 +1,39 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: addons-argocd-jira-bridge
+spec:
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            akuity.io/argo-cd-cluster-name: mgmt-we
+  template:
+    metadata:
+      name: addon-{{name}}-argocd-jira-bridge
+      annotations:
+        argocd.argoproj.io/sync-wave: "38"
+    spec:
+      project: default
+      source:
+        repoURL: '{{metadata.annotations.addons_repo_url}}'
+        targetRevision: '{{metadata.annotations.addons_repo_revision}}'
+        path: '{{metadata.annotations.addons_repo_basepath}}platform/argocd-jira-bridge'
+        helm:
+          releaseName: jira-bridge
+          values: |
+            clusterName: "{{name}}"
+            jira:
+              baseUrl: "{{metadata.annotations.jira_base_url}}"
+              projectKey: "{{metadata.annotations.jira_project_key}}"
+              userEmail: "{{metadata.annotations.jira_service_account_email}}"
+      destination:
+        namespace: jira-bridge
+        name: '{{name}}'
+      syncPolicy:
+        automated: {}
+        syncOptions:
+          - CreateNamespace=true

@@ -1,0 +1,35 @@
+image:
+  repository: ghcr.io/ste-cityos/aks-platform-engineering/saas-token-rotator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Injected via ArgoCD ApplicationSet from cluster metadata
+keyVaultWeUrl: ""
+keyVaultNeUrl: ""
+identityClientId: ""
+
+# Schedule: quarterly rotation (every 90 days at 03:00)
+schedule: "0 3 1 */3 *"
+
+gracePeriodHours: 24
+
+bitbucket:
+  secretName: bitbucket-workspace-token
+  workspaceSecretRef:
+    name: saas-rotator-bitbucket-creds
+    workspaceKey: BITBUCKET_WORKSPACE
+    clientIdKey: BITBUCKET_OAUTH_CLIENT_ID
+    clientSecretKey: BITBUCKET_OAUTH_CLIENT_SECRET
+
+jira:
+  secretName: jira-service-account-token
+  credentialsSecretRef:
+    name: saas-rotator-jira-creds
+    emailKey: JIRA_SERVICE_ACCOUNT_EMAIL
+    tokenKey: JIRA_CURRENT_API_TOKEN
+
+prometheusRule:
+  enabled: true
+  labels:
+    release: prometheus
+  tokenAgeDaysThreshold: 100

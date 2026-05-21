@@ -1,5 +1,6 @@
 controller:
-  replicas: 1 # Additional replicas will cause sharding of managed clusters across number of replicas.
+  replicas: 3
+  dynamicClusterDistribution: true
   metrics:
     enabled: true
     service:
@@ -10,9 +11,9 @@ controller:
       value: '300'
 
 repoServer:
+  replicas: 2
   autoscaling:
-    enabled: true
-    minReplicas: 1
+    enabled: false
   resources: # Adjust based on your specific use case (required for HPA)
     requests:
       cpu: '100m'
@@ -27,7 +28,7 @@ repoServer:
         prometheus.io/scrape: true
 
 applicationSet:
-  replicaCount: 1 # The controller doesn't scale horizontally, is active-standby replicas
+  replicas: 2
   metrics:
     enabled: true
     service:
@@ -35,9 +36,9 @@ applicationSet:
         prometheus.io/scrape: true
 
 server:
+  replicas: 2
   autoscaling:
-    enabled: true
-    minReplicas: 1
+    enabled: false
   resources: # Adjust based on your specific use case (required for HPA)
     requests:
       cpu: '100m'
@@ -54,7 +55,10 @@ server:
     type: LoadBalancer
     annotations:
       # https://cloud-provider-azure.sigs.k8s.io/topics/loadbalancer/#loadbalancer-annotations
-      service.beta.kubernetes.io/azure-load-balancer-internal: false
+      service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+
+redis-ha:
+  enabled: true
 
 configs:
   cm:
@@ -64,6 +68,32 @@ configs:
         - ProviderConfigUsage
         apiGroups:
         - "*"
+    resource.customizations: |
+      "*.platform.cityos.io/*":
+        health.lua: |
+          hs = {
+            status = "Progressing",
+            message = "Waiting for Crossplane reconciliation"
+          }
+          if obj.status ~= nil and obj.status.conditions ~= nil then
+            local degraded = nil
+            for _, condition in ipairs(obj.status.conditions) do
+              if condition.type == "Ready" and condition.status == "True" then
+                hs.status = "Healthy"
+                hs.message = condition.message or condition.reason or "Ready"
+                return hs
+              end
+              if condition.type == "Ready" and condition.status == "False" then
+                degraded = condition
+              end
+            end
+            if degraded ~= nil then
+              hs.status = "Degraded"
+              hs.message = degraded.message or degraded.reason or "Not ready"
+              return hs
+            end
+          end
+          return hs
 
 # -- Array of extra K8s manifests to deploy
 ## Note: Supports use of custom Helm templates

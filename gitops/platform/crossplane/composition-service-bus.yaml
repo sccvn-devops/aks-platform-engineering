@@ -1,0 +1,119 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: servicebus.azure.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.cityos.io/v1alpha1
+    kind: XServiceBus
+  resources:
+    - name: namespace
+      base:
+        apiVersion: servicebus.azure.upbound.io/v1beta1
+        kind: ServiceBusNamespace
+        spec:
+          forProvider:
+            localAuthEnabled: false
+            location: westeurope
+            minimumTlsVersion: "1.2"
+            publicNetworkAccessEnabled: false
+            resourceGroupName: placeholder
+            sku: Basic
+            zoneRedundant: false
+          providerConfigRef:
+            name: default
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.location
+          toFieldPath: spec.forProvider.location
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.resourceGroupName
+          toFieldPath: spec.forProvider.resourceGroupName
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.sloClass
+          toFieldPath: spec.forProvider.sku
+          transforms:
+            - type: map
+              map:
+                bronze: Basic
+                silver: Standard
+                gold: Premium
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.sloClass
+          toFieldPath: spec.forProvider.zoneRedundant
+          transforms:
+            - type: map
+              map:
+                bronze: false
+                silver: false
+                gold: true
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: map
+              map:
+                westeurope: azure-westeurope
+                northeurope: azure-northeurope
+
+    - name: secret-prod-we
+      base:
+        apiVersion: keyvault.azure.upbound.io/v1beta1
+        kind: Secret
+        spec:
+          forProvider:
+            keyVaultId: placeholder
+            value: placeholder
+            contentType: application/json
+          providerConfigRef:
+            name: azure-westeurope
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.keyVaultWeId
+          toFieldPath: spec.forProvider.keyVaultId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secretName
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.value
+          transforms:
+            - type: string
+              string:
+                type: Format
+                fmt: '{"namespace":"%s.servicebus.windows.net"}'
+
+    - name: secret-prod-ne
+      base:
+        apiVersion: keyvault.azure.upbound.io/v1beta1
+        kind: Secret
+        spec:
+          forProvider:
+            keyVaultId: placeholder
+            value: placeholder
+            contentType: application/json
+          providerConfigRef:
+            name: azure-northeurope
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.keyVaultNeId
+          toFieldPath: spec.forProvider.keyVaultId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secretName
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.value
+          transforms:
+            - type: string
+              string:
+                type: Format
+                fmt: '{"namespace":"%s.servicebus.windows.net"}'

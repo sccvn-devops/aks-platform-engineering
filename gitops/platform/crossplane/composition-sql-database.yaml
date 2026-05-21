@@ -1,0 +1,117 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: sqldatabase.azure.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.cityos.io/v1alpha1
+    kind: XSQLDatabase
+  writeConnectionSecretsToNamespace: crossplane-system
+  resources:
+    - name: database
+      base:
+        apiVersion: sql.azure.upbound.io/v1beta2
+        kind: MSSQLDatabase
+        spec:
+          forProvider:
+            collation: SQL_Latin1_General_CP1_CI_AS
+            maxSizeGb: 5
+            skuName: Basic
+            resourceGroupName: placeholder
+            serverName: placeholder
+          providerConfigRef:
+            name: default
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.name
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.resourceGroupName
+          toFieldPath: spec.forProvider.resourceGroupName
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.serverName
+          toFieldPath: spec.forProvider.serverName
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.collation
+          toFieldPath: spec.forProvider.collation
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.maxSizeGb
+          toFieldPath: spec.forProvider.maxSizeGb
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.sloClass
+          toFieldPath: spec.forProvider.skuName
+          transforms:
+            - type: map
+              map:
+                bronze: Basic
+                silver: S1
+                gold: GP_S_Gen5_2
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: map
+              map:
+                westeurope: azure-westeurope
+                northeurope: azure-northeurope
+
+    - name: secret-prod-we
+      base:
+        apiVersion: keyvault.azure.upbound.io/v1beta1
+        kind: Secret
+        spec:
+          forProvider:
+            keyVaultId: placeholder
+            value: placeholder
+            contentType: application/json
+          providerConfigRef:
+            name: azure-westeurope
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.keyVaultWeId
+          toFieldPath: spec.forProvider.keyVaultId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secretName
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.parameters.serverName
+              - fromFieldPath: metadata.name
+            strategy: string
+            string:
+              fmt: '{"server":"%s.database.windows.net","database":"%s"}'
+          toFieldPath: spec.forProvider.value
+
+    - name: secret-prod-ne
+      base:
+        apiVersion: keyvault.azure.upbound.io/v1beta1
+        kind: Secret
+        spec:
+          forProvider:
+            keyVaultId: placeholder
+            value: placeholder
+            contentType: application/json
+          providerConfigRef:
+            name: azure-northeurope
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.keyVaultNeId
+          toFieldPath: spec.forProvider.keyVaultId
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.secretName
+          toFieldPath: metadata.annotations[crossplane.io/external-name]
+        - type: CombineFromComposite
+          combine:
+            variables:
+              - fromFieldPath: spec.parameters.serverName
+              - fromFieldPath: metadata.name
+            strategy: string
+            string:
+              fmt: '{"server":"%s.database.windows.net","database":"%s"}'
+          toFieldPath: spec.forProvider.value

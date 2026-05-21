@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myapp-infra-config
+  namespace: placeholder-infra
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    app.kubernetes.io/part-of: myapp
+    platform.ste.io/tier: infra
+data:
+  environment: placeholder
+  service: myapp
+  tier: infra

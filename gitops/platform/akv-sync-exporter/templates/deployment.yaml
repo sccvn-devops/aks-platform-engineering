@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "akv-sync-exporter.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: akv-sync-exporter
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: akv-sync-exporter
+  template:
+    metadata:
+      labels:
+        app: akv-sync-exporter
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: exporter
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python3", "/app/exporter.py"]
+          env:
+            - name: VAULT_WE_URL
+              value: {{ .Values.vaultWe.url | quote }}
+            - name: VAULT_NE_URL
+              value: {{ .Values.vaultNe.url | quote }}
+            - name: AZURE_CLIENT_ID
+              value: {{ .Values.azureClientId | quote }}
+            - name: AZURE_FEDERATED_TOKEN_FILE
+              value: /var/run/secrets/azure/tokens/azure-identity-token
+            - name: AZURE_TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: akv-sync-exporter-azure
+                  key: tenantId
+                  optional: true
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: script
+              mountPath: /app
+            - name: azure-identity-token
+              mountPath: /var/run/secrets/azure/tokens
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: {{ include "akv-sync-exporter.fullname" . }}-script
+            defaultMode: 0755
+        - name: azure-identity-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: api://AzureADTokenExchange
+                  expirationSeconds: 3600
+                  path: azure-identity-token

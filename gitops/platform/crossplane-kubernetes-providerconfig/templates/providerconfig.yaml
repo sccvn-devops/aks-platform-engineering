@@ -1,0 +1,11 @@
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: {{ .Values.providerConfig.name | quote }}
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      name: {{ .Values.credentialsSecret.name | quote }}
+      namespace: {{ .Values.credentialsSecret.namespace | quote }}
+      key: {{ .Values.credentialsSecret.key | quote }}

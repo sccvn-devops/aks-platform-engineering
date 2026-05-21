@@ -1,0 +1,17 @@
+clusterName: ""
+leaseBlobUrl: ""
+
+image:
+  repository: acrplatformprod.azurecr.io/platform/mgmt-leader-lease
+  tag: latest
+  pullPolicy: IfNotPresent
+
+azure:
+  clientId: ""
+
+serviceAccount:
+  name: mgmt-leader-lease
+
+metrics:
+  port: 8080
+

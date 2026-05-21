@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    tier: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crossplane-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    tier: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    tier: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kargo
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    tier: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyverno
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    tier: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-secrets
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    tier: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  labels:
+    tier: platform

@@ -1,0 +1,109 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: workloads-set
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: platform.ste.io/env
+              operator: In
+              values: ["dev"]
+        - matchExpressions:
+            - key: platform.ste.io/env
+              operator: In
+              values: ["staging"]
+        - matchExpressions:
+            - key: platform.ste.io/env
+              operator: In
+              values: ["prod"]
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: dev
+                  syncPhase: "-1"
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/dev
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: dev
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: staging
+                  syncPhase: "2"
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/staging
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: staging
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: prod
+                  syncPhase: "4"
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/prod
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: prod
+  template:
+    metadata:
+      name: '{{index .path.segments 2}}-app-{{.env}}-{{.name}}'
+      labels:
+        platform.ste.io/service: '{{index .path.segments 2}}'
+        platform.ste.io/env: '{{.env}}'
+        platform.ste.io/cluster: '{{.name}}'
+        platform.ste.io/tier: workload
+        platform.ste.io/infra-app: '{{index .path.segments 2}}-infra-{{.env}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{.syncPhase}}'
+    spec:
+      project: workloads
+      source:
+        repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+        targetRevision: HEAD
+        path: '{{.path.path}}'
+      destination:
+        name: '{{.name}}'
+        namespace: '{{index .path.segments 2}}-{{.env}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 15s
+            factor: 2
+            maxDuration: 5m
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true

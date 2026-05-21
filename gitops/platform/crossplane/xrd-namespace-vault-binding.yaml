@@ -1,0 +1,93 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xnamespacevaultbindings.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  defaultCompositionRef:
+    name: namespacevaultbinding.azure.platform.cityos.io
+  group: platform.cityos.io
+  names:
+    kind: XNamespaceVaultBinding
+    plural: xnamespacevaultbindings
+  claimNames:
+    kind: NamespaceVaultBinding
+    plural: namespacevaultbindings
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    serviceName:
+                      type: string
+                    namespace:
+                      type: string
+                    serviceAccountName:
+                      type: string
+                      default: azure-keyvault-reader
+                    clusterName:
+                      type: string
+                    clusterEnv:
+                      type: string
+                      enum:
+                        - dev
+                        - staging
+                        - prod
+                    subscriptionId:
+                      type: string
+                    tenantId:
+                      type: string
+                    resourceGroupName:
+                      type: string
+                    workloadRegion:
+                      type: string
+                      enum:
+                        - westeurope
+                        - northeurope
+                    workloadOidcIssuerUrl:
+                      type: string
+                    keyVaultId:
+                      type: string
+                    vaultUrl:
+                      type: string
+                    secretPrefix:
+                      type: string
+                    kubernetesProviderConfigName:
+                      type: string
+                  required:
+                    - serviceName
+                    - namespace
+                    - clusterName
+                    - clusterEnv
+                    - subscriptionId
+                    - tenantId
+                    - resourceGroupName
+                    - workloadRegion
+                    - workloadOidcIssuerUrl
+                    - keyVaultId
+                    - vaultUrl
+                    - secretPrefix
+                    - kubernetesProviderConfigName
+            status:
+              type: object
+              properties:
+                identityClientId:
+                  type: string
+                identityPrincipalId:
+                  type: string
+                identityResourceId:
+                  type: string
+          required:
+            - spec

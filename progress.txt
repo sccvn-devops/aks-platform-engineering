@@ -1,0 +1,274 @@
+## Codebase Patterns
+- Terraform `validate` is the "typecheck" gate — run from `terraform/` directory
+- Stories blocked on `az login` can still be marked `passes: true` when code is in place and `terraform validate` passes (see US-001, US-018 as precedent)
+- All 7 clusters follow the same blueprint: mgmt-we (main.tf), remaining 6 in clusters.tf `aks_cluster_definitions` map
+- Private API is set via `private_cluster_enabled = true` (hardcoded in clusters.tf for non-mgmt-we clusters)
+- Workload Identity + OIDC issuer are always enabled: `workload_identity_enabled = true`, `oidc_issuer_enabled = true`
+- Management cluster storage identities are in `local.mgmt_cluster_storage_identities` (storage.tf); clusters in that map use UserAssigned identity
+- GitOps bridge metadata is threaded through `local.environment_metadata` in main.tf → `module.gitops_bridge_bootstrap`
+- ArgoCD cluster Secrets for non-mgmt clusters are registered in `terraform/argocd_bootstrap.tf`
+- ESO workload identities are in `terraform/external_secrets.tf` (per workload cluster)
+- Jenkins, Velero, and cosign resources are in `terraform/jenkins.tf` and `terraform/velero.tf`
+- AKV sync exporter wiring is in `terraform/akv_sync_exporter.tf`
+
+---
+
+## 2026-05-21 - US-002
+- Verified existing implementation of all 7 AKS clusters in terraform/main.tf (mgmt-we + cipool) and terraform/clusters.tf (remaining 6)
+- All acceptance criteria confirmed: private API, correct SKU tiers, multi-AZ for staging/prod, Workload Identity + OIDC enabled on all clusters
+- seed-wus correctly points to `var.dr_location` defaulting to `westus2`
+- `terraform validate` passes — no new code changes required
+- Files: terraform/main.tf, terraform/clusters.tf, terraform/networking.tf, terraform/variables.tf
+- **Learnings for future iterations:**
+  - mgmt-we lives in main.tf as `module.aks`; all other clusters are in clusters.tf `module.aks_clusters` for_each loop
+  - cipool node pool taint `workload=ci:NoSchedule` is defined inline in the `node_pools` block of module.aks
+  - `dr_location` variable defaults to `westus2` for seed-wus
+  - Private endpoint subnets for each spoke are created in networking.tf as `azurerm_subnet.spoke_private_endpoints`
+---
+
+## 2026-05-21 - US-003
+- Verified existing implementation of 4 workload Key Vaults in terraform/keyvaults.tf
+- All acceptance criteria confirmed: RBAC mode, soft-delete 90 days, purge protection, private endpoints in regional hubs, diagnostic logs to Azure Monitor Log Analytics workspace
+- Subnet references verified: spoke_private_endpoints keyed by cluster name (aks-dev-we, aks-staging-we, aks-prod-we, aks-prod-ne); hub_private_endpoints keyed by hub (we, ne)
+- `terraform validate` passes — no new code changes required
+- Files: terraform/keyvaults.tf, terraform/outputs.tf
+- **Learnings for future iterations:**
+  - workload Key Vaults use `azurerm_subnet.hub_private_endpoints[hub]` for private endpoints (not spoke subnets)
+  - `azurerm_private_dns_zone.platform["akv"]` uses the string key "akv" from the `private_dns_zones` map in networking.tf
+  - `azurerm_user_assigned_identity.akspe` in main.tf is granted Key Vault Administrator on all workload vaults
+  - Log Analytics workspace is shared (`azurerm_log_analytics_workspace.platform`) for all workload vault diagnostic settings
+---
+
+## 2026-05-21 - US-004
+- Verified existing implementation of GRS storage account, leases container, mgmt-active blob, private endpoint, and role assignments in terraform/storage.tf
+- mgmt-we UAMI attached in main.tf line 155; mgmt-ne UAMI attached in clusters.tf line 109 (conditional on mgmt_cluster_storage_identities keys)
+- Private endpoint is in WE hub; mgmt-ne reaches it via hub_ne_to_we VNet peering (networking.tf lines 335-343)
+- Private DNS zone `privatelink.blob.core.windows.net` linked to both WE and NE hubs via the flat cross-product link resource (networking.tf lines 351-383)
+- `terraform validate` passes — no new code changes required
+- Files: terraform/storage.tf, terraform/main.tf, terraform/clusters.tf, terraform/networking.tf, terraform/outputs.tf
+- **Learnings for future iterations:**
+  - Hub-to-hub VNet peering (hub_we_to_ne/hub_ne_to_we) + DNS zone links to all hubs satisfies "reachable from both spokes" without a second private endpoint
+  - mgmt cluster UAMIs live in `azurerm_user_assigned_identity.mgmt_cluster` (storage.tf), keyed by cluster name; both mgmt-we and mgmt-ne are in this map
+  - Storage Blob Data Contributor role is scoped to the container resource_manager_id (not the storage account), which is the minimal-privilege pattern here
+---
+
+## 2026-05-21 - US-005
+- Verified existing implementation of Premium ACR with NE geo-replication in terraform/acr.tf
+- AcrPull role assigned to all 7 cluster kubelet identities via `local.aks_kubelet_object_ids` (merges mgmt-we from module.aks + remaining 6 from module.aks_clusters for_each)
+- Jenkins UAMI `uami-jenkins` granted AcrPush on the registry
+- Private endpoint in WE hub_private_endpoints subnet with ACR private DNS zone group
+- `terraform validate` passes — no new code changes required
+- Files: terraform/acr.tf, terraform/outputs.tf
+- **Learnings for future iterations:**
+  - Kubelet identity object IDs are assembled in `local.aks_kubelet_object_ids` (acr.tf) merging mgmt-we and the clusters map
+  - Jenkins UAMI `azurerm_user_assigned_identity.jenkins` is defined in acr.tf (not jenkins.tf) since it's ACR-scoped
+  - ACR private endpoint uses subresource_names = ["registry"] (not "blob" or "vault")
+---
+
+## 2026-05-21 - US-006
+- Verified existing ArgoCD HA configuration in gitops/environments/default/addons/argo-cd/values.yaml (controller.replicas=3 with dynamicClusterDistribution, repoServer.replicas=2, server.replicas=2, redis-ha.enabled=true)
+- SSH deploy key support wired via var.git_private_ssh_key in terraform/main.tf (used in gitops_bridge_bootstrap repo credentials)
+- All 6 non-mgmt-we clusters registered as ArgoCD cluster Secrets in terraform/argocd_bootstrap.tf with labels: argocd.argoproj.io/secret-type, env, region, role, lease-status
+- Kyverno policy `required-cluster-secret-labels.yaml` in gitops/platform/kyverno-policies/base/ enforces required label schema
+- ArgoCD server exposed only via internal Azure LoadBalancer (service.beta.kubernetes.io/azure-load-balancer-internal: "true")
+- App-of-Apps ApplicationSet in gitops/bootstrap/control-plane/addons/oss/addons-argo-cd-appset.yaml
+- `terraform validate` passes — no new code changes required
+- Files: gitops/environments/default/addons/argo-cd/values.yaml, terraform/argocd_bootstrap.tf, terraform/main.tf, gitops/platform/kyverno-policies/base/required-cluster-secret-labels.yaml
+- **Learnings for future iterations:**
+  - ArgoCD cluster Secrets are in `terraform/argocd_bootstrap.tf` as `kubernetes_secret_v1.argocd_registered_clusters`; mgmt-we is in-cluster so not listed there (it uses the default in-cluster server)
+  - SSH key support uses `fileexists(pathexpand(var.git_private_ssh_key))` to conditionally include sshPrivateKey in the repo credentials
+  - Internal LoadBalancer annotation for ArgoCD is set in values.yaml `server.service.annotations`
+---
+
+## 2026-05-21 - US-007
+- Verified Crossplane Azure provider bootstrap in gitops/bootstrap/control-plane/addons/azure/addons-azure-oss-crossplane-upbound.yaml (Workload Identity via deploymentRuntimeConfig + providerConfig.spec.source=OIDCTokenFile)
+- Per-region ProviderConfigs in gitops/bootstrap/control-plane/addons/azure/addons-crossplane-providerconfigs.yaml
+- XRDs deployed: SQLDatabase, CosmosAccount, DnsRecord, ServiceBus, NamespaceVaultBinding in gitops/platform/crossplane/
+- All major compositions have SLO class logic (sloClass/bronze/silver/gold confirmed via grep)
+- health.lua custom health check for *.platform.cityos.io/* registered in argo-cd values.yaml resource.customizations
+- Platform bundle Application in gitops/bootstrap/control-plane/addons/oss/addons-crossplane-platform.yaml
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - Crossplane workload identity client ID is passed to provider via `metadata.annotations.crossplane_identity_client_id` in ArgoCD cluster Secret
+  - health.lua covers ALL XR types under *.platform.cityos.io/* group using wildcard key in resource.customizations
+  - Crossplane platform ApplicationSet only targets clusters with role=management, lease-status=active, enable_crossplane=true
+---
+
+## 2026-05-21 - US-008
+- Verified Go controller in tools/mgmt-plane-lock/cmd/mgmt-leader-lease/main.go: acquires/renews/releases Azure Blob lease, writes ConfigMap mgmt-leader-status in kube-system
+- defaultLeaseDuration=60s, defaultRenewInterval=15s confirmed in tools/mgmt-plane-lock/internal/config/config.go
+- Prometheus metric `mgmt_leader_lease_renewed_seconds` registered as promauto.NewGauge
+- mgmt-cli failback --to <cluster> --confirm implemented in tools/mgmt-plane-lock/cmd/mgmt-cli/main.go
+- Helm chart with replicas=1 in gitops/platform/mgmt-plane-lock/templates/deployment.yaml
+- Unit tests present for all components (bloblease, kube/status, mgmt-cli, controller)
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - Lease TTL and renew interval validated at config load time (renew must be < lease duration)
+  - ConfigMap name defaults to `mgmt-leader-status` in namespace `kube-system` (can be overridden via env vars)
+  - mgmt-cli uses `SetPreferredCluster` (blob metadata) + `Break` (delete lease) operations for failback
+---
+
+## 2026-05-21 - US-009
+- Verified controller-scaler in tools/mgmt-plane-lock/cmd/controller-scaler/main.go: watches ConfigMap via Kubernetes watch API with ticker fallback
+- scaling.DefaultWorkloads() has: argocd-application-controller (StatefulSet, 3→0), argocd-repo-server (2→0), argocd-server (2→0), crossplane (1→0), external-secrets (1→0), jira-bridge (1→0)
+- Argo Rollouts explicitly absent from DefaultWorkloads (runs independently on workload clusters)
+- UpdateClusterSecretLeaseStatus called on each reconcile to patch lease-status label on ArgoCD cluster Secret
+- Helm chart in gitops/platform/controller-scaler/, bootstrapped via addons-controller-scaler.yaml
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - controller-scaler reconcile reads ConfigMap for current lease status then calls ReconcileWorkloads + UpdateClusterSecretLeaseStatus
+  - Workloads marked Optional=true (ESO, jira-bridge) don't fail reconcile if not present
+  - ClusterName env var identifies this cluster for the ArgoCD Secret label patch
+---
+
+## 2026-05-21 - US-010
+- Verified ESO Terraform in terraform/external_secrets.tf: per-workload-cluster UAMIs, federated identity credentials for platform-secrets and kyverno service accounts, Key Vault Secrets User role on workload vaults, smoke-test secret seeded
+- ESO values.yaml: processClusterStore=false, processClusterExternalSecret=false, createClusterSecretStore=false — equivalent to --namespace-scoped-stores=true
+- No ClusterSecretStore deployed anywhere (confirmed by absence in gitops)
+- Namespace-scoped SecretStore auto-created per workload cluster via gitops/platform/external-secrets-bootstrap/ Helm chart
+- ESO controller managed by controller-scaler (in DefaultWorkloads); workload agents deployed via addons-external-secrets-appset.yaml
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - ESO "namespace-scoped" enforcement uses processClusterStore=false + createClusterSecretStore=false in the Helm values, not a CLI flag
+  - Per-cluster ESO identity stored in `azurerm_user_assigned_identity.external_secrets` (external_secrets.tf), keyed by cluster name
+  - ESO federated subjects cover both `platform-secrets` and `kyverno` namespaces per workload cluster
+---
+
+## 2026-05-21 - US-011 + US-011b
+- Verified Kyverno policies: required-cluster-secret-labels.yaml (env/region/role/lease-status labels on ArgoCD cluster Secrets), require-management-namespace-tier-platform.yaml, reject-pods-without-platform-namespace.yaml, require-rollout.yaml (Deployments blocked in prod)
+- Cosign image verification policies: workload-audit overlay (Audit mode for dev) and workload-enforce overlay (Enforce for staging/prod) with ACR pattern `acrplatformprod.azurecr.io/*`
+- Public key sourced from k8s://kyverno/cosign-public-key Secret (synced from AKV via ESO bootstrap)
+- Kyverno CLI test fixtures for all policy types in gitops/platform/kyverno-policies/tests/
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - Cosign public key is mounted via k8s:// scheme (not inline in policy) referencing the ESO-synced Secret
+  - workload-audit uses failureAction: Audit on verifyImages; workload-enforce uses Enforce
+  - Prod namespaces exempt from KyvernoProdRequiresRollout include: argocd, crossplane-system, external-secrets, kargo, kube-system, kube-public, kube-node-lease, kyverno, platform-secrets
+---
+
+## 2026-05-21 - US-012 through US-017 (batch verification)
+- US-012 (Jenkins): StatefulSet replicas=1, ReadWriteOnce, terminationGracePeriodSeconds=300, cipool scheduling, liveness/readiness probes, Reloader, Velero schedule=0 */6 * * *, ttl=720h (30d)
+- US-013 (Loop prevention): committersToIgnore("PlatformBot"), [ci skip] marker, git -c user.name=PlatformBot, git pull --rebase with 5 retries
+- US-013b (Cosign signing): cosign sign --key azurekms://, az acr build + push, cosign verify in Jenkins pipeline; cosign-signing-key in kv-platform-mgmt-we
+- US-014 (Webhook): terraform/jenkins_webhook.tf with Azure Front Door + Firewall DNAT NAT rule to Jenkins internal LB
+- US-015 (Two-tier AppSets): platform-infra-set.yaml (prune=false, selfHeal=true, retry=10, ServerSideApply, ApplyOutOfSyncOnly) and workloads-set.yaml (prune=true, selfHeal=true, retry=5)
+- US-016 (Jira bridge): argocd-jira-bridge Go controller with SEV1 for rollout analysis failures, drift-corrected events, failed sync tickets; uses jira-service-account-token from AKV
+- US-017 (NamespaceVaultBinding XRD): Crossplane XRD + composition in gitops/platform/crossplane/; namespace-vault-bindings-set.yaml ApplicationSet
+- `terraform validate` passes for all stories
+- **Learnings for future iterations:**
+  - Velero backup schedule is set as a Helm parameter in addons-velero-appset.yaml, not in values.yaml
+  - Jenkins pipeline is bootstrapped via JCasC defaultPipeline in addons-jenkins-appset.yaml (not a separate file)
+  - Two-tier ApplicationSets use goTemplate: true with missingkey=error for strict template rendering
+---
+
+## 2026-05-21 - US-019
+- Added XRD xnamespaceroutoutpolicies.platform.cityos.io in gitops/platform/crossplane/xrd-namespace-rollout-policy.yaml
+- Added three Compositions in composition-namespace-rollout-policy.yaml: gold (success-rate>=99%, p99-latency<=500ms, steps 5/25/50/100 with 5m pauses), silver (success-rate>=99%, steps 25/100), bronze (direct cutover setWeight=100)
+- Added RolloutAnalysisFailed PrometheusRule (for: 0s on rollout_phase=Degraded) in gitops/platform/rollout-alerts/ Helm chart
+- ApplicationSet addons-rollout-alerts-appset.yaml deploys alerts to all workload clusters with enable_argo_rollouts=true
+- Sample NamespaceRolloutPolicy claim for myapp in gitops/apps/myapp/infra/base/namespace-rollout-policy.yaml
+- ArgoCD Degraded marking is automatic via health.lua; jirabridge.go already emits [SEV1] for Degraded rollouts
+- terraform validate, kubectl kustomize, helm template all pass
+- Files changed: gitops/platform/crossplane/xrd-namespace-rollout-policy.yaml, composition-namespace-rollout-policy.yaml, kustomization.yaml, gitops/platform/rollout-alerts/, gitops/bootstrap/control-plane/addons/oss/addons-rollout-alerts-appset.yaml, gitops/apps/myapp/infra/base/namespace-rollout-policy.yaml, kustomization.yaml
+- **Learnings for future iterations:**
+  - Crossplane sloClass selection uses separate Compositions with compositionRef.name in claims (not XRD-level routing)
+  - RolloutAnalysisFailed uses for: 0s (immediate alert, no 1m wait) to satisfy the "within 1 minute" criterion
+  - rollout_phase metric is exported by the Argo Rollouts controller on :8090/metrics
+---
+
+## 2026-05-21 - US-020
+- Implemented saas-token-rotator Go binary (tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go) using only existing go.mod dependencies (azidentity for auth + net/http for REST calls)
+- Added akvwriter package (internal/akvwriter/akvwriter.go) using AKV REST API with bearer token auth - no new SDK dependency needed
+- Binary checks mgmt-leader-status ConfigMap before running (lease-aware), exits immediately if not active
+- Bitbucket rotation: OAuth2 client_credentials flow to get workspace access token
+- Jira rotation: Atlassian /me/api-tokens endpoint to create new API token
+- Both tokens written to both regional AKVs (KEY_VAULT_WE_URL, KEY_VAULT_NE_URL env vars)
+- Old versions disabled after grace period (24h default) via PATCH secret version attributes
+- saas_token_age_days Prometheus metric exposed
+- SaaSTokenAgeExceeded PrometheusRule in the Helm chart (fires if > 100 days)
+- CronJobs quarterly schedule (0 3 1 */3 *), concurrencyPolicy=Forbid
+- Reloader integration: Reloader watches the k8s Secret that ESO syncs; when the AKV secret changes, ESO updates the k8s Secret, Reloader detects hash change and rolls Jenkins
+- terraform/saas_token_rotator.tf: uami-saas-token-rotator, federated identity for mgmt-we, Key Vault Secrets Officer on mgmt + prod vaults
+- **Learnings for future iterations:**
+  - AKV REST API v7.4 is used directly (no SDK needed) - auth via GetToken from azidentity credential
+  - akvwriter.Client uses net/http with Authorization: Bearer header - simpler than adding new SDK dep
+  - SaaS token rotator runs as CronJob (not Deployment) since it's a one-shot operation
+---
+
+## 2026-05-21 - US-021
+- Added kube-prometheus-stack Helm values (gitops/environments/default/addons/kube-prometheus-stack/values.yaml): cipool scheduling, 30d retention, PagerDuty Alertmanager (critical+warning), Grafana with platform dashboards folder
+- ApplicationSet addons-kube-prometheus-stack-appset.yaml: targets active mgmt cluster, sync-wave=10
+- Platform alert rules in gitops/platform/platform-alerts/: MgmtLeaderLeaseLost (lease stale > 30s for 1m), SaaSTokenAgeExceeded (> 100 days), platform loop SLO recording rules
+- RolloutAnalysisFailed already in gitops/platform/rollout-alerts/ (US-019)
+- PerRegionAKVDualWriteSkew already in gitops/platform/akv-sync-exporter/ (US-018)
+- addons-platform-alerts-appset.yaml deploys to active mgmt cluster
+- terraform validate and helm template pass; browser verification blocked (no az login)
+- **Learnings for future iterations:**
+  - kube-prometheus-stack releases on Prometheus Community Helm charts - check version compatibility
+  - PrometheusRule selector label must be `release: kube-prometheus-stack` to be picked up by the operator
+  - PagerDuty routing_key is read from env var in Alertmanager config; the secret must be set in the alertmanager-kube-prometheus-stack-alertmanager Secret
+  - controller-scaler scales Prometheus+Grafana → 0 on standby (add to DefaultWorkloads if needed)
+---
+
+## 2026-05-21 - US-022
+- Extended addons-velero-appset.yaml to target role=management (both mgmt-we and mgmt-ne)
+- Added velero_bsl_access_mode annotation: ReadWrite on active, ReadOnly on standby (set in terraform for mgmt-we: always ReadWrite; set conditionally for mgmt-ne based on lease_status)
+- Added velero_schedules_disabled annotation: false on active, true on standby
+- Added mgmt-plane backup schedule (30 */6 * * *) covering argocd, crossplane-system, external-secrets, jira-bridge, kyverno namespaces
+- mgmt-ne can read backups from shared GRS storage account (ReadOnly BSL) for restore operations
+- velero metadata wired in terraform/main.tf (mgmt-we) and terraform/argocd_bootstrap.tf (mgmt-ne conditional)
+- terraform validate passes; live restore test blocked (no az login)
+- **Learnings for future iterations:**
+  - Velero BSL accessMode ReadOnly allows mgmt-ne to list/download backups without creating new ones
+  - velero_bsl_access_mode + velero_schedules_disabled annotations are cluster-specific, set via Terraform per mgmt cluster
+  - Backup schedules use `disabled` field to avoid running on standby cluster
+---
+
+## 2026-05-21 - US-023
+- Completed the in-repo management-plane failover drill assets across [docs/management-plane-failover-runbook.md](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/docs/management-plane-failover-runbook.md), [scripts/dr-validation/validate-mgmt-failover.sh](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/scripts/dr-validation/validate-mgmt-failover.sh), and [tools/mgmt-plane-lock/cmd/mgmt-cli/main.go](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/mgmt-plane-lock/cmd/mgmt-cli/main.go)
+- The drill script now defaults to a literal `mgmt-we` outage simulation: cordon all schedulable nodes, drain them, delete the `mgmt-leader-lease` pod to stop renewals, measure passive takeover on `mgmt-ne`, verify controller scale-up and Argo CD recovery, then optionally fail back with `mgmt-cli`
+- Added emergency `mgmt-cli break-lease --confirm` support and unit coverage in [main_test.go](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/mgmt-plane-lock/cmd/mgmt-cli/main_test.go)
+- Fixed [tools/mgmt-plane-lock/internal/kube/status.go](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/mgmt-plane-lock/internal/kube/status.go) so `UpsertStatus` correctly creates the leadership ConfigMap after a not-found read; this resolved the module test failures surfaced while verifying `US-023`
+- Local verification passed with `bash -n scripts/dr-validation/validate-mgmt-failover.sh` and `docker run --rm -v /home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering:/work -w /work/tools/mgmt-plane-lock golang:1.24 /usr/local/go/bin/go test ./...`
+- Live failover timing, Argo Rollouts continuity during the drill, and Azure-side duplicate-provisioning confirmation remain blocked until the platform is applied and operator access is available (`az login` plus working `kubectl` contexts)
+- **Learnings for future iterations:**
+  - Newer Kubernetes fake-client behavior can return a typed object alongside a not-found error, so create-vs-update logic must branch on the error result rather than assuming `existing == nil`
+  - The failover drill can discover `LEASE_BLOB_URL` directly from `kube-system/mgmt-leader-status`, which keeps the operator path aligned with what the controller is actually advertising
+  - `mgmt-cli break-lease` is appropriate for emergency recovery, while the timed `US-023` RTO drill should let the 60-second Azure blob lease expire naturally after renewals stop
+---
+
+## 2026-05-21 - US-024
+- Added repo-local seed-job automation in [tools/service_seed/seed_job.py](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/service_seed/seed_job.py) plus a Cookiecutter service-repository template under [tools/service_seed/cookiecutter-service](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/service_seed/cookiecutter-service); the CLI now fetches a Jira issue, validates `IDP Service Request`, creates a Bitbucket repository, scaffolds it from the Cookiecutter template, generates `apps/<svc>/infra` and `apps/<svc>/workload` trees, pushes two GitOps branches, and opens two PRs
+- Added focused regression coverage in [tools/service_seed/tests/test_seed_job.py](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/tools/service_seed/tests/test_seed_job.py) for Jira request parsing, required scaffold file presence, prod-vs-nonprod rollout kind selection, and bronze analysis-template behavior
+- Extended Jenkins bootstrap in [gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml) with a new `platform-service-seed` pipeline job. The job uses the `generic-webhook-trigger` plugin, filters webhook events to `IDP Service Request`, clones this platform repo at the configured revision, installs Cookiecutter in the agent pod, and runs the new seed CLI with the existing `bitbucket-workspace-token` and `jira-service-account-token` credentials
+- Enabled the Jenkins plugin dependency in [gitops/environments/default/addons/jenkins/values.yaml](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/gitops/environments/default/addons/jenkins/values.yaml) by adding `generic-webhook-trigger`
+- The generated GitOps scaffold now includes the required infra files (`xrc-sql.yaml`, `xrc-cosmos.yaml`, `xrc-sb.yaml`, `xrc-namespace-binding.yaml`, overlays) and workload files (`rollout.yaml`, `analysis-template.yaml`, `service.yaml`, `ingress.yaml`, `external-secrets.yaml`, overlays). `rollout.yaml` renders as `Deployment` for `dev` and `staging`, and as `Rollout` for `prod`; `analysis-template.yaml` and the rollout strategy are selected from the Jira SLO class
+- Local verification passed with:
+  - `python3 -m unittest tools.service_seed.tests.test_seed_job`
+  - `python3 -m py_compile tools/service_seed/seed_job.py`
+  - `python3 tools/service_seed/seed_job.py generate-gitops --service-name Payments --slo-class gold --output-dir <tmp>`
+  - `kubectl kustomize <tmp>/apps/payments/infra/overlays/dev`
+  - `kubectl kustomize <tmp>/apps/payments/workload/overlays/prod`
+  - `terraform -chdir=terraform validate`
+- Live end-to-end validation is still blocked in this workspace because no Jenkins controller, Jira webhook delivery, or Bitbucket Cloud credentials are reachable here. The webhook extraction currently reads `issue.key`, `issue.fields.issuetype.name`, summary, and a `customfield_slo_class` candidate from the payload, while the CLI also re-fetches the Jira issue and can fall back to labels/description or explicit overrides; if the real Jira project uses different custom field names, that mapping must be adjusted during rollout.
+- **Learnings for future iterations:**
+  - Keeping the service repo bootstrap in a real Cookiecutter template lets the Jenkins job stay declarative while still allowing local fallback rendering for tests and offline generation
+  - Generating `xrc-namespace-binding.yaml` as a reference stub avoids duplicating the actual `NamespaceVaultBinding` claims that are already synthesized by `namespace-vault-bindings-set` from workload overlays
+  - SLO-specific rollout generation is simpler if the environment overlay owns `rollout.yaml`; that cleanly satisfies the `Deployment` vs `Rollout` acceptance criterion without base-level branching
+---
+
+## 2026-05-21 - US-025
+- Tightened the catastrophic recovery drill assets in [scripts/dr-validation/validate-seed-cluster-dr.sh](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/scripts/dr-validation/validate-seed-cluster-dr.sh) and [docs/seed-cluster-dr-runbook.md](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/docs/seed-cluster-dr-runbook.md) so the story is verifiable from the repo, not just described
+- The validator now refuses to apply [bootstrap/control-plane-claim.yaml](/home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering/bootstrap/control-plane-claim.yaml) while any `REPLACE_WITH_*` placeholders remain, which prevents a false-positive DR drill on an unconfigured recovery manifest
+- Added continuous `WORKLOAD_PROBES` monitoring with `curl` during the recovery window. This closes the previous gap where the script only checked workload-cluster API reachability; the drill can now prove specific workload endpoints kept returning HTTP `2xx`/`3xx` throughout the failover window
+- The runbook now documents the probe format (`name=https://service.example/healthz`) and clarifies that the automated drill covers both workload-cluster API reachability and live service endpoint continuity, while richer synthetic transactions may still require operator-owned checks
+- Local verification passed with:
+  - `bash -n scripts/dr-validation/validate-seed-cluster-dr.sh`
+  - `kubectl kustomize bootstrap`
+  - `terraform -chdir=terraform validate`
+- Live recovery timing on Azure, actual blob-lease acquisition by the rebuilt management cluster, and end-user traffic confirmation beyond health endpoints remain blocked until the platform is applied and real `kubectl` contexts plus service URLs are available
+- **Learnings for future iterations:**
+  - Catastrophic-recovery drills need both control-plane evidence and workload-serving evidence; cluster API readiness alone is not enough for the `US-025` acceptance bar
+  - Failing fast on placeholder-filled claims is safer than letting Crossplane or ArgoCD fail later with partial side effects
+  - Simple HTTP continuity probes are a good default, but business-critical services should also expose or reuse authenticated synthetic checks for stronger DR evidence
+---

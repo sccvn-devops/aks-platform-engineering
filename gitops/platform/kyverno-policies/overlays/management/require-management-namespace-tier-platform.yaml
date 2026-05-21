@@ -1,0 +1,29 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kyverno-require-management-namespace-tier-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-tier-platform-label
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+      exclude:
+        any:
+          - resources:
+              names:
+                - kube-public
+                - kube-node-lease
+      validate:
+        message: Management cluster namespaces must set tier=platform.
+        pattern:
+          metadata:
+            labels:
+              tier: platform

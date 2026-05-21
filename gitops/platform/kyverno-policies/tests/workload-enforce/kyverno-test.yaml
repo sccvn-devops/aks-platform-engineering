@@ -1,0 +1,15 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: workload-enforce-policies
+policies:
+  - ../../overlays/workload-enforce
+resources:
+  - ./resources/platform-acr-image.yaml
+results:
+  - policy: kyverno-verify-acr-images
+    rule: verify-platform-acr-images-with-cosign
+    resources:
+      - storefront
+    kind: Pod
+    result: fail

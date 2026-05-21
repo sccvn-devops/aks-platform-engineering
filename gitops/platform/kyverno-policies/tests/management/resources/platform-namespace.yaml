@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-team
+  labels:
+    kubernetes.io/metadata.name: platform-team
+    tier: platform

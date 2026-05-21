@@ -1,0 +1,56 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target:
+      kind: Namespace
+      name: placeholder-workload
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: myapp-staging
+      - op: add
+        path: /metadata/labels/environment
+        value: staging
+  - target:
+      kind: ServiceAccount
+      name: myapp-runtime
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: myapp-staging
+  - target:
+      kind: ConfigMap
+      name: myapp-runtime-config
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: myapp-staging
+      - op: replace
+        path: /data/environment
+        value: staging
+  - target:
+      kind: NetworkPolicy
+      name: myapp-default-deny-ingress
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: myapp-staging
+  - target:
+      kind: Role
+      name: myapp-reader
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: myapp-staging
+  - target:
+      kind: RoleBinding
+      name: myapp-reader
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: myapp-staging
+      - op: replace
+        path: /subjects/0/namespace
+        value: myapp-staging

@@ -1,0 +1,70 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xsqldatabases.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  defaultCompositionRef:
+    name: sqldatabase.azure.platform.cityos.io
+  group: platform.cityos.io
+  names:
+    kind: XSQLDatabase
+    plural: xsqldatabases
+  claimNames:
+    kind: SQLDatabase
+    plural: sqldatabases
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    region:
+                      type: string
+                      enum:
+                        - westeurope
+                        - northeurope
+                    resourceGroupName:
+                      type: string
+                    serverName:
+                      type: string
+                    sloClass:
+                      type: string
+                      enum:
+                        - bronze
+                        - silver
+                        - gold
+                      default: bronze
+                    collation:
+                      type: string
+                      default: SQL_Latin1_General_CP1_CI_AS
+                    maxSizeGb:
+                      type: integer
+                      default: 5
+                    secretName:
+                      type: string
+                      description: Name used for the AKV secret in both regional vaults (e.g. payments-sql-conn)
+                    keyVaultWeId:
+                      type: string
+                      description: Azure Resource ID of the West Europe prod Key Vault for dual-write
+                    keyVaultNeId:
+                      type: string
+                      description: Azure Resource ID of the North Europe prod Key Vault for dual-write
+                  required:
+                    - region
+                    - resourceGroupName
+                    - serverName
+                    - secretName
+                    - keyVaultWeId
+                    - keyVaultNeId
+              required:
+                - parameters

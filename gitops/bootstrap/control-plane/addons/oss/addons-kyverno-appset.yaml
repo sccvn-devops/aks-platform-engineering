@@ -18,9 +18,6 @@ spec:
                 addonChartRepository: https://kyverno.github.io/kyverno
               selector:
                 matchExpressions:
-                  - key: akuity.io/argo-cd-cluster-name
-                    operator: NotIn
-                    values: [in-cluster]
                   - key: enable_kyverno
                     operator: In
                     values: ['true']

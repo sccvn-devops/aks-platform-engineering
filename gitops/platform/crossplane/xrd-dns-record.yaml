@@ -1,0 +1,60 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xdnsrecords.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  defaultCompositionRef:
+    name: dnsrecord.azure.platform.cityos.io
+  group: platform.cityos.io
+  names:
+    kind: XDnsRecord
+    plural: xdnsrecords
+  claimNames:
+    kind: DnsRecord
+    plural: dnsrecords
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    region:
+                      type: string
+                      enum:
+                        - westeurope
+                        - northeurope
+                    resourceGroupName:
+                      type: string
+                    zoneName:
+                      type: string
+                    records:
+                      type: array
+                      items:
+                        type: string
+                    ttl:
+                      type: integer
+                      default: 300
+                    sloClass:
+                      type: string
+                      enum:
+                        - bronze
+                        - silver
+                        - gold
+                      default: bronze
+                  required:
+                    - region
+                    - resourceGroupName
+                    - zoneName
+                    - records
+              required:
+                - parameters

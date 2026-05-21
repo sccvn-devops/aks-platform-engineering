@@ -1,0 +1,38 @@
+replicaCount: 1
+
+image:
+  repository: python
+  tag: "3.12-slim"
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  name: akv-sync-exporter
+  annotations: {}
+
+service:
+  port: 9090
+
+# Azure Key Vault URLs for the two prod regions
+vaultWe:
+  url: ""
+
+vaultNe:
+  url: ""
+
+# Workload identity client ID for the exporter pod
+azureClientId: ""
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+prometheusRule:
+  enabled: true
+  # drift threshold in seconds (10 minutes)
+  skewThresholdSeconds: 600
+  labels:
+    release: kube-prometheus-stack
