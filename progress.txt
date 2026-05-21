@@ -79,3 +79,17 @@
   - SSH key support uses `fileexists(pathexpand(var.git_private_ssh_key))` to conditionally include sshPrivateKey in the repo credentials
   - Internal LoadBalancer annotation for ArgoCD is set in values.yaml `server.service.annotations`
 ---
+
+## 2026-05-21 - US-007
+- Verified Crossplane Azure provider bootstrap in gitops/bootstrap/control-plane/addons/azure/addons-azure-oss-crossplane-upbound.yaml (Workload Identity via deploymentRuntimeConfig + providerConfig.spec.source=OIDCTokenFile)
+- Per-region ProviderConfigs in gitops/bootstrap/control-plane/addons/azure/addons-crossplane-providerconfigs.yaml
+- XRDs deployed: SQLDatabase, CosmosAccount, DnsRecord, ServiceBus, NamespaceVaultBinding in gitops/platform/crossplane/
+- All major compositions have SLO class logic (sloClass/bronze/silver/gold confirmed via grep)
+- health.lua custom health check for *.platform.cityos.io/* registered in argo-cd values.yaml resource.customizations
+- Platform bundle Application in gitops/bootstrap/control-plane/addons/oss/addons-crossplane-platform.yaml
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - Crossplane workload identity client ID is passed to provider via `metadata.annotations.crossplane_identity_client_id` in ArgoCD cluster Secret
+  - health.lua covers ALL XR types under *.platform.cityos.io/* group using wildcard key in resource.customizations
+  - Crossplane platform ApplicationSet only targets clusters with role=management, lease-status=active, enable_crossplane=true
+---

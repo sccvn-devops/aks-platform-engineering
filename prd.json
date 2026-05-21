@@ -126,7 +126,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Implemented on 2026-05-20 by adding a dedicated Crossplane workload identity in `terraform/main.tf` with subscription-scoped Contributor access and exposing its client ID through GitOps bridge metadata for the active management cluster. Extended the Crossplane Azure provider addon in `gitops/bootstrap/control-plane/addons/azure/addons-azure-oss-crossplane-upbound.yaml` and `gitops/environments/default/addons/crossplane-azure-upbound/values.yaml` to enable Azure Workload Identity runtime configuration and install the additional Azure SQL, Cosmos DB, and Service Bus provider packages. Added Argo CD-managed regional ProviderConfigs plus a Crossplane platform API bundle in `gitops/bootstrap/control-plane/addons/azure/addons-crossplane-providerconfigs.yaml`, `gitops/bootstrap/control-plane/addons/oss/addons-crossplane-platform.yaml`, and `gitops/platform/crossplane/` with XRDs and SLO-aware compositions for `SQLDatabase`, `CosmosAccount`, `DnsRecord`, `ServiceBus`, and dual-Key-Vault `NamespaceVaultBinding`, along with Argo CD `health.lua` custom health checks for the new XR group. Local verification is still limited to static checks in this workspace; live provider health and reconciliation on `mgmt-we` remain blocked until the stack is applied against Azure (`az login` required)."
     },
     {
