@@ -353,8 +353,8 @@
         "Typecheck passes"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented on 2026-05-21 by extending the SQL, Cosmos, and ServiceBus Crossplane XRDs with three new required parameters (secretName, keyVaultWeId, keyVaultNeId) and adding two keyvault.azure.upbound.io/v1beta1/Secret resources to each Composition — one bound to the azure-westeurope ProviderConfig writing to the WE vault, one to azure-northeurope writing to the NE vault. Both KV Secrets share the same AKV secret name (set via crossplane.io/external-name from secretName) and the same connection JSON value built with a CombineFromComposite or Format string transform from the composite's parameters. Added the akv-sync-exporter Helm chart (gitops/platform/akv-sync-exporter/) with a Python exporter Deployment that polls both prod AKVs using Azure Workload Identity and exposes akv_dual_write_skew_seconds{secret_name} on :9090/metrics; includes a PrometheusRule PerRegionAKVDualWriteSkew that fires when skew exceeds 600s for 5m, a ServiceMonitor for Prometheus scraping, and a ServiceAccount with workload identity annotations. Wired the exporter through Terraform (terraform/akv_sync_exporter.tf: UAMI uami-akv-sync-exporter, Key Vault Secrets User role on both prod vaults, federated identity credential for mgmt-we) and the environment_metadata in terraform/main.tf so kv_prod_we_url, kv_prod_ne_url, and akv_sync_exporter_identity_client_id appear as ArgoCD cluster annotations. The ArgoCD ApplicationSet addons-akv-sync-exporter (sync-wave 35) targets mgmt-we and injects these values into the Helm release. terraform validate and helm template both pass. Live end-to-end verification (provision XR → confirm both vaults contain identical secret) remains blocked until the stack is applied with Azure credentials (az login required)."
     },
     {
       "id": "US-019",
