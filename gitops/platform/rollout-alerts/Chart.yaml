@@ -1,0 +1,5 @@
+apiVersion: v2
+name: rollout-alerts
+description: Prometheus alert rules for Argo Rollouts SLO analysis failures.
+type: application
+version: 0.1.0

@@ -160,3 +160,18 @@
   - Jenkins pipeline is bootstrapped via JCasC defaultPipeline in addons-jenkins-appset.yaml (not a separate file)
   - Two-tier ApplicationSets use goTemplate: true with missingkey=error for strict template rendering
 ---
+
+## 2026-05-21 - US-019
+- Added XRD xnamespaceroutoutpolicies.platform.cityos.io in gitops/platform/crossplane/xrd-namespace-rollout-policy.yaml
+- Added three Compositions in composition-namespace-rollout-policy.yaml: gold (success-rate>=99%, p99-latency<=500ms, steps 5/25/50/100 with 5m pauses), silver (success-rate>=99%, steps 25/100), bronze (direct cutover setWeight=100)
+- Added RolloutAnalysisFailed PrometheusRule (for: 0s on rollout_phase=Degraded) in gitops/platform/rollout-alerts/ Helm chart
+- ApplicationSet addons-rollout-alerts-appset.yaml deploys alerts to all workload clusters with enable_argo_rollouts=true
+- Sample NamespaceRolloutPolicy claim for myapp in gitops/apps/myapp/infra/base/namespace-rollout-policy.yaml
+- ArgoCD Degraded marking is automatic via health.lua; jirabridge.go already emits [SEV1] for Degraded rollouts
+- terraform validate, kubectl kustomize, helm template all pass
+- Files changed: gitops/platform/crossplane/xrd-namespace-rollout-policy.yaml, composition-namespace-rollout-policy.yaml, kustomization.yaml, gitops/platform/rollout-alerts/, gitops/bootstrap/control-plane/addons/oss/addons-rollout-alerts-appset.yaml, gitops/apps/myapp/infra/base/namespace-rollout-policy.yaml, kustomization.yaml
+- **Learnings for future iterations:**
+  - Crossplane sloClass selection uses separate Compositions with compositionRef.name in claims (not XRD-level routing)
+  - RolloutAnalysisFailed uses for: 0s (immediate alert, no 1m wait) to satisfy the "within 1 minute" criterion
+  - rollout_phase metric is exported by the Argo Rollouts controller on :8090/metrics
+---

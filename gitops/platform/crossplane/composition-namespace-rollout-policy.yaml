@@ -1,0 +1,230 @@
+---
+# Gold: success-rate >= 99%, p99-latency <= 500ms, canary steps 5/25/50/100 with 5m pauses
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: namespaceroutoutpolicy-gold.platform.cityos.io
+  labels:
+    crossplane.io/xrd: xnamespaceroutoutpolicies.platform.cityos.io
+    platform.cityos.io/slo-class: gold
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.cityos.io/v1alpha1
+    kind: XNamespaceRolloutPolicy
+  resources:
+    - name: analysis-template
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
+        spec:
+          forProvider:
+            manifest:
+              apiVersion: argoproj.io/v1alpha1
+              kind: AnalysisTemplate
+              metadata: {}
+              spec:
+                metrics:
+                  - name: success-rate
+                    interval: 60s
+                    failureLimit: 2
+                    successCondition: "result[0] >= 0.99"
+                    provider:
+                      prometheus:
+                        address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+                        query: >-
+                          sum(rate(http_requests_total{namespace="NAMESPACE",status=~"2.."}[5m]))
+                          /
+                          sum(rate(http_requests_total{namespace="NAMESPACE"}[5m]))
+                  - name: p99-latency-ms
+                    interval: 60s
+                    failureLimit: 2
+                    successCondition: "result[0] <= 500"
+                    provider:
+                      prometheus:
+                        address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+                        query: >-
+                          histogram_quantile(0.99,
+                          sum(rate(http_request_duration_milliseconds_bucket{namespace="NAMESPACE"}[5m]))
+                          by (le)) * 1000
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.name
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-gold"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.prometheusAddress
+          toFieldPath: spec.forProvider.manifest.spec.metrics[0].provider.prometheus.address
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.prometheusAddress
+          toFieldPath: spec.forProvider.manifest.spec.metrics[1].provider.prometheus.address
+    - name: rollout-patch
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
+        spec:
+          forProvider:
+            manifest:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Rollout
+              metadata:
+                annotations:
+                  platform.cityos.io/slo-class: gold
+              spec:
+                strategy:
+                  canary:
+                    analysis:
+                      templates:
+                        - templateName: placeholder-gold
+                    steps:
+                      - setWeight: 5
+                      - pause: {duration: 5m}
+                      - setWeight: 25
+                      - pause: {duration: 5m}
+                      - setWeight: 50
+                      - pause: {duration: 5m}
+                      - setWeight: 100
+          managementPolicies: ["Observe"]
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.spec.strategy.canary.analysis.templates[0].templateName
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-gold"
+---
+# Silver: success-rate >= 99%, canary steps 25/100
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: namespaceroutoutpolicy-silver.platform.cityos.io
+  labels:
+    crossplane.io/xrd: xnamespaceroutoutpolicies.platform.cityos.io
+    platform.cityos.io/slo-class: silver
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.cityos.io/v1alpha1
+    kind: XNamespaceRolloutPolicy
+  resources:
+    - name: analysis-template
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
+        spec:
+          forProvider:
+            manifest:
+              apiVersion: argoproj.io/v1alpha1
+              kind: AnalysisTemplate
+              metadata: {}
+              spec:
+                metrics:
+                  - name: success-rate
+                    interval: 60s
+                    failureLimit: 2
+                    successCondition: "result[0] >= 0.99"
+                    provider:
+                      prometheus:
+                        address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+                        query: >-
+                          sum(rate(http_requests_total{namespace="NAMESPACE",status=~"2.."}[5m]))
+                          /
+                          sum(rate(http_requests_total{namespace="NAMESPACE"}[5m]))
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.name
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-silver"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.prometheusAddress
+          toFieldPath: spec.forProvider.manifest.spec.metrics[0].provider.prometheus.address
+    - name: rollout-patch
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
+        spec:
+          forProvider:
+            manifest:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Rollout
+              metadata:
+                annotations:
+                  platform.cityos.io/slo-class: silver
+              spec:
+                strategy:
+                  canary:
+                    analysis:
+                      templates:
+                        - templateName: placeholder-silver
+                    steps:
+                      - setWeight: 25
+                      - pause: {duration: 5m}
+                      - setWeight: 100
+          managementPolicies: ["Observe"]
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.spec.strategy.canary.analysis.templates[0].templateName
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-silver"
+---
+# Bronze: no analysis, direct cutover [setWeight: 100]
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: namespaceroutoutpolicy-bronze.platform.cityos.io
+  labels:
+    crossplane.io/xrd: xnamespaceroutoutpolicies.platform.cityos.io
+    platform.cityos.io/slo-class: bronze
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.cityos.io/v1alpha1
+    kind: XNamespaceRolloutPolicy
+  resources:
+    - name: rollout-patch
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
+        spec:
+          forProvider:
+            manifest:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Rollout
+              metadata:
+                annotations:
+                  platform.cityos.io/slo-class: bronze
+              spec:
+                strategy:
+                  canary:
+                    steps:
+                      - setWeight: 100
+          managementPolicies: ["Observe"]
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.namespace
+          toFieldPath: spec.forProvider.manifest.metadata.namespace

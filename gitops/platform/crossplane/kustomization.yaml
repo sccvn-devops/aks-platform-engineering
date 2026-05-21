@@ -11,3 +11,5 @@ resources:
   - composition-service-bus.yaml
   - xrd-namespace-vault-binding.yaml
   - composition-namespace-vault-binding.yaml
+  - xrd-namespace-rollout-policy.yaml
+  - composition-namespace-rollout-policy.yaml

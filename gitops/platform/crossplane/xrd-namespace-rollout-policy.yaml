@@ -1,0 +1,49 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xnamespaceroutoutpolicies.platform.cityos.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  defaultCompositionRef:
+    name: namespaceroutoutpolicy-bronze.platform.cityos.io
+  group: platform.cityos.io
+  names:
+    kind: XNamespaceRolloutPolicy
+    plural: xnamespaceroutoutpolicies
+  claimNames:
+    kind: NamespaceRolloutPolicy
+    plural: namespaceroutoutpolicies
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - parameters
+              properties:
+                parameters:
+                  type: object
+                  required:
+                    - namespace
+                    - sloClass
+                    - prometheusAddress
+                  properties:
+                    namespace:
+                      type: string
+                      description: Target namespace for the rollout policy.
+                    sloClass:
+                      type: string
+                      enum: ["gold", "silver", "bronze"]
+                      description: SLO class determines canary steps and analysis thresholds.
+                    prometheusAddress:
+                      type: string
+                      description: Prometheus service address for SLO metric queries.
+                      default: "http://prometheus-operated.monitoring.svc.cluster.local:9090"

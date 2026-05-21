@@ -1,0 +1,29 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rollout-analysis-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: rollout-alerts
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: argo-rollouts
+      interval: 30s
+      rules:
+        - alert: RolloutAnalysisFailed
+          expr: |
+            rollout_phase{phase="Degraded"} == 1
+          for: 0s
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Argo Rollout analysis failed: {{ "{{ $labels.rollout }}" }}"
+            description: >-
+              Rollout {{ "{{ $labels.rollout }}" }} in namespace {{ "{{ $labels.namespace }}" }}
+              has entered Degraded phase (analysis failure). Canary has been aborted,
+              stable version restored to 100% traffic.
+            runbook_url: https://github.com/gitops-bridge-dev/aks-platform-engineering/wiki/runbook-rollout-degraded
