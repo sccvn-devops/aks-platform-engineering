@@ -194,7 +194,7 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Implemented on 2026-05-21 by enabling Kyverno in `terraform/argocd_bootstrap.tf` for every registered cluster, updating `gitops/bootstrap/control-plane/addons/oss/addons-kyverno-appset.yaml` so the addon targets all clusters carrying the bootstrap labels (including the in-cluster management plane), and adding a companion `addons-kyverno-policies` `ApplicationSet` to roll out policy bundles from `gitops/platform/kyverno-policies/`. The new policy package applies `kyverno-required-cluster-secret-labels` everywhere, labels core management namespaces with `tier=platform`, enforces `tier=platform` on management namespaces and rejects Pods in unlabeled management namespaces, and adds `kyverno-prod-requires-rollout` on production clusters to block `Deployment` resources outside exempt system namespaces. Added Kyverno CLI regression fixtures under `gitops/platform/kyverno-policies/tests/` for conformant and non-conformant cluster Secret, Namespace, Pod, and prod Deployment cases. Local verification remains limited to static rendering (`terraform validate`, `kubectl kustomize`); live policy activation on AKS and `kyverno test` execution are still blocked in this workspace because Azure access (`az login`) and the Kyverno CLI are not available."
     },
     {
@@ -211,7 +211,7 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Implemented on 2026-05-21 by extending `terraform/external_secrets.tf`, `terraform/variables.tf`, and `terraform/argocd_bootstrap.tf` so each workload Key Vault now stores a `cosign-public-key` secret, the shared External Secrets workload identity is federated for both `platform-secrets` and `kyverno` service accounts, and Argo CD cluster registration advertises the ACR login server plus the Cosign secret name. Generalized `gitops/platform/external-secrets-bootstrap/` to render multiple `ExternalSecret` resources per release, kept the workload smoke-test bootstrap in `addons-external-secrets-bootstrap.yaml`, and added `addons-kyverno-cosign-key-bootstrap.yaml` so each workload cluster syncs a `kyverno/cosign-public-key` Secret with the required `cosign.pub` key from AKV. Added workload-specific Kyverno policy overlays in `gitops/platform/kyverno-policies/overlays/` and updated `addons-kyverno-policies-appset.yaml` so dev clusters get the ACR Cosign verification policy in `Audit` mode while staging and prod clusters get `Enforce`, with prod also retaining the existing rollout-only admission guard. Local verification passed with `terraform validate`, `helm template gitops/platform/external-secrets-bootstrap`, and `kubectl kustomize` against the new workload overlays. Live unsigned-image rejection on AKS and `kyverno test` execution remain blocked in this workspace because Azure runtime access (`az login`) and the Kyverno CLI are not available."
     },
     {

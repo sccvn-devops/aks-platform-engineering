@@ -133,3 +133,15 @@
   - Per-cluster ESO identity stored in `azurerm_user_assigned_identity.external_secrets` (external_secrets.tf), keyed by cluster name
   - ESO federated subjects cover both `platform-secrets` and `kyverno` namespaces per workload cluster
 ---
+
+## 2026-05-21 - US-011 + US-011b
+- Verified Kyverno policies: required-cluster-secret-labels.yaml (env/region/role/lease-status labels on ArgoCD cluster Secrets), require-management-namespace-tier-platform.yaml, reject-pods-without-platform-namespace.yaml, require-rollout.yaml (Deployments blocked in prod)
+- Cosign image verification policies: workload-audit overlay (Audit mode for dev) and workload-enforce overlay (Enforce for staging/prod) with ACR pattern `acrplatformprod.azurecr.io/*`
+- Public key sourced from k8s://kyverno/cosign-public-key Secret (synced from AKV via ESO bootstrap)
+- Kyverno CLI test fixtures for all policy types in gitops/platform/kyverno-policies/tests/
+- `terraform validate` passes — no new code changes required
+- **Learnings for future iterations:**
+  - Cosign public key is mounted via k8s:// scheme (not inline in policy) referencing the ESO-synced Secret
+  - workload-audit uses failureAction: Audit on verifyImages; workload-enforce uses Enforce
+  - Prod namespaces exempt from KyvernoProdRequiresRollout include: argocd, crossplane-system, external-secrets, kargo, kube-system, kube-public, kube-node-lease, kyverno, platform-secrets
+---
