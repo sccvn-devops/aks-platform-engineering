@@ -3,9 +3,9 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: namespaceroutoutpolicy-gold.platform.cityos.io
+  name: namespacerolloutpolicy-gold.platform.cityos.io
   labels:
-    crossplane.io/xrd: xnamespaceroutoutpolicies.platform.cityos.io
+    crossplane.io/xrd: xnamespacerolloutpolicies.platform.cityos.io
     platform.cityos.io/slo-class: gold
   annotations:
     argocd.argoproj.io/sync-wave: "2"
@@ -108,9 +108,9 @@ spec:
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: namespaceroutoutpolicy-silver.platform.cityos.io
+  name: namespacerolloutpolicy-silver.platform.cityos.io
   labels:
-    crossplane.io/xrd: xnamespaceroutoutpolicies.platform.cityos.io
+    crossplane.io/xrd: xnamespacerolloutpolicies.platform.cityos.io
     platform.cityos.io/slo-class: silver
   annotations:
     argocd.argoproj.io/sync-wave: "2"
@@ -195,9 +195,9 @@ spec:
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: namespaceroutoutpolicy-bronze.platform.cityos.io
+  name: namespacerolloutpolicy-bronze.platform.cityos.io
   labels:
-    crossplane.io/xrd: xnamespaceroutoutpolicies.platform.cityos.io
+    crossplane.io/xrd: xnamespacerolloutpolicies.platform.cityos.io
     platform.cityos.io/slo-class: bronze
   annotations:
     argocd.argoproj.io/sync-wave: "2"

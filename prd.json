@@ -327,7 +327,7 @@
       "title": "Implement Per-Namespace Vault Binding (NamespaceVaultBinding XRD)",
       "description": "As a platform engineer, I need to implement the NamespaceVaultBinding Crossplane Composition so each workload namespace gets isolated identity and AKV access.",
       "acceptanceCriteria": [
-        "XRD xnamespacevaultbindings.platform.example.com deployed",
+        "XRD xnamespacevaultbindings.platform.cityos.io deployed",
         "Composition creates: UAMI (uami-<namespace>-<cluster>), FederatedIdentityCredential, RoleAssignment with ABAC condition (secrets:Name LIKE '<prefix>-*')",
         "SecretStore and ServiceAccount auto-created per namespace",
         "ABAC condition tested: namespace payments cannot read secrets prefixed billing-*",
@@ -375,7 +375,7 @@
       ],
       "priority": 21,
       "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding XRD xnamespaceroutoutpolicies.platform.cityos.io and three SLO-class-specific Compositions (gold/silver/bronze) in gitops/platform/crossplane/. Gold generates AnalysisTemplate with success-rate>=99% and p99-latency<=500ms metrics plus canary steps 5/25/50/100 with 5m pauses; silver generates success-rate>=99% analysis with steps 25/100; bronze is direct cutover setWeight=100. Added RolloutAnalysisFailed PrometheusRule (fires=0s on rollout_phase=Degraded) deployed to workload clusters via addons-rollout-alerts-appset.yaml and gitops/platform/rollout-alerts/ Helm chart. ArgoCD marks Application Degraded automatically via Rollout health checks; jirabridge.go already detects Degraded phase and creates [SEV1] Jira issues. Added sample NamespaceRolloutPolicy claim for myapp in gitops/apps/myapp/infra/base/namespace-rollout-policy.yaml. terraform validate, kubectl kustomize, and helm template all pass."
+      "notes": "Implemented on 2026-05-21 by adding XRD xnamespacerolloutpolicies.platform.cityos.io and three SLO-class-specific Compositions (gold/silver/bronze) in gitops/platform/crossplane/. Gold generates AnalysisTemplate with success-rate>=99% and p99-latency<=500ms metrics plus canary steps 5/25/50/100 with 5m pauses; silver generates success-rate>=99% analysis with steps 25/100; bronze is direct cutover setWeight=100. Added RolloutAnalysisFailed PrometheusRule (fires=0s on rollout_phase=Degraded) deployed to workload clusters via addons-rollout-alerts-appset.yaml and gitops/platform/rollout-alerts/ Helm chart. ArgoCD marks Application Degraded automatically via Rollout health checks; jirabridge.go already detects Degraded phase and creates [SEV1] Jira issues. Added sample NamespaceRolloutPolicy claim for myapp in gitops/apps/myapp/infra/base/namespace-rollout-policy.yaml. terraform validate, kubectl kustomize, and helm template all pass."
     },
     {
       "id": "US-020",

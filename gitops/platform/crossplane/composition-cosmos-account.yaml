@@ -28,6 +28,7 @@ spec:
                 location: northeurope
                 zoneRedundant: false
             location: westeurope
+            automaticFailoverEnabled: true
             multipleWriteLocationsEnabled: false
             publicNetworkAccessEnabled: false
             resourceGroupName: placeholder
@@ -60,7 +61,7 @@ spec:
               map:
                 bronze: false
                 silver: false
-                gold: true
+                gold: false
         - type: FromCompositeFieldPath
           fromFieldPath: spec.parameters.sloClass
           toFieldPath: spec.forProvider.geoLocation[0].zoneRedundant

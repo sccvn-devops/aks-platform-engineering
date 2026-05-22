@@ -250,7 +250,7 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 **Description:** As a platform engineer, I want the `NamespaceVaultBinding` Crossplane Composition functional so that each workload namespace gets isolated identity and AKV access.
 
 **Acceptance Criteria:**
-- [ ] XRD `xnamespacevaultbindings.platform.example.com` deployed
+- [ ] XRD `xnamespacevaultbindings.platform.cityos.io` deployed
 - [ ] Composition creates: UAMI (`uami-<namespace>-<cluster>`), FederatedIdentityCredential, RoleAssignment with ABAC condition (`secrets:Name LIKE '<prefix>-*'`)
 - [ ] SecretStore and ServiceAccount auto-created per namespace
 - [ ] ABAC condition confirmed: namespace `payments` cannot read secrets prefixed `billing-*`
@@ -386,17 +386,17 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 - FR-18: Reloader must restart affected pods when mounted Secrets change hash
 - FR-19: The "Create New IDP Service" workflow must be triggered by a Jira ticket and produce a fully-scaffolded service with all Crossplane claims and workload manifests
 - FR-20: Velero must back up the management cluster (etcd + PVCs) every 6 hours to GRS storage with 30-day retention
-- FR-21: Front Door must route user traffic Active-Active for reads across both prod regions
-- FR-22: Cosmos must use Active-Passive writes with `multipleWriteLocationsEnabled: false` and automatic failover
-- FR-23: All clusters must enforce naming convention `<role>-<env>-<region>` or `<role>-<region>` with label validation
-- FR-24: Argo Rollouts controllers must run locally in workload clusters, not in management clusters
-- FR-25: All container images must be signed with Cosign (AKV-backed key) and verified by Kyverno policy at admission (per ADR-008)
-- FR-26: The `controller-scaler` must update the `lease-status` label on ArgoCD cluster Secrets to enable platform-component ApplicationSet gating
+- FR-21: Cosmos must use Active-Passive writes with `multipleWriteLocationsEnabled: false` and automatic failover
+- FR-22: All clusters must enforce naming convention `<role>-<env>-<region>` or `<role>-<region>` with label validation
+- FR-23: Argo Rollouts controllers must run locally in workload clusters, not in management clusters
+- FR-24: All container images must be signed with Cosign (AKV-backed key) and verified by Kyverno policy at admission (per ADR-008)
+- FR-25: The `controller-scaler` must update the `lease-status` label on ArgoCD cluster Secrets to enable platform-component ApplicationSet gating
 
 ---
 
 ## Non-Goals (Out of Scope)
 
+- **Workload traffic routing via Front Door**: Each application team provisions its own Front Door profile (or Azure Traffic Manager) via a Crossplane Composition claim. The platform layer provides the Active-Active prod cluster pair and the Crossplane Kubernetes provider; per-service traffic steering is application-team responsibility, not platform-wide infrastructure
 - **Multi-master Jenkins**: Upstream does not support it; single-replica with Velero backup is the accepted pattern
 - **Private endpoint to Bitbucket Cloud**: Atlassian doesn't offer Azure Private Link; egress via Firewall FQDN is accepted
 - **Cosmos multi-region writes**: Intentionally disabled; Active-Passive writes simplifies consistency model
@@ -501,12 +501,12 @@ The implementation is a **greenfield build** leveraging existing Terraform and G
 
 ## Open Questions
 
-1. **Crossplane provider version**: Which exact version of `provider-azure` (Upbound official vs community) should be used? Does it support all required resource types (ABAC conditions on RoleAssignment, FederatedIdentityCredential)?
-2. **ArgoCD version**: Does the installed version support the `dependencies` field for inter-Application ordering, or do we need the custom admission webhook approach?
+1. ~~**Crossplane provider version**: Which exact version of `provider-azure` (Upbound official vs community) should be used? Does it support all required resource types (ABAC conditions on RoleAssignment, FederatedIdentityCredential)?~~ **Resolved**: Upbound `provider-azure` is in use (confirmed by `crossplane-azure-upbound` addon values). `FederatedIdentityCredential` is supported and used throughout. ABAC conditions on RoleAssignment for Key Vault secret data-plane access are not supported by Azure itself (not a provider limitation) — see US-017 architectural note: isolation is enforced via per-namespace UAMI binding instead.
+2. ~~**ArgoCD version**: Does the installed version support the `dependencies` field for inter-Application ordering, or do we need the custom admission webhook approach?~~ **Resolved**: ArgoCD chart 7.8.25 (v2.14) is installed. Cross-tier health gating is implemented via sync-wave annotations on the ApplicationSet resources themselves: `platform-infra-set` at wave 40, `workloads-set` at wave 50. ArgoCD's `cluster-addons` Application will not advance to wave 50 (and therefore will not create/sync any workload Application) until all Applications generated by `platform-infra-set` are Healthy. This is coarse-grained (all infra healthy before any workload syncs) rather than per-service, which is the native ArgoCD limit without custom hooks.
 3. **Existing Terraform state**: What is the current state of `terraform/` modules? Do they already provision some of the required infrastructure (VNets, AKS)?
 4. **Bitbucket workspace**: Is the workspace already created? Do we have admin access to create workspace access tokens?
 5. **Cosmos consistency default**: The blueprint defaults to `session` consistency — is this confirmed as the correct default for the organization's workloads?
-6. **Observability stack choice**: Prometheus + Grafana, or Azure Monitor + Managed Grafana? The blueprint implies self-hosted Prometheus.
+6. ~~**Observability stack choice**: Prometheus + Grafana, or Azure Monitor + Managed Grafana?~~ **Resolved**: Self-hosted `kube-prometheus-stack` (Prometheus + Grafana) deployed via `addons-kube-prometheus-stack-appset.yaml` on `mgmt-we`.
 7. **DNS provider**: Which DNS zone and provider will be used for workload ingress (Azure DNS, external)?
 8. **Seed cluster location**: West US 2 is specified — is this confirmed as an acceptable DR region given data residency requirements?
 9. **Budget/quota**: Are Azure quotas sufficient for 7 AKS clusters with Premium SKUs across 3 regions?
