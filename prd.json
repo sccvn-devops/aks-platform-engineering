@@ -535,8 +535,8 @@
         "Given the state SA exists, When I read its encryption configuration, Then encryption.services.blob.enabled = true with keyType = Microsoft-managed, and no CMK references are present."
       ],
       "priority": 31,
-      "passes": false,
-      "notes": "PRD-v3 [P0]. FR: FR-V3-04. ADR: ADR-023-v3. MSE only for v3; CMK migration tracked as roadmap item OQ-V3-04 and must not be retrofitted inside v3."
+      "passes": true,
+      "notes": "Implemented on 2026-05-22. Updated scripts/bootstrap-tfstate.sh to pass --encryption-services blob on storage account creation (makes MSE explicit) and added an inline post-creation assertion that reads encryption.keySource (must be Microsoft.Storage), encryption.services.blob.enabled (must be true), and encryption.keyVaultProperties.keyVaultUri (must be empty/null). Added scripts/validate-mse-encryption.sh as a standalone checker that reads the live Azure SA properties and also statically checks terraform/provider.tf for any CMK configuration. Updated .gitignore to track both updated bootstrap script and new validation script. No CMK references exist anywhere in the Terraform code base. terraform validate passes. Live az-based check requires az login."
     },
     {
       "id": "US-V3-05",

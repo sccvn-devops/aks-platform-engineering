@@ -64,6 +64,8 @@ fi
 
 # ---------------------------------------------------------------------------
 # 3. Storage account: GRS, StorageV2, TLS 1.2, no public blob access (idempotent)
+#    Encryption: Microsoft-managed keys (MSE) — explicit via --encryption-services.
+#    No CMK is configured; CMK migration is deferred per ADR-023-v3 decision #5.
 # ---------------------------------------------------------------------------
 if ! az storage account show \
       --name "$STORAGE_ACCOUNT" \
@@ -78,10 +80,50 @@ if ! az storage account show \
     --allow-blob-public-access false \
     --allow-shared-key-access false \
     --min-tls-version TLS1_2 \
+    --encryption-services blob \
     --output none
 else
   echo "Storage account $STORAGE_ACCOUNT already exists — skipping."
 fi
+
+# ---------------------------------------------------------------------------
+# 3a. Verify encryption is MSE (Microsoft-managed key, no CMK) — idempotent check
+# ---------------------------------------------------------------------------
+echo "Verifying MSE encryption on $STORAGE_ACCOUNT ..."
+KEY_TYPE=$(az storage account show \
+  --name "$STORAGE_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "encryption.keySource" \
+  --output tsv 2>/dev/null || true)
+
+BLOB_ENC=$(az storage account show \
+  --name "$STORAGE_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "encryption.services.blob.enabled" \
+  --output tsv 2>/dev/null || true)
+
+CMK_URL=$(az storage account show \
+  --name "$STORAGE_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "encryption.keyVaultProperties.keyVaultUri" \
+  --output tsv 2>/dev/null || true)
+
+if [ "$BLOB_ENC" != "true" ]; then
+  echo "ERROR: blob encryption is not enabled on $STORAGE_ACCOUNT (got: $BLOB_ENC)" >&2
+  exit 1
+fi
+
+if [ "$KEY_TYPE" != "Microsoft.Storage" ]; then
+  echo "ERROR: keySource is not Microsoft-managed on $STORAGE_ACCOUNT (got: $KEY_TYPE)" >&2
+  exit 1
+fi
+
+if [ -n "$CMK_URL" ] && [ "$CMK_URL" != "null" ]; then
+  echo "ERROR: CMK Key Vault URI is set on $STORAGE_ACCOUNT — remove per ADR-023-v3" >&2
+  exit 1
+fi
+
+echo "OK: encryption.services.blob.enabled=true, keySource=Microsoft.Storage, no CMK"
 
 # ---------------------------------------------------------------------------
 # 4. Enable blob versioning (idempotent — update is safe to repeat)

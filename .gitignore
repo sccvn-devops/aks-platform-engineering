@@ -103,5 +103,6 @@ scripts/*
 !scripts/bootstrap-tfstate.sh
 !scripts/validate-state-partitioning.sh
 !scripts/validate-blob-lease-locking.sh
+!scripts/validate-mse-encryption.sh
 !scripts/dr-validation/
 !scripts/dr-validation/validate-mgmt-failover.sh

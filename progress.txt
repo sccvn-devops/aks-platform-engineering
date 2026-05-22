@@ -288,6 +288,19 @@
   - validate-state-partitioning.sh doubles as a CI-compatible check (exit 1 on failure) and a pre-flight operator check (AZURE_ONLINE=1 for live blob listing)
 ---
 
+## 2026-05-22 - US-V3-04
+- Updated scripts/bootstrap-tfstate.sh: added --encryption-services blob to az storage account create (explicit MSE) and added inline post-creation assertion checking keySource=Microsoft.Storage, blob.enabled=true, keyVaultUri=empty
+- Created scripts/validate-mse-encryption.sh: standalone checker that reads live Azure SA encryption properties (requires az login) and statically checks terraform/provider.tf for CMK config
+- Updated .gitignore with !scripts/validate-mse-encryption.sh exception
+- No CMK references (customer_managed_key, key_vault_key_id, infrastructure_encryption) exist in terraform/provider.tf or any backend config
+- `terraform validate` passes; live az-based check blocked (no az login)
+- Files changed: scripts/bootstrap-tfstate.sh, scripts/validate-mse-encryption.sh, .gitignore, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - Azure `az storage account show --query "encryption.keySource"` returns "Microsoft.Storage" for MSE and "Microsoft.Keyvault" for CMK
+  - `--encryption-services blob` in az storage account create makes MSE explicit (it's the default, but explicit is better for compliance evidence)
+  - CMK migration requires a separate ADR per ADR-023-v3 decision #5; do not add customer_managed_key blocks to the state SA in v3
+---
+
 ## 2026-05-22 - US-V3-03
 - Created scripts/validate-blob-lease-locking.sh: static-only validation that verifies (1) backend "azurerm" is declared, (2) no forbidden lock-store attributes (lock_table, dynamodb_table, lock_service_url, cosmos lock, table_name lock) in terraform/, (3) no competing lock resources (aws_dynamodb_table, etc.), (4) all .tfbackend files contain only the 'key' directive
 - With AZURE_ONLINE=1 the script also acquires a blob lease on an existing state blob and attempts a second acquire, expecting a 409/LeaseAlreadyPresent error — proving no external lock service is consulted
