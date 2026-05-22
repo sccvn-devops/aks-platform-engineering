@@ -253,9 +253,9 @@ variable "build_backstage" {
 }
 
 variable "postgres_password" {
-  description = "Password for the Backstage Postgres database"
+  description = "Password for the Backstage Postgres database, sourced from AKV at apply time via OIDC federation."
   type        = string
-  default     = "secretPassword123!"
+  sensitive   = true
 }
 
 variable "jenkins_admin_username" {
@@ -265,21 +265,21 @@ variable "jenkins_admin_username" {
 }
 
 variable "jenkins_admin_password" {
-  description = "Bootstrap admin password to seed in the management Key Vault for Jenkins."
+  description = "Bootstrap admin password to seed in the management Key Vault for Jenkins. Sourced from AKV at apply time via OIDC federation."
   type        = string
-  default     = "ChangeMe-Jenkins-Admin-123!"
+  sensitive   = true
 }
 
 variable "jenkins_bitbucket_workspace_token" {
-  description = "Bootstrap Bitbucket workspace token to seed in the management Key Vault for Jenkins."
+  description = "Bootstrap Bitbucket workspace token to seed in the management Key Vault for Jenkins. Sourced from AKV at apply time via OIDC federation."
   type        = string
-  default     = "replace-me-bitbucket-workspace-token"
+  sensitive   = true
 }
 
 variable "jenkins_jira_service_account_token" {
-  description = "Bootstrap Jira service account token to seed in the management Key Vault for Jenkins."
+  description = "Bootstrap Jira service account token to seed in the management Key Vault for Jenkins. Sourced from AKV at apply time via OIDC federation."
   type        = string
-  default     = "replace-me-jira-service-account-token"
+  sensitive   = true
 }
 
 variable "jira_base_url" {
@@ -331,17 +331,15 @@ variable "jenkins_webhook_internal_load_balancer_ip" {
 }
 
 variable "jenkins_webhook_https_keystore_base64" {
-  description = "Base64-encoded Jenkins HTTPS keystore content used by the controller to terminate TLS for Bitbucket webhook ingress."
+  description = "Base64-encoded Jenkins HTTPS keystore content used by the controller to terminate TLS for Bitbucket webhook ingress. Sourced from AKV at apply time via OIDC federation."
   type        = string
   sensitive   = true
-  default     = ""
 }
 
 variable "jenkins_webhook_https_keystore_password" {
-  description = "Password for the Jenkins HTTPS keystore mounted into the controller pod."
+  description = "Password for the Jenkins HTTPS keystore mounted into the controller pod. Sourced from AKV at apply time via OIDC federation."
   type        = string
   sensitive   = true
-  default     = "changeit"
 }
 
 variable "jenkins_webhook_allowed_ipv4_cidrs" {
@@ -398,18 +396,6 @@ variable "jenkins_webhook_allowed_ipv4_cidrs" {
     "34.196.8.197/32",
     "44.194.7.14/32",
   ]
-}
-
-variable "cosign_public_key_pem" {
-  description = "PEM-encoded Cosign public key distributed to workload clusters through Azure Key Vault."
-  type        = string
-  sensitive   = true
-  default     = <<-EOT
-  -----BEGIN PUBLIC KEY-----
-  MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPZrfM
-  5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==
-  -----END PUBLIC KEY-----
-  EOT
 }
 
 variable "backstage_tls_crt" {

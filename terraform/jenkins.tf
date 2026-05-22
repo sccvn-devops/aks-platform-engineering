@@ -205,6 +205,17 @@ resource "azurerm_key_vault_secret" "jenkins_webhook_https_keystore_password" {
   ]
 }
 
+resource "azurerm_key_vault_secret" "backstage_postgres_password" {
+  name         = "backstage-postgres-password"
+  value        = var.postgres_password
+  key_vault_id = azurerm_key_vault.management_ci.id
+
+  depends_on = [
+    azurerm_role_assignment.management_ci_key_vault_admin,
+    azurerm_role_assignment.management_ci_current_operator_admin,
+  ]
+}
+
 resource "azurerm_key_vault_secret" "backstage_tls_crt" {
   name         = "backstage-tls-crt"
   value        = var.backstage_tls_crt

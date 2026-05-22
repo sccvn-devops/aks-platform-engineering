@@ -112,3 +112,4 @@ scripts/*
 !scripts/dr-validation/
 !scripts/dr-validation/validate-mgmt-failover.sh
 !scripts/purge-tls-history.sh
+!scripts/fetch-tf-secrets.sh
