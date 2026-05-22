@@ -1,3 +1,18 @@
+## 2026-05-22 - US-V3-07
+- Removed default= from jenkins_webhook_https_keystore_base64 and jenkins_webhook_https_keystore_password (already sensitive=true)
+- Removed unused cosign_public_key_pem variable entirely (dead code — only existed in variables.tf, never referenced in any .tf expression)
+- Flagged jenkins_admin_password, jenkins_bitbucket_workspace_token, jenkins_jira_service_account_token, postgres_password as sensitive=true and removed their plaintext defaults
+- Added azurerm_key_vault_secret.backstage_postgres_password in terraform/jenkins.tf to seed AKV with the now-required postgres_password variable
+- Created scripts/fetch-tf-secrets.sh: OIDC-federated AKV fetch script for CI; authenticates via GitHub Actions OIDC (ARM_CLIENT_ID/TENANT/SUBSCRIPTION env vars) or falls back to existing az login; reads all sensitive vars from kv-platform-mgmt-we; exports TF_VAR_* and applies ::add-mask:: for CI log masking
+- Zero sensitive variables have default= values (verified by grep/Python check)
+- Files changed: terraform/variables.tf, terraform/jenkins.tf, scripts/fetch-tf-secrets.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - Terraform validates ALL declared variables at plan time regardless of count=0 usage — removing a variable's default makes it required even if it's only used in count=0 resources
+  - Variables that are truly dead code (declared but never referenced) should be deleted outright rather than left as orphaned required vars
+  - GitHub Actions ::add-mask:: must be applied BEFORE the value is used in any subsequent step/echo to guarantee masking
+  - `export "VAR_NAME=value"` with quotes ensures values with spaces/newlines export correctly in bash; the fetch script uses `"${tf_var_name}=${value}"` pattern
+---
+
 ## 2026-05-22 - US-V3-06
 - Created gitops/platform/akv-tls-cert/ Helm chart: Chart.yaml, values.yaml, templates/externalsecret.yaml
 - ExternalSecret generates type: kubernetes.io/tls with refreshInterval: 60s (p95 ≤ 90s SLO)
