@@ -1,5 +1,5 @@
 ## Codebase Patterns
-- Terraform `validate` is the "typecheck" gate — run from `terraform/` directory
+- Terraform `validate` is the "typecheck" gate — run from `terraform/` directory with `terraform init -backend=false -input=false` first (now required since provider.tf has a backend block)
 - Stories blocked on `az login` can still be marked `passes: true` when code is in place and `terraform validate` passes (see US-001, US-018 as precedent)
 - All 7 clusters follow the same blueprint: mgmt-we (main.tf), remaining 6 in clusters.tf `aks_cluster_definitions` map
 - Private API is set via `private_cluster_enabled = true` (hardcoded in clusters.tf for non-mgmt-we clusters)
@@ -10,6 +10,8 @@
 - ESO workload identities are in `terraform/external_secrets.tf` (per workload cluster)
 - Jenkins, Velero, and cosign resources are in `terraform/jenkins.tf` and `terraform/velero.tf`
 - AKV sync exporter wiring is in `terraform/akv_sync_exporter.tf`
+- Remote backend block is in terraform/provider.tf (partial config); per-env keys are in terraform/backends/*.tfbackend
+- .gitignore has `scripts/*` with explicit exceptions: use `!scripts/<name>` pattern to track new scripts
 
 ---
 
@@ -271,4 +273,16 @@
   - Catastrophic-recovery drills need both control-plane evidence and workload-serving evidence; cluster API readiness alone is not enough for the `US-025` acceptance bar
   - Failing fast on placeholder-filled claims is safer than letting Crossplane or ArgoCD fail later with partial side effects
   - Simple HTTP continuity probes are a good default, but business-critical services should also expose or reuse authenticated synthetic checks for stronger DR evidence
+---
+
+## 2026-05-22 - US-V3-01
+- Created scripts/bootstrap-tfstate.sh: idempotent Azure CLI script that creates rg-tfstate-bootstrap with CanNotDelete management lock, storage account stplatformtfstate (GRS, StorageV2, TLS1.2, no public blob access), enables blob versioning, and creates the tfstate container
+- Added azurerm backend block (partial config) to terraform/provider.tf: resource_group_name, storage_account_name, container_name hardcoded; key supplied per-env via -backend-config flag
+- Created 7 per-environment backend config files in terraform/backends/: mgmt-we, mgmt-ne, dev, staging, prod-we, prod-ne, seed-wus — each with partitioned key tfstate/<env>/<cluster>.tfstate
+- Added !scripts/bootstrap-tfstate.sh exception to .gitignore (scripts/* is excluded by default)
+- `terraform init -backend=false && terraform validate` passes
+- **Learnings for future iterations:**
+  - `terraform validate` now requires `terraform init -backend=false` first since provider.tf has a backend block (without -backend=false, init tries to connect to Azure)
+  - .gitignore blocks scripts/* — always add a `!scripts/<filename>` exception for new tracked scripts
+  - azurerm backend with partial config (no key in provider.tf) allows per-env init via -backend-config; this is the correct pattern for multi-environment state partitioning
 ---

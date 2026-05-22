@@ -501,8 +501,8 @@
         "Given the bootstrap is complete, When I run terraform init in any environment, Then the backend resolves successfully against the partitioned key tfstate/<env>/<cluster>.tfstate."
       ],
       "priority": 28,
-      "passes": false,
-      "notes": "PRD-v3 [P0]. FR: FR-V3-01, FR-V3-02. ADR: ADR-023-v3. Closes finding F-01 (no remote backend). Requires /scripts/bootstrap-tfstate.sh idempotent Azure CLI script and azurerm backend block per env."
+      "passes": true,
+      "notes": "Implemented on 2026-05-22 by adding scripts/bootstrap-tfstate.sh (idempotent Azure CLI script: creates rg-tfstate-bootstrap with CanNotDelete lock, storage account stplatformtfstate with GRS/TLS1.2/blob-versioning, and tfstate container) and wiring the azurerm backend block in terraform/provider.tf (partial config: resource_group_name, storage_account_name, container_name hardcoded; key supplied per-env via -backend-config=backends/<env>.tfbackend). Created seven backend config files in terraform/backends/ covering all cluster environments (mgmt-we, mgmt-ne, dev, staging, prod-we, prod-ne, seed-wus) with keys matching tfstate/<env>/<cluster>.tfstate. terraform validate passes with -backend=false. Live bootstrap verification requires az login + real Azure subscription."
     },
     {
       "id": "US-V3-02",
