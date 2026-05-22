@@ -1,0 +1,38 @@
+# .pre-commit-config.yaml — canonical local hook runner (US-V3-10, US-V3-11)
+#
+# Exactly 6 hooks required at v3 GA (ADR-025-v3, FR-V3-14):
+#   terraform_fmt, terraform_validate, tflint, detect-private-key,
+#   end-of-file-fixer, trailing-whitespace
+#
+# Install: pre-commit install
+# Run all: pre-commit run --all-files
+# Run single: pre-commit run <hook-id> --all-files
+
+repos:
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.92.0
+    hooks:
+      - id: terraform_fmt
+        args:
+          - --args=-recursive
+      - id: terraform_validate
+        args:
+          - --args=-no-color
+        additional_dependencies:
+          - terraform>=1.5.0,<2.0.0
+
+  - repo: https://github.com/terraform-linters/tflint
+    rev: v0.55.0
+    hooks:
+      - id: tflint
+        args:
+          - --config=.tflint.hcl
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: detect-private-key
+      - id: end-of-file-fixer
+        exclude: '^(backstage/)'
+      - id: trailing-whitespace
+        exclude: '^(backstage/)'

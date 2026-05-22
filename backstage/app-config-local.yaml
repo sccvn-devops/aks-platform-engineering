@@ -33,10 +33,14 @@ backend:
   https:
     certificate:
       type: 'pem'
+      # TLS material removed from git (US-V3-05). For local dev, generate a self-signed cert:
+      #   openssl req -x509 -newkey rsa:2048 -keyout /tmp/tls.key -out /tmp/tls.crt -days 365 -nodes -subj '/CN=localhost'
+      # then set env vars: BACKSTAGE_TLS_KEY and BACKSTAGE_TLS_CRT.
+      # In production, certs are issued by AKV and synced via ESO (US-V3-06).
       key:
-          $file: ../terraform/tls.key  #When running a YARN build you will need to make this resolve to the correct path in this case add a . however that will need to change when you build the image for the actual mount point. Alternativley create a local app-config with this removed to run YARN builds.
-      cert: 
-          $file: ../terraform/tls.crt 
+          $env: BACKSTAGE_TLS_KEY
+      cert:
+          $env: BACKSTAGE_TLS_CRT
   # This is for local development only, it is not recommended to use this in production
   # The production database configuration is stored in app-config.production.yaml
   database:

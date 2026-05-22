@@ -87,6 +87,11 @@ site
 # Sensitive credentials
 *-credentials.yaml
 
+# TLS certificate and private key material — never committed; provision via AKV (US-V3-05)
+*.key
+*.crt
+*.pem
+
 # vscode database functionality support files
 *.session.sql
 
@@ -106,3 +111,4 @@ scripts/*
 !scripts/validate-mse-encryption.sh
 !scripts/dr-validation/
 !scripts/dr-validation/validate-mgmt-failover.sh
+!scripts/purge-tls-history.sh

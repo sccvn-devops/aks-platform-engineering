@@ -594,6 +594,20 @@ module "gitops_bridge_bootstrap" {
 # Backstage: Bootstrap
 ################################################################################
 
+data "azurerm_key_vault_secret" "backstage_tls_crt" {
+  count        = local.build_backstage ? 1 : 0
+  name         = "backstage-tls-crt"
+  key_vault_id = azurerm_key_vault.management_ci.id
+  depends_on   = [azurerm_role_assignment.management_ci_key_vault_admin]
+}
+
+data "azurerm_key_vault_secret" "backstage_tls_key" {
+  count        = local.build_backstage ? 1 : 0
+  name         = "backstage-tls-key"
+  key_vault_id = azurerm_key_vault.management_ci.id
+  depends_on   = [azurerm_role_assignment.management_ci_key_vault_admin]
+}
+
 resource "kubernetes_secret" "tls_secret" {
   count      = local.build_backstage ? 1 : 0
   depends_on = [kubernetes_namespace.backstage_nammespace]
@@ -606,8 +620,8 @@ resource "kubernetes_secret" "tls_secret" {
   type = "kubernetes.io/tls"
 
   data = {
-    "tls.crt" = file("tls.crt") # Adjust the path accordingly
-    "tls.key" = file("tls.key") # Adjust the path accordingly
+    "tls.crt" = data.azurerm_key_vault_secret.backstage_tls_crt[0].value
+    "tls.key" = data.azurerm_key_vault_secret.backstage_tls_key[0].value
   }
 }
 

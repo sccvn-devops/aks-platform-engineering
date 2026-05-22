@@ -411,3 +411,25 @@ variable "cosign_public_key_pem" {
   -----END PUBLIC KEY-----
   EOT
 }
+
+variable "backstage_tls_crt" {
+  description = "PEM-encoded TLS certificate for Backstage, sourced from AKV at apply time via OIDC federation. Never stored in tfvars."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^-----BEGIN CERTIFICATE-----", var.backstage_tls_crt))
+    error_message = "backstage_tls_crt must be a PEM-encoded certificate beginning with '-----BEGIN CERTIFICATE-----'."
+  }
+}
+
+variable "backstage_tls_key" {
+  description = "PEM-encoded TLS private key for Backstage, sourced from AKV at apply time via OIDC federation. Never stored in tfvars."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^-----BEGIN (RSA |EC |PRIVATE KEY)", var.backstage_tls_key))
+    error_message = "backstage_tls_key must be a PEM-encoded private key."
+  }
+}
