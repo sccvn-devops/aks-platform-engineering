@@ -102,5 +102,6 @@ _docs/
 scripts/*
 !scripts/bootstrap-tfstate.sh
 !scripts/validate-state-partitioning.sh
+!scripts/validate-blob-lease-locking.sh
 !scripts/dr-validation/
 !scripts/dr-validation/validate-mgmt-failover.sh

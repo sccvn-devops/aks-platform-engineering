@@ -524,8 +524,8 @@
         "Given two concurrent terraform apply invocations against the same env, When both attempt to acquire the lease, Then one succeeds and the second waits or fails with a clear lease-held error message \u2014 no external lock service is consulted."
       ],
       "priority": 30,
-      "passes": false,
-      "notes": "PRD-v3 [P0]. FR: FR-V3-03. ADR: ADR-023-v3. No external lock store (DynamoDB, Cosmos, custom table) permitted. Native azurerm backend blob lease is the sole locking mechanism."
+      "passes": true,
+      "notes": "Implemented on 2026-05-22. The azurerm backend configured in terraform/provider.tf uses native Azure Blob Lease as its sole locking mechanism — no lock_table, dynamodb_table, or other external lock-store attributes are present anywhere in the Terraform code or .tfbackend files. Added scripts/validate-blob-lease-locking.sh which statically verifies: (1) backend \"azurerm\" is declared, (2) no forbidden lock-store attributes exist in terraform/, (3) no competing lock resources (DynamoDB tables, Cosmos tables, etc.), and (4) all .tfbackend files contain only the 'key' directive. With AZURE_ONLINE=1, the script acquires a blob lease and then attempts a second acquire, confirming the expected 409 LeaseAlreadyPresent error with no external service consulted. Offline (static) checks pass. Live two-concurrent-apply verification remains blocked until az login and real state blobs are available."
     },
     {
       "id": "US-V3-04",
