@@ -101,5 +101,6 @@ _docs/
 # private scripts
 scripts/*
 !scripts/bootstrap-tfstate.sh
+!scripts/validate-state-partitioning.sh
 !scripts/dr-validation/
 !scripts/dr-validation/validate-mgmt-failover.sh

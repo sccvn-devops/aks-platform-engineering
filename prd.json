@@ -513,8 +513,8 @@
         "Given an apply in dev is in progress, When an apply is initiated in prod-we, Then the second apply is not blocked because the lease is scoped to the dev blob only."
       ],
       "priority": 29,
-      "passes": false,
-      "notes": "PRD-v3 [P0]. FR: FR-V3-02. ADR: ADR-023-v3. Closes F-01 state-partitioning concern. Exactly 7 state keys required; cross-env applies must not block each other."
+      "passes": true,
+      "notes": "Implemented on 2026-05-22. The 7 partitioned backend config files from US-V3-01 (terraform/backends/*.tfbackend) already satisfy criterion 1: exactly 7 keys matching tfstate/<env>/<cluster>.tfstate. Criterion 2 (cross-env lease isolation) is inherent to the azurerm backend — each environment uses a distinct blob path, so blob leases are scoped per-blob and concurrent dev + prod-we applies do not block each other. Added scripts/validate-state-partitioning.sh which verifies exactly 7 backend files with correct key patterns, checks for disallowed backend \"local\" declarations, and (with AZURE_ONLINE=1) lists actual Azure blob keys after apply. Fixed scripts/bootstrap-tfstate.sh to include --allow-shared-key-access false per ADR-023-v3 decision #6. Updated .gitignore to track the new script. terraform validate and validate-state-partitioning.sh both pass."
     },
     {
       "id": "US-V3-03",

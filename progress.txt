@@ -275,6 +275,19 @@
   - Simple HTTP continuity probes are a good default, but business-critical services should also expose or reuse authenticated synthetic checks for stronger DR evidence
 ---
 
+## 2026-05-22 - US-V3-02
+- Verified 7 partitioned backend config files from US-V3-01 satisfy acceptance criterion 1 (exactly 7 keys: tfstate/mgmt-we/mgmt-we.tfstate, tfstate/mgmt-ne/mgmt-ne.tfstate, tfstate/dev/aks-dev-we.tfstate, tfstate/staging/aks-staging-we.tfstate, tfstate/prod-we/aks-prod-we.tfstate, tfstate/prod-ne/aks-prod-ne.tfstate, tfstate/seed-wus/seed-wus.tfstate)
+- Cross-env lease isolation (criterion 2) is inherent to azurerm backend: distinct blob paths = distinct leases = no cross-env blocking
+- Fixed scripts/bootstrap-tfstate.sh: added --allow-shared-key-access false per ADR-023-v3 decision #6
+- Created scripts/validate-state-partitioning.sh: validates 7 backends exist with correct key patterns, checks no backend "local" declarations, optionally lists Azure blobs with AZURE_ONLINE=1
+- Updated .gitignore to track scripts/validate-state-partitioning.sh (scripts/* is excluded by default)
+- Files changed: scripts/bootstrap-tfstate.sh, scripts/validate-state-partitioning.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - Azure blob lease locking is per-blob by azurerm backend default; no additional configuration needed for cross-env isolation
+  - --allow-shared-key-access false is required for ADR-023-v3 compliance; prevents key-based auth to the state SA (OIDC/Entra auth only)
+  - validate-state-partitioning.sh doubles as a CI-compatible check (exit 1 on failure) and a pre-flight operator check (AZURE_ONLINE=1 for live blob listing)
+---
+
 ## 2026-05-22 - US-V3-01
 - Created scripts/bootstrap-tfstate.sh: idempotent Azure CLI script that creates rg-tfstate-bootstrap with CanNotDelete management lock, storage account stplatformtfstate (GRS, StorageV2, TLS1.2, no public blob access), enables blob versioning, and creates the tfstate container
 - Added azurerm backend block (partial config) to terraform/provider.tf: resource_group_name, storage_account_name, container_name hardcoded; key supplied per-env via -backend-config flag

@@ -76,6 +76,7 @@ if ! az storage account show \
     --sku Standard_GRS \
     --kind StorageV2 \
     --allow-blob-public-access false \
+    --allow-shared-key-access false \
     --min-tls-version TLS1_2 \
     --output none
 else
