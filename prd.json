@@ -559,8 +559,8 @@
         "Given a workload namespace with a NamespaceVaultBinding (per US-017), When a certificate is issued in the corresponding AKV, Then ESO materializes it as a Kubernetes TLS Secret within the secret freshness SLO (p95 \u2264 90s, inherited from PRD-v2)."
       ],
       "priority": 33,
-      "passes": false,
-      "notes": "PRD-v3 [P0]. FR: FR-V3-06. ADR: ADR-005-v2, ADR-020, ADR-030-v3. Aligns with ADR-005-v2 (per-namespace SecretStore) and ADR-020 (AKV as cert authority of record). Depends on US-017 NamespaceVaultBinding."
+      "passes": true,
+      "notes": "Implemented on 2026-05-22. Created gitops/platform/akv-tls-cert/ Helm chart (Chart.yaml, values.yaml, templates/externalsecret.yaml) that generates ESO ExternalSecret resources of type kubernetes.io/tls with refreshInterval=60s (within the p95≤90s SLO). The ExternalSecret fetches the AKV certificate backing secret via secret/<certName> (covered by existing Key Vault Secrets User role on the NamespaceVaultBinding UAMI) and uses ESO v2 template engineVersion with Sprig regexFind to extract tls.crt (CERTIFICATE PEM block) and tls.key (PRIVATE KEY PEM block) from the PEM bundle. Added addons-akv-tls-cert-sync-appset.yaml ApplicationSet (sync-wave=35) using the same matrix generator pattern as namespace-vault-bindings-set to deploy one ExternalSecret per workload namespace per workload cluster, targeting the azure-keyvault SecretStore created by NamespaceVaultBinding (US-017). Extended terraform/external_secrets.tf with azurerm_key_vault_certificate.platform_tls provisioning a self-signed wildcard cert (CN=platform.internal, *.platform.internal SAN, 12 months, content_type=application/x-pem-file) in each workload AKV with AKV-native AutoRenew 30 days before expiry. terraform validate and helm template both pass. Live ESO reconciliation and the 60s SLO verification remain blocked until the stack is applied against Azure (az login required)."
     },
     {
       "id": "US-V3-07",

@@ -83,3 +83,53 @@ resource "azurerm_key_vault_secret" "cosign_public_key" {
     azurerm_key_vault_key.management_ci_cosign,
   ]
 }
+
+# Self-signed platform TLS certificate issued by AKV in each workload vault.
+# ESO syncs the backing PEM secret (secret/platform-tls) to a kubernetes.io/tls
+# Secret in every workload namespace via the addons-akv-tls-cert-sync ApplicationSet.
+# content_type = application/x-pem-file ensures the backing secret is PEM-encoded
+# so the ESO v2 template regexFind can extract tls.crt and tls.key correctly.
+# AKV auto-renews 30 days before expiry; ESO re-syncs within 60 s of the new version.
+resource "azurerm_key_vault_certificate" "platform_tls" {
+  for_each = local.workload_key_vaults
+
+  name         = "platform-tls"
+  key_vault_id = azurerm_key_vault.platform[each.key].id
+
+  certificate_policy {
+    issuer_parameters {
+      name = "Self"
+    }
+    key_properties {
+      exportable = true
+      key_size   = 2048
+      key_type   = "RSA"
+      reuse_key  = false
+    }
+    lifetime_action {
+      action {
+        action_type = "AutoRenew"
+      }
+      trigger {
+        days_before_expiry = 30
+      }
+    }
+    secret_properties {
+      content_type = "application/x-pem-file"
+    }
+    x509_certificate_properties {
+      extended_key_usage = ["1.3.6.1.5.5.7.3.1"]
+      key_usage          = ["digitalSignature", "keyEncipherment"]
+      subject            = "CN=platform.internal"
+      validity_in_months = 12
+      subject_alternative_names {
+        dns_names = ["*.platform.internal"]
+      }
+    }
+  }
+
+  depends_on = [
+    azurerm_role_assignment.platform_key_vault_admin,
+    azurerm_role_assignment.current_operator_key_vault_admin,
+  ]
+}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: akv-tls-cert
+description: Materialise AKV-issued certificates as Kubernetes TLS Secrets via ESO
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

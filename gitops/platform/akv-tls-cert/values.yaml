@@ -1,0 +1,16 @@
+namespace: ""
+
+secretStore:
+  name: azure-keyvault
+  kind: SecretStore
+
+# List of certificates to sync from AKV as kubernetes.io/tls Secrets.
+# The backing AKV secret (secret/<certName>) is fetched using Key Vault Secrets User
+# and split into tls.crt / tls.key via ESO v2 template regexFind.
+# refreshInterval defaults to 60s, satisfying the p95 ≤ 90s secret freshness SLO.
+certificates: []
+# Example:
+# - name: platform-tls          # ExternalSecret resource name
+#   certName: platform-tls      # AKV certificate object name
+#   targetName: platform-tls    # k8s Secret name (defaults to name)
+#   refreshInterval: 60s        # defaults to 60s if omitted
