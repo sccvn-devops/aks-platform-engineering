@@ -1,19 +1,19 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: CompositeResourceDefinition
 metadata:
-  name: xnamespaceroutoutpolicies.platform.cityos.io
+  name: xnamespacerolloutpolicies.platform.cityos.io
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
   defaultCompositionRef:
-    name: namespaceroutoutpolicy-bronze.platform.cityos.io
+    name: namespacerolloutpolicy-bronze.platform.cityos.io
   group: platform.cityos.io
   names:
     kind: XNamespaceRolloutPolicy
-    plural: xnamespaceroutoutpolicies
+    plural: xnamespacerolloutpolicies
   claimNames:
     kind: NamespaceRolloutPolicy
-    plural: namespaceroutoutpolicies
+    plural: namespacerolloutpolicies
   versions:
     - name: v1alpha1
       served: true

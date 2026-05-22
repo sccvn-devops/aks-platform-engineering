@@ -17,6 +17,8 @@ spec:
                 addonChartVersion: '{{metadata.labels.argo_rollouts_chart_version}}'
                 addonChartRepository: https://argoproj.github.io/argo-helm
               selector:
+                matchLabels:
+                  role: workload
                 matchExpressions:
                   - key: enable_argo_rollouts
                     operator: In

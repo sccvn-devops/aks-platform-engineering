@@ -273,7 +273,7 @@ def build_gitops_files(req: ServiceRequest) -> dict[str, str]:
 def build_infra_files(req: ServiceRequest) -> dict[str, str]:
     service = req.service_slug
     slo = req.slo_class
-    namespace_rollout_composition = f"namespaceroutoutpolicy-{slo}.platform.cityos.io"
+    namespace_rollout_composition = f"namespacerolloutpolicy-{slo}.platform.cityos.io"
     files = {
         f"apps/{service}/infra/base/kustomization.yaml": "\n".join(
             [

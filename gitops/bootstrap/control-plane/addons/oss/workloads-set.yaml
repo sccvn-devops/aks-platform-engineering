@@ -2,6 +2,8 @@ apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: workloads-set
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
 spec:
   goTemplate: true
   goTemplateOptions:

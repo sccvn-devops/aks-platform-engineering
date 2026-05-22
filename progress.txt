@@ -162,7 +162,7 @@
 ---
 
 ## 2026-05-21 - US-019
-- Added XRD xnamespaceroutoutpolicies.platform.cityos.io in gitops/platform/crossplane/xrd-namespace-rollout-policy.yaml
+- Added XRD xnamespacerolloutpolicies.platform.cityos.io in gitops/platform/crossplane/xrd-namespace-rollout-policy.yaml
 - Added three Compositions in composition-namespace-rollout-policy.yaml: gold (success-rate>=99%, p99-latency<=500ms, steps 5/25/50/100 with 5m pauses), silver (success-rate>=99%, steps 25/100), bronze (direct cutover setWeight=100)
 - Added RolloutAnalysisFailed PrometheusRule (for: 0s on rollout_phase=Degraded) in gitops/platform/rollout-alerts/ Helm chart
 - ApplicationSet addons-rollout-alerts-appset.yaml deploys alerts to all workload clusters with enable_argo_rollouts=true
