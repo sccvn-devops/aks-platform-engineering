@@ -1,3 +1,20 @@
+## 2026-05-22 - US-V3-06
+- Created gitops/platform/akv-tls-cert/ Helm chart: Chart.yaml, values.yaml, templates/externalsecret.yaml
+- ExternalSecret generates type: kubernetes.io/tls with refreshInterval: 60s (p95 ≤ 90s SLO)
+- Uses ESO v2 template engineVersion with Sprig regexFind to split PEM bundle into tls.crt and tls.key
+- Fetches via secret/<certName> (AKV backing secret for certificate) — covered by existing Key Vault Secrets User role
+- Created addons-akv-tls-cert-sync-appset.yaml (sync-wave=35): matrix generator git dirs + workload clusters, deploys to <svc>-<env> namespaces using azure-keyvault SecretStore from NamespaceVaultBinding
+- Extended terraform/external_secrets.tf: azurerm_key_vault_certificate.platform_tls in all workload AKVs (self-signed, CN=platform.internal, *.platform.internal SAN, content_type=application/x-pem-file, AutoRenew 30d before expiry)
+- terraform validate and helm template pass; live ESO sync verification blocked (no az login)
+- Files changed: gitops/platform/akv-tls-cert/{Chart.yaml,values.yaml,templates/externalsecret.yaml}, gitops/bootstrap/control-plane/addons/oss/addons-akv-tls-cert-sync-appset.yaml, terraform/external_secrets.tf, prd.json
+- **Learnings for future iterations:**
+  - Helm escapes ESO template delimiters: use `{{ "{{" }}` and `{{ "}}" }}` to pass `{{ }}` through as ESO template expressions
+  - ESO v2 template with `engineVersion: v2` supports Sprig functions including `regexFind` with Go regex (?s) flag for multiline PEM matching
+  - AKV certificate backing secret (secret/<name>) is accessible via Key Vault Secrets User role — no need for Key Vault Certificates Officer for ESO cert sync
+  - content_type = "application/x-pem-file" on azurerm_key_vault_certificate ensures PEM-encoded backing secret; application/x-pkcs12 would give base64 PKCS#12 blob that can't be regex-parsed
+  - `(?s)-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----` and `(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----` are the correct Go regex patterns for extracting PEM blocks
+---
+
 ## Codebase Patterns
 - Terraform `validate` is the "typecheck" gate — run from `terraform/` directory with `terraform init -backend=false -input=false` first (now required since provider.tf has a backend block)
 - Stories blocked on `az login` can still be marked `passes: true` when code is in place and `terraform validate` passes (see US-001, US-018 as precedent)
