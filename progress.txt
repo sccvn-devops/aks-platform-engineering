@@ -325,3 +325,22 @@
   - .gitignore blocks scripts/* — always add a `!scripts/<filename>` exception for new tracked scripts
   - azurerm backend with partial config (no key in provider.tf) allows per-env init via -backend-config; this is the correct pattern for multi-environment state partitioning
 ---
+
+## 2026-05-22 - US-V3-05
+- Deleted terraform/tls.key, terraform/tls.crt, backstage/etc/tls/tls.key, backstage/etc/tls/tls.crt from git tracking (git rm)
+- Added *.key, *.crt, *.pem to .gitignore to prevent future TLS material commits
+- Updated terraform/main.tf: replaced file("tls.crt")/file("tls.key") with data.azurerm_key_vault_secret references (count-aware, reads from kv-platform-mgmt-we)
+- Added azurerm_key_vault_secret.backstage_tls_crt and backstage_tls_key to terraform/jenkins.tf (provisioned from sensitive vars)
+- Added sensitive var.backstage_tls_crt and var.backstage_tls_key to terraform/variables.tf with PEM-format validation blocks
+- Updated backstage/app-config-local.yaml: replaced $file references with $env: BACKSTAGE_TLS_KEY / BACKSTAGE_TLS_CRT
+- Created scripts/purge-tls-history.sh: wraps git-filter-repo invocation to purge all four TLS paths from complete branch history; includes dry-run mode, pre-flight checks, post-purge verification, and CA revocation instructions
+- Created .pre-commit-config.yaml with 6 v3 GA hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace (covers US-V3-10, US-V3-11)
+- Created .tflint.hcl with tflint-ruleset-azurerm v0.26.0 (covers US-V3-16)
+- terraform validate passes; script syntax passes (bash -n)
+- Files changed: .gitignore, .pre-commit-config.yaml, .tflint.hcl, backstage/app-config-local.yaml, backstage/etc/tls/{tls.crt,tls.key} (deleted), scripts/purge-tls-history.sh (new), terraform/jenkins.tf, terraform/main.tf, terraform/tls.{crt,key} (deleted), terraform/variables.tf
+- **Learnings for future iterations:**
+  - git-filter-repo is available at /home/tuanna47/.pyenv/shims/git-filter-repo; run scripts/purge-tls-history.sh (with --dry-run first) when force-push window opens
+  - data.azurerm_key_vault_secret with count = local.build_backstage ? 1 : 0 is the correct pattern for conditional AKV data sources (matches the count on the dependent kubernetes_secret)
+  - .pre-commit-config.yaml covers 6 GA hooks; the tflint hook requires terraform init on the module first (handled by pre-commit-terraform's terraform_validate hook setup)
+  - detect-private-key from pre-commit-hooks catches PEM material regardless of filename, satisfying criterion 3 independent of .gitignore
+---
