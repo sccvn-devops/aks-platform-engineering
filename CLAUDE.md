@@ -104,3 +104,17 @@ Terraform labels the AKS cluster metadata with which addons to enable (e.g., `en
 - YAML: 2-space indent
 - Backstage: PascalCase for React components, camelCase for functions, `*.test.tsx` / `*.spec.ts` for tests
 - Conventional commits preferred; include issue/PR ref when available
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `sccvn-devops/aks-platform-engineering`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default canonical label names (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo. ADRs live at `_docs/IDP-GitOps-ADRs-v2.md` (not `docs/adr/`). See `docs/agents/domain.md`.

@@ -491,6 +491,283 @@
       "priority": 27,
       "passes": true,
       "notes": "Implemented the repo-side catastrophic recovery path on 2026-05-21 by adding a concrete seed-cluster recovery claim at `bootstrap/control-plane-claim.yaml`, extending the Crossplane AKS composition in `gitops/clusters/crossplane/base/cluster/aks-composition.yaml` so claim metadata can bootstrap Argo CD from this repository and recreate the management-cluster metadata contract used by the control-plane addon ApplicationSets, and adding `scripts/dr-validation/validate-seed-cluster-dr.sh` plus `docs/seed-cluster-dr-runbook.md` to run and document the drill. Local verification passed with `bash -n scripts/dr-validation/validate-seed-cluster-dr.sh`, `kubectl kustomize bootstrap`, and `kubectl kustomize gitops/clusters/crossplane/base/cluster`. Repo-side implementation is complete; the remaining Azure-backed drill evidence still requires a real run with populated claim metadata, a reachable `seed-wus` cluster, and workload URLs/contexts so blob-lease acquisition, measured RTO <= 45 minutes, and workload traffic continuity can be captured operationally."
+    },
+    {
+      "id": "US-V3-01",
+      "title": "Remote State Backend with Out-of-Band Bootstrap",
+      "description": "As a platform engineer, I want Terraform state stored in a remote AzureRM backend bootstrapped out-of-band so that I never risk state loss from a developer laptop and the chicken-and-egg of \"Terraform managing its own state SA\" never arises.",
+      "acceptanceCriteria": [
+        "Given a fresh subscription with no Terraform footprint, When I run /scripts/bootstrap-tfstate.sh once, Then the resource group rg-tfstate-bootstrap exists with a CanNotDelete management lock, the storage account is provisioned, blob versioning is enabled, and re-running the script is idempotent.",
+        "Given the bootstrap is complete, When I run terraform init in any environment, Then the backend resolves successfully against the partitioned key tfstate/<env>/<cluster>.tfstate."
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-01, FR-V3-02. ADR: ADR-023-v3. Closes finding F-01 (no remote backend). Requires /scripts/bootstrap-tfstate.sh idempotent Azure CLI script and azurerm backend block per env."
+    },
+    {
+      "id": "US-V3-02",
+      "title": "Per-Environment State Partitioning",
+      "description": "As a platform engineer, I want one state file per cluster so that blast radius from a corrupted lock or a botched apply is bounded to a single environment.",
+      "acceptanceCriteria": [
+        "Given the state account is bootstrapped, When I list state keys after the initial apply of all environments, Then exactly seven keys exist: tfstate/mgmt-we/..., tfstate/mgmt-ne/..., tfstate/dev/..., tfstate/staging/..., tfstate/prod-we/..., tfstate/prod-ne/..., tfstate/seed-wus/....",
+        "Given an apply in dev is in progress, When an apply is initiated in prod-we, Then the second apply is not blocked because the lease is scoped to the dev blob only."
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-02. ADR: ADR-023-v3. Closes F-01 state-partitioning concern. Exactly 7 state keys required; cross-env applies must not block each other."
+    },
+    {
+      "id": "US-V3-03",
+      "title": "Native Azure Blob Lease Locking",
+      "description": "As a platform engineer, I want state locking handled by the azurerm backend's native blob lease so that there is no second locking system to operate.",
+      "acceptanceCriteria": [
+        "Given two concurrent terraform apply invocations against the same env, When both attempt to acquire the lease, Then one succeeds and the second waits or fails with a clear lease-held error message \u2014 no external lock service is consulted."
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-03. ADR: ADR-023-v3. No external lock store (DynamoDB, Cosmos, custom table) permitted. Native azurerm backend blob lease is the sole locking mechanism."
+    },
+    {
+      "id": "US-V3-04",
+      "title": "State Encryption with MSE",
+      "description": "As a platform engineer, I want server-side encryption with Microsoft-managed keys enabled on the state SA so that data-at-rest protection is guaranteed without taking on CMK operational cost in v3.",
+      "acceptanceCriteria": [
+        "Given the state SA exists, When I read its encryption configuration, Then encryption.services.blob.enabled = true with keyType = Microsoft-managed, and no CMK references are present."
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-04. ADR: ADR-023-v3. MSE only for v3; CMK migration tracked as roadmap item OQ-V3-04 and must not be retrofitted inside v3."
+    },
+    {
+      "id": "US-V3-05",
+      "title": "Purge TLS Material from Git History",
+      "description": "As a platform engineer, I want all historical `tls.key` and `tls.crt` material removed from git history, the certificate rotated, and the old certificate revoked at the CA so that the compromise window closes.",
+      "acceptanceCriteria": [
+        "Given the repository at HEAD, When I clone it fresh and run git log -p -- '/tls.key', Then no historical content is returned.",
+        "Given the purge is complete, When I check the issuing CA, Then the old certificate is in the revocation list and a new certificate is bound to the live workload.",
+        "Given the purge is complete, When any developer attempts to commit a file matching *.key or *.crt, Then .gitignore excludes it and the detect-private-key hook rejects PEM content regardless of filename."
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-05, FR-V3-07. ADR: ADR-030-v3. Closes P0 finding F-06. git filter-repo purge + force-push required; coordinate cutover per OQ-V3-03. *.key and *.crt added to .gitignore."
+    },
+    {
+      "id": "US-V3-06",
+      "title": "AKV-Issued Certs via ESO",
+      "description": "As a platform engineer, I want all platform certificates issued by Azure Key Vault and synced into Kubernetes by ESO so that no certificate material ever lives in git.",
+      "acceptanceCriteria": [
+        "Given a workload namespace with a NamespaceVaultBinding (per US-017), When a certificate is issued in the corresponding AKV, Then ESO materializes it as a Kubernetes TLS Secret within the secret freshness SLO (p95 \u2264 90s, inherited from PRD-v2)."
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-06. ADR: ADR-005-v2, ADR-020, ADR-030-v3. Aligns with ADR-005-v2 (per-namespace SecretStore) and ADR-020 (AKV as cert authority of record). Depends on US-017 NamespaceVaultBinding."
+    },
+    {
+      "id": "US-V3-07",
+      "title": "AKV-Sourced Sensitive TF Variables",
+      "description": "As a platform engineer, I want every sensitive Terraform variable sourced from AKV via `data \"azurerm_key_vault_secret\"` so that no sensitive value ever lands in a tfvars file or default expression.",
+      "acceptanceCriteria": [
+        "Given the Terraform code base, When I grep for default = on variables flagged sensitive, Then zero matches are returned.",
+        "Given a CI run, When the job starts, Then sensitive TF_VAR_* values are populated from AKV via OIDC federation and are masked in CI logs."
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-08, FR-V3-09. ADR: ADR-030-v3. Closes P0 finding F-05. No plaintext tfvars with sensitive material; OIDC-federated AKV fetch exports TF_VAR_* masked in CI logs."
+    },
+    {
+      "id": "US-V3-08",
+      "title": "RG-Scoped `akspe` and Velero RBAC",
+      "description": "As a platform engineer, I want `akspe` and the Velero UAMI scoped to specific resource groups so that compromise of either does not grant subscription-wide control.",
+      "acceptanceCriteria": [
+        "Given the applied Terraform, When I list role assignments for akspe, Then only Contributor and User Access Administrator are present, and every assignment is scoped to an AKS resource group \u2014 never to the subscription.",
+        "Given the applied Terraform, When I list role assignments for the Velero UAMI, Then only Contributor on the backup RG and Storage Blob Data Contributor on the backup SA are present."
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-10, FR-V3-11. ADR: ADR-024-v3. Closes P0 finding F-07. Subscription-Owner default for akspe must be removed; Velero narrowed to backup RG and storage account."
+    },
+    {
+      "id": "US-V3-09",
+      "title": "AKV-Native Quarterly Rotation",
+      "description": "As a platform engineer, I want quarterly rotation of keys and certificates handled by AKV-native rotation policies and federation for identities so that v3 introduces no new manual rotation toil.",
+      "acceptanceCriteria": [
+        "Given an AKV key or certificate provisioned by v3, When I inspect its rotation policy, Then a quarterly policy is attached and the next rotation timestamp is visible.",
+        "Given a UAMI or SP used by the platform, When I inspect its credential profile, Then it is federated via Workload Identity with no client secret on record."
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": "PRD-v3 [P0]. FR: FR-V3-12. ADR: ADR-006-v2, ADR-030-v3. AKV-native quarterly rotation policies required on all v3-provisioned keys and certs. No static credentials on any UAMI or SP."
+    },
+    {
+      "id": "US-V3-10",
+      "title": "Adopt `pre-commit` Framework",
+      "description": "As a platform engineer, I want `pre-commit` to be the canonical local hook runner so that every contributor runs the same checks locally that CI runs centrally.",
+      "acceptanceCriteria": [
+        "Given a fresh clone, When I run pre-commit install, Then the hook set described in FR-V3-14 is registered and any subsequent commit triggers it."
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-13. ADR: ADR-025-v3. Closes P1 finding F-02. .pre-commit-config.yaml at repo root is the single source of truth for hook configuration."
+    },
+    {
+      "id": "US-V3-11",
+      "title": "Minimal v3 Hook Set",
+      "description": "As a platform engineer, I want a small, fast, deterministic hook set in v3 so that local commits are not bogged down by long-running checks while still catching the worst defects.",
+      "acceptanceCriteria": [
+        "Given .pre-commit-config.yaml at HEAD, When I enumerate the hooks, Then exactly terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, and trailing-whitespace are configured \u2014 no more, no fewer, at v3 GA."
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-14. ADR: ADR-025-v3. Exactly 6 hooks required at v3 GA. Additional hooks must be proposed via ADR."
+    },
+    {
+      "id": "US-V3-12",
+      "title": "GitHub Actions Meta-CI",
+      "description": "As a platform engineer, I want platform-repo CI on GitHub Actions so that the workflow runs on infrastructure not coupled to the `mgmt-we` cluster whose Terraform is being changed.",
+      "acceptanceCriteria": [
+        "Given a PR against main, When it opens or updates, Then a GitHub Actions workflow runs terraform fmt, terraform validate, tflint, checkov, and terraform plan per env.",
+        "Given the platform-repo CI exists, When I inspect Jenkins, Then application CI continues to run there per ADR-001-v2 with no v3-driven change."
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-15. ADR: ADR-025-v3, ADR-001-v2. GitHub Actions for platform meta-CI only. App CI stays on Jenkins per ADR-001-v2. No displacement of Jenkins by v3."
+    },
+    {
+      "id": "US-V3-13",
+      "title": "Phased Blocking Gates",
+      "description": "As a platform engineer, I want gates phased so that the team absorbs new failure modes without being swamped at cutover.",
+      "acceptanceCriteria": [
+        "Given day-1 of v3 rollout, When a PR fails terraform_fmt, terraform_validate, or tflint, Then the PR is blocked from merging.",
+        "Given sprint-1 of v3 rollout, When a PR fails checkov, Then a warning is posted but the PR is not blocked.",
+        "Given sprint-2 of v3 rollout, When a PR fails checkov and the baseline does not cover the finding, Then the PR is blocked."
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-16. ADR: ADR-025-v3, ADR-027-v3. Day-1: fmt/validate/tflint blocking. Sprint-1: checkov advisory. Sprint-2: checkov blocking. Sonar remains advisory for HCL."
+    },
+    {
+      "id": "US-V3-14",
+      "title": "GHA Matrix with Required-Reviewer Apply Gate",
+      "description": "As a platform engineer, I want one CI job per env-state and a `terraform apply` gated by a GitHub Environment with required reviewers so that no environment is changed without an explicit, recorded human decision.",
+      "acceptanceCriteria": [
+        "Given a PR touching Terraform, When CI runs, Then the matrix produces one plan job per env-state listed in FR-V3-02, each posting its plan diff to the PR.",
+        "Given a merge to main, When the apply workflow is invoked, Then each env-state apply job targets its corresponding GitHub Environment (e.g., prod-we), which pauses the run until one of the configured required reviewers approves; approvals and reviewer identities are recorded in the GitHub Actions run history.",
+        "Given an attempt to invoke terraform apply from a PR branch, When the job starts, Then Environment branch protection rejects the deploy because the branch is not main."
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-17. ADR: ADR-025-v3, ADR-030-v3. One GHA Environment per env-state (7 total). At least two @<org>/platform-team members as required reviewers. OIDC subject scoped per Environment. Apply restricted to main branch only."
+    },
+    {
+      "id": "US-V3-15",
+      "title": "Critical-Path Variable Validation",
+      "description": "As a platform engineer, I want validation blocks on the critical-path variables from day-1 so that obvious misconfigurations fail at `plan` rather than at apply.",
+      "acceptanceCriteria": [
+        "Given the v3 Terraform at GA, When I review variables for region, cluster name, SKU tier, CIDR, and environment, Then each carries an inline validation {} block with a clear error_message.",
+        "Given a value such as env = \"qa\" is passed, When terraform plan runs, Then the regex ^(dev|staging|prod)$ rejects it with a meaningful error.",
+        "Given v3 + 2 sprints, When I audit variable coverage, Then 100% of variables carry a validation {} block or are explicitly exempted via a tflint allow-list with rationale."
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-18. ADR: ADR-026-v3. Closes P1 finding F-03. Day-1 set: region, cluster name, SKU tier, CIDR, environment. 100% coverage ratchet over two subsequent sprints."
+    },
+    {
+      "id": "US-V3-16",
+      "title": "Resource-Level Rules via tflint + Custom Detection",
+      "description": "As a platform engineer, I want cloud-resource rules in `tflint-ruleset-azurerm` and a custom rule that flags unvalidated variables so that the validation regime is observable and enforceable.",
+      "acceptanceCriteria": [
+        "Given the tflint config at HEAD, When I list active rulesets, Then tflint-ruleset-azurerm is enabled with documented overrides.",
+        "Given a contributor adds a new variable without validation {}, When tflint runs, Then the custom rule emits a warning (during the ratchet) or an error (post 100%-coverage cutover)."
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-19, FR-V3-20. ADR: ADR-026-v3. tflint-ruleset-azurerm enforces naming/SKU/tag rules. Custom tflint rule flags unvalidated variables: advisory during ratchet, blocking at 100% cutover."
+    },
+    {
+      "id": "US-V3-17",
+      "title": "`.checkov.baseline` with CODEOWNERS Ownership",
+      "description": "As a platform engineer, I want the checkov baseline owned by `@<org>/platform-team` (interim, until a dedicated Platform Security guild exists) so that exceptions are not silently inflated by arbitrary contributors.",
+      "acceptanceCriteria": [
+        "Given the repository, When I open CODEOWNERS, Then .checkov.baseline is owned by @<org>/platform-team (with a TODO comment naming the Security guild as the future owner).",
+        "Given a PR that mutates .checkov.baseline, When CI runs, Then review from a CODEOWNERS member is required before merge.",
+        "Given an inline # checkov:skip=CKV_*:<ticket> without a referenced Jira ticket or with an expired ticket, When checkov runs, Then the build fails."
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-21, FR-V3-22. ADR: ADR-027-v3. Closes P1 finding F-04 (partial). Interim CODEOWNERS owner is @<org>/platform-team; hand-off to Security guild is v3+1 backlog. Inline suppressions require ticket + expiry."
+    },
+    {
+      "id": "US-V3-18",
+      "title": "Checkov in Both pre-commit and CI",
+      "description": "As a platform engineer, I want checkov to run identically in pre-commit and CI so that local failures are reproducible against the same ruleset.",
+      "acceptanceCriteria": [
+        "Given the same commit SHA, When checkov runs locally via pre-commit and in GitHub Actions, Then both consume .checkov.yaml and produce the same exit code and the same finding set."
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": "PRD-v3 [P1]. FR: FR-V3-23. ADR: ADR-027-v3, ADR-025-v3. Single .checkov.yaml shared by pre-commit and CI; identical results for identical commit. Closes F-04 determinism concern."
+    },
+    {
+      "id": "US-V3-19",
+      "title": "SonarQube Scope Limited to TypeScript + Dockerfiles",
+      "description": "As a platform engineer, I want Sonar limited to Backstage TypeScript and Dockerfiles so that we do not double-cover HCL or pay for analysis that produces no incremental signal.",
+      "acceptanceCriteria": [
+        "Given Sonar's project configuration, When I review the inclusion/exclusion patterns, Then TypeScript under backstage/ and Dockerfile* are included and /*.tf is excluded."
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": "PRD-v3 [P2]. FR: FR-V3-24. ADR: ADR-028-v3. Greenfield Sonar onboarding for backstage/. HCL covered by tflint and checkov; no Sonar double-coverage. sonar-project.properties at backstage/sonar-project.properties."
+    },
+    {
+      "id": "US-V3-20",
+      "title": "Configurable Sonar Hosting",
+      "description": "As a platform engineer, I want a documented toggle between SonarCloud SaaS (default) and self-hosted Sonar on `cipool` so that operators can comply with future data-residency or cost constraints without re-engineering the gate.",
+      "acceptanceCriteria": [
+        "Given the v3 release, When an operator sets var.sonar_hosting = \"saas\" (the default), Then the meta-CI uses SonarCloud and no in-cluster Sonar exists.",
+        "Given the v3 release, When an operator sets var.sonar_hosting = \"cipool\", Then Sonar runs on the cipool node pool of mgmt-we (never on systempool of mgmt-we or anywhere on mgmt-ne, per ADR-016-v3-amendment) and CI points at the in-cluster endpoint.",
+        "Given the toggle variable, When any value other than \"saas\" or \"cipool\" is supplied, Then the inline validation {} block on var.sonar_hosting fails terraform plan with a clear error message."
+      ],
+      "priority": 47,
+      "passes": false,
+      "notes": "PRD-v3 [P2]. FR: FR-V3-25, FR-V3-25a. ADR: ADR-028-v3, ADR-016-v3-amendment. var.sonar_hosting enum: 'saas' | 'cipool'. cipool path gated on ADR-016-v3-amendment Accepted. Default 'saas' can ship while amendment is Proposed."
+    },
+    {
+      "id": "US-V3-21",
+      "title": "Sonar Way + 80% New-Code Coverage Override",
+      "description": "As a platform engineer, I want Sonar Way as the default profile with an 80% new-code coverage override so that code quality steadily improves without rewriting history.",
+      "acceptanceCriteria": [
+        "Given the configured profile, When I open the quality gate, Then Sonar Way is selected and the new-code coverage threshold is set to 80%.",
+        "Given sprint-1 of Sonar rollout, When the gate fails for packages/backend, Then a warning is posted but the PR is not blocked.",
+        "Given sprint-2 onward, When the gate fails for packages/backend, Then the PR is blocked."
+      ],
+      "priority": 48,
+      "passes": false,
+      "notes": "PRD-v3 [P2]. FR: FR-V3-26. ADR: ADR-028-v3. Sonar Way quality profile with 80% new-code coverage override. Advisory sprint-1, blocking from sprint-2 for packages/backend."
+    },
+    {
+      "id": "US-V3-22",
+      "title": "Pin Terraform `~> 1.5.0`",
+      "description": "As a platform engineer, I want Terraform pinned to `~> 1.5.0` so that patch upgrades are accepted automatically within the LTS-ish 1.5.x line (the last MPL-licensed series) while minor jumps are deliberate and validated against the full ruleset.",
+      "acceptanceCriteria": [
+        "Given any Terraform module at HEAD, When I read required_version, Then it reads ~> 1.5.0.",
+        "Given CI, When the workflow boots, Then the installed Terraform version satisfies ~> 1.5.0."
+      ],
+      "priority": 49,
+      "passes": false,
+      "notes": "PRD-v3 [P2]. FR: FR-V3-27. ADR: ADR-029-v3. Closes P2 finding F-08. ~> 1.5.0 is last MPL-licensed line; compatible with current tflint, checkov, and azurerm provider toolchain matrix."
+    },
+    {
+      "id": "US-V3-23",
+      "title": "Replace `uuid()` with `random_uuid` Resources",
+      "description": "As a platform engineer, I want every `uuid()` interpolation replaced with a `random_uuid` resource keyed to the cluster name so that no plan diff surfaces without a real input change.",
+      "acceptanceCriteria": [
+        "Given the Terraform code base, When I grep -R 'uuid()' terraform/, Then zero matches are returned.",
+        "Given the same module, When I run terraform plan twice without input changes, Then the second plan is empty.",
+        "Given var.cluster_name changes, When terraform plan runs, Then the random_uuid regenerates as expected. ---"
+      ],
+      "priority": 50,
+      "passes": false,
+      "notes": "PRD-v3 [P2]. FR: FR-V3-28. ADR: ADR-029-v3. Closes P2 finding F-09. random_uuid keepers map: { trigger = var.cluster_name }. Eliminates per-plan drift while preserving regeneration on input change."
     }
   ]
 }

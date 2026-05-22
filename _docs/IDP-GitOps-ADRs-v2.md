@@ -994,3 +994,566 @@ The lease blob is the **authoritative** source of "who is active." Cluster label
 - The decision ledger from the audit (Q1–Q17 → resolutions) is preserved in the blueprint's changelog for traceability.
 
 *End of v2 ADR pack.*
+
+---
+
+# PRD-v3 Addendum — Proposed ADRs (ADR-023-v3 .. ADR-030-v3 + ADR-016-v3-amendment)
+
+The following ADRs are introduced by **PRD-v3** (`IDP-GitOps-Blueprint-PRD-v3.md`, dated 2026-05-22) and remain in **Proposed** status until the v3 readiness review accepts them. They follow the v2 ADR template and cross-reference the PRD-v3 functional requirements (`FR-V3-NN`) and design-grilling questions (`Q-NNN`) they resolve. Number reuse remains forbidden; v3 ADRs occupy the contiguous block ADR-023..ADR-030 plus a named amendment to ADR-016.
+
+| # | Title | Status | Resolves |
+|---|---|---|---|
+| ADR-023-v3 | Terraform Remote State on Azure Storage with Per-Env Files | Proposed (PRD-v3) | Q-001, Q-002, Q-003, Q-004 |
+| ADR-024-v3 | RBAC Scope-Down for Platform UAMIs (akspe, Velero) | Proposed (PRD-v3) | Q-008 |
+| ADR-025-v3 | Pre-commit + GitHub Actions Quality Gates for Platform Repo | Proposed (PRD-v3) | Q-010..Q-014 |
+| ADR-026-v3 | Variable Validation Strategy (Inline + tflint + custom rule) | Proposed (PRD-v3) | Q-015, Q-016 |
+| ADR-027-v3 | Checkov Supply-Chain Scanning with Baseline | Proposed (PRD-v3) | Q-017, Q-018 |
+| ADR-028-v3 | SonarQube Static Analysis (TS + Dockerfile scope, configurable hosting) | Proposed (PRD-v3) | Q-019, Q-020, Q-021, A1, A7 |
+| ADR-029-v3 | Terraform Version Pin (`~> 1.5.0`) and `uuid()` Drift Fix | Proposed (PRD-v3) | Q-022 (corrected), Q-023 |
+| ADR-030-v3 | Credential Sourcing via OIDC + AKV (no plaintext defaults) | Proposed (PRD-v3) | Q-005, Q-006, Q-007, Q-009 |
+| ADR-016-v3-amendment | Permit DX Tools (Jenkins, Sonar) on `cipool` cluster | Proposed — amends ADR-016 | A5, OQ-V3-05 |
+
+---
+
+# ADR-023-v3: Terraform Remote State on Azure Storage with Per-Env Files
+
+**Status:** Proposed (PRD-v3)
+**Date:** 2026-05-22
+**Deciders:** Principal Architect, Platform Lead, SRE Lead
+**Resolves:** Q-001, Q-002, Q-003, Q-004
+**Implements:** FR-V3-01, FR-V3-02, FR-V3-03, FR-V3-04
+
+## Context
+
+The v2 Terraform code base has no remote backend (audit finding F-01). State files live on operator laptops — a single laptop loss, a stale checkout, or a botched `terraform apply` from a stale state risks unbounded damage to the platform. Without remote state there is also no shared lock, so two operators can race the same apply. The audit ranked F-01 as P0 because both data-loss and split-brain failure modes are realistic.
+
+Terraform cannot bootstrap its own state backend without a chicken-and-egg problem: the Storage Account that holds the state cannot itself be defined by code whose state it would host.
+
+## Decision
+
+1. Adopt the AzureRM remote backend for every environment.
+2. Provision the state Storage Account **out of band** by an idempotent Azure CLI script (`/scripts/bootstrap-tfstate.sh`) into a dedicated resource group `rg-tfstate-bootstrap` with a `CanNotDelete` management lock.
+3. Use **one state file per cluster** under the key pattern `tfstate/<env>/<cluster>.tfstate`. Day-1 keys are the seven listed in FR-V3-02. No shared/consolidated state.
+4. Use the AzureRM backend's **native Azure Blob lease** as the lock — the same primitive ADR-022 uses for the mgmt-plane singleton. No external lock store.
+5. Use **Microsoft-managed keys** for the state SA in v3. CMK is roadmap (OQ-V3-04); retrofitting in v3 without a follow-up ADR is forbidden.
+6. The Storage Account has `allowSharedKeyAccess: false`, blob versioning ON, soft-delete 30d, and a private endpoint in the West Europe hub VNet.
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| Terraform Cloud / HCP | Vendor lock, additional egress trust boundary, no operational gain over native AzureRM backend |
+| Self-managed S3-style backend on a foreign cloud | Cross-cloud dependency conflicts with ADR-009 (private posture) |
+| Single shared state file across all envs | Defeats per-env blast-radius isolation; lease contention across unrelated applies |
+| DynamoDB-style external lock store | Re-introduces a foreign-cloud dependency; native blob lease is sufficient |
+| CMK at v3 | Operational cost (rotation, AKV dependency) not justified before MSE baseline is exercised; deferred via OQ-V3-04 |
+
+## Consequences
+
+**Easier:**
+- State loss from laptop failure or stale checkouts is impossible.
+- Concurrent applies against different env-states do not contend.
+- Operational experience with blob leases (ADR-022) transfers directly.
+
+**Harder:**
+- Bootstrap-time chicken-and-egg requires an out-of-band script and a runbook.
+- Migration from local-to-remote state must be rehearsed on `dev` first (per-env, with version snapshots).
+- Storage Account is itself a dependency; SA outage freezes Terraform (but not workloads or ArgoCD).
+
+**Will need to revisit if:**
+- CMK becomes a compliance requirement (then ADR-NN for CMK migration).
+- The platform grows beyond ~20 env-states (key namespace organization may need a second axis).
+
+## Action Items
+1. [ ] Author `/scripts/bootstrap-tfstate.sh` (idempotent).
+2. [ ] Document migration runbook (local → remote) and rehearse on `dev`.
+3. [ ] Add CI check that rejects PRs declaring `backend "local"`.
+4. [ ] Author CMK migration ADR when OQ-V3-04 is committed.
+
+## Related ADRs
+- ADR-022 — Blob Lease as singleton lock; same primitive reused here.
+- ADR-029-v3 — Terraform version pin (compatible with this backend).
+- ADR-030-v3 — Credential sourcing for the backend itself (OIDC at TF-time).
+
+---
+
+# ADR-024-v3: RBAC Scope-Down for Platform UAMIs (akspe, Velero)
+
+**Status:** Proposed (PRD-v3)
+**Date:** 2026-05-22
+**Deciders:** Principal Architect, Security Lead, Platform Lead
+**Resolves:** Q-008
+**Implements:** FR-V3-10, FR-V3-11
+
+## Context
+
+Audit finding F-07: the `akspe` user-assigned managed identity was granted **Owner at subscription scope** during early v2 development. The Velero UAMI carried similarly over-broad scopes. Both were expedient — every Terraform apply just worked — but compromise of either UAMI would have authorized arbitrary mutation of every resource in the subscription, including other teams' production data. Every higher-layer control (Kyverno admission, ESO per-namespace UAMI, ADR-020 per-namespace SecretStore) becomes window-dressing when the foundational identity is subscription-Owner.
+
+## Decision
+
+1. The `akspe` UAMI holds **Contributor** and **User Access Administrator** scoped to **each AKS resource group** (`rg-aks-<env>-<region>`). Never at subscription scope. Never `Owner`.
+2. The Velero UAMI holds **Contributor** on its backup resource group and **Storage Blob Data Contributor** on its backup Storage Account. Nothing else.
+3. The `gha-platform-ci` UAMI (referenced by ADR-030-v3) holds **Key Vault Secrets User** scoped to each per-env AKV — read-only at TF-time. No write roles, no subscription scope.
+4. A CI assertion runs `az role assignment list --assignee <UAMI>` on every PR and **fails the build** if any assignment is at subscription scope or carries `Owner`.
+5. A tflint custom rule warns on any new `azurerm_role_assignment` whose `scope` resolves to `data.azurerm_subscription.current.id`.
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| Keep subscription-Owner ("convenience") | The audit finding; defeats every higher control |
+| Split `akspe` into per-cluster UAMIs | Increases identity sprawl; RG scope is already a clean blast-radius boundary |
+| Use Azure built-in `Reader` + bespoke custom role for the writes `akspe` actually needs | Custom role drift; v3 ships with built-ins and revisits only if the over-grant of `Contributor` proves problematic |
+
+## Consequences
+
+**Easier:**
+- Compromise blast-radius is bounded to one AKS resource group.
+- The principle of least privilege is enforceable, not aspirational.
+
+**Harder:**
+- Any new resource type `akspe` provisions outside the AKS RGs requires a new role assignment (and review).
+- Velero needs its backup RG carved out distinctly from AKS RGs (already the case).
+
+**Will need to revisit if:**
+- The platform adopts a tighter custom role to replace `Contributor` (likely a follow-up; tracked outside v3).
+
+## Action Items
+1. [ ] Remove subscription-scoped `Owner` from `akspe` in Terraform.
+2. [ ] Add CI assertion job for role-assignment scopes.
+3. [ ] Add tflint custom rule for subscription-scope detection.
+4. [ ] Quarterly review of `akspe` and Velero assignments.
+
+## Related ADRs
+- ADR-006-v2 — Workload Identity foundational decision.
+- ADR-020 — Per-namespace UAMI isolation; this ADR fixes the foundational-layer over-grant that ADR-020 sat on top of.
+- ADR-030-v3 — Credential sourcing; `gha-platform-ci` UAMI scopes also defined here.
+
+---
+
+# ADR-025-v3: Pre-commit + GitHub Actions Quality Gates for Platform Repo
+
+**Status:** Proposed (PRD-v3)
+**Date:** 2026-05-22
+**Deciders:** Platform Lead, SRE Lead
+**Resolves:** Q-010, Q-011, Q-012, Q-013, Q-014
+**Implements:** FR-V3-13, FR-V3-14, FR-V3-15, FR-V3-16, FR-V3-17
+
+## Context
+
+Audit finding F-02: the platform repo has no pre-commit hooks, no PR-time lint or validation. Style drift, broken Terraform, leaked secrets, and other defects land on `main` because nothing catches them before merge. v2 assumed industry-standard hygiene; the review proved otherwise.
+
+App CI runs on Jenkins (ADR-001-v2) and is not in question. What is missing is **platform-repo meta-CI** — the workflow that gates Terraform and Backstage changes.
+
+## Decision
+
+1. Adopt the Python `pre-commit` framework as the canonical local hook runner. A single `.pre-commit-config.yaml` at the repo root is the source of truth.
+2. The v3 minimal hook set is exactly: `terraform_fmt`, `terraform_validate`, `tflint`, `detect-private-key`, `end-of-file-fixer`, `trailing-whitespace`. (Checkov runs in pre-commit too — added under ADR-027-v3.)
+3. Platform-repo meta-CI runs on **GitHub Actions** with three workflows: `terraform-plan.yml`, `terraform-apply.yml`, `backstage.yml`. Jenkins is untouched — app CI continues there per ADR-001-v2.
+4. Blocking is phased:
+   - **Day-1 blocking:** `terraform_fmt`, `terraform_validate`, `tflint`, `detect-private-key`.
+   - **Sprint-1 advisory, sprint-2 blocking:** `checkov` (ADR-027-v3), Sonar (ADR-028-v3, scoped to `packages/backend`), custom tflint unvalidated-var rule (ADR-026-v3).
+5. The Terraform workflow is a **matrix of one job per env-state**. `terraform plan` runs on every PR; `terraform apply` runs only on merges to `main`.
+6. `terraform apply` is gated by **GitHub Environments + required reviewers** — one Environment per env-state, each listing at least two members of `@<org>/platform-team` as required reviewers, with deployment branches restricted to `main` and OIDC subject claims scoped per-Environment.
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| Husky / Lefthook | Node-centric; mismatch with HCL toolchain; pre-commit is the industry default for IaC repos |
+| Run meta-CI on Jenkins too | Couples platform-repo CI to the cluster whose Terraform it changes — fails the "don't change the runway you're flying off of" test |
+| Single apply job (no matrix) | Loses per-env-state visibility; one failure blocks the whole apply |
+| Auto-apply on `main` | Removes the human in the loop for prod changes; rejected on safety grounds |
+
+## Consequences
+
+**Easier:**
+- Local pre-commit and CI catch the same classes of defect; same hook set, same config.
+- App CI on Jenkins is untouched — no migration risk.
+- Apply gating produces an auditable record (who approved what env-state change when).
+
+**Harder:**
+- Contributors must `pre-commit install` (one-time); office-hours session at each phase cutover.
+- Environment-and-reviewer plumbing for seven env-states adds GitHub admin overhead.
+
+**Will need to revisit if:**
+- Sprint-2 blocking causes excessive merge friction (then re-phase, not abandon).
+- A new env-state is added (must spin up matching GitHub Environment).
+
+## Action Items
+1. [ ] Land `.pre-commit-config.yaml` with the v3 minimal hook set.
+2. [ ] Author `terraform-plan.yml`, `terraform-apply.yml`, `backstage.yml`.
+3. [ ] Create seven GitHub Environments with required reviewers and `main`-only branch protection.
+4. [ ] Office-hours session before day-1 blocking and before sprint-2 blocking.
+
+## Related ADRs
+- ADR-001-v2 — App CI on Jenkins; unchanged.
+- ADR-026-v3 — Variable validation; consumed by tflint here.
+- ADR-027-v3 — Checkov; integrated in both pre-commit and CI.
+- ADR-028-v3 — Sonar; in the Backstage workflow.
+- ADR-030-v3 — OIDC credential sourcing; consumed by the apply workflow.
+
+---
+
+# ADR-026-v3: Variable Validation Strategy (Inline + tflint + Custom Rule)
+
+**Status:** Proposed (PRD-v3)
+**Date:** 2026-05-22
+**Deciders:** Platform Lead, Principal Architect
+**Resolves:** Q-015, Q-016
+**Implements:** FR-V3-18, FR-V3-19, FR-V3-20
+
+## Context
+
+Audit finding F-03: Terraform variables in the v2 codebase carry no `validation {}` blocks. A typo such as `env = "qa"` propagates through `plan` and surfaces as a confused Azure API error at `apply`. There is no policy preventing new unvalidated variables from landing.
+
+## Decision
+
+1. **Critical-path variables carry inline `validation {}` from day-1.** The critical-path set is: `region`, `cluster_name`, `sku_tier`, `cidr_block`, `environment` (regex `^(dev|staging|prod)$`).
+2. **Cloud-resource-level rules** (naming, SKU constraints, required tags) live in `tflint-ruleset-azurerm` — not duplicated inside `validation {}`. The split is deliberate: inline = input shape, tflint = resource shape.
+3. **A custom tflint rule** detects any new `variable` declaration lacking a `validation {}` block. The rule is **advisory** while the 100%-coverage ratchet is in progress and **blocking** once 100% is declared.
+4. Coverage ratchets to 100% across two sprints following P1 closure. Exemptions require an allow-list entry with rationale.
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| OPA / Conftest over plan output | Adds a second policy language alongside Kyverno + tflint; redundant signal |
+| `validation {}` everywhere with no tflint | Duplicates rules across modules; drift over time |
+| tflint everywhere with no `validation {}` | Loses the per-module shape contract that documents intent at the variable site |
+| Hard cutover to 100% on day-1 | Excessive churn; phased ratchet is the safer rollout |
+
+## Consequences
+
+**Easier:**
+- Misconfigurations fail at `plan`, not `apply`.
+- Each variable's contract is documented at its declaration.
+
+**Harder:**
+- The custom tflint rule must be authored and maintained (~50 lines of Go).
+- Application teams inherit new variable-validation expectations on next PR.
+
+**Will need to revisit if:**
+- The `tflint-ruleset-azurerm` upstream adds a built-in unvalidated-var detector (then drop the custom rule).
+
+## Action Items
+1. [ ] Add `validation {}` blocks for the day-1 critical-path five.
+2. [ ] Author the custom tflint rule for unvalidated-var detection.
+3. [ ] Schedule the sprint-1 and sprint-2 ratchet PRs.
+4. [ ] Flip the custom rule to blocking at 100% coverage.
+
+## Related ADRs
+- ADR-025-v3 — Quality gates; this rule executes inside the same tflint hook.
+
+---
+
+# ADR-027-v3: Checkov Supply-Chain Scanning with Baseline
+
+**Status:** Proposed (PRD-v3)
+**Date:** 2026-05-22
+**Deciders:** Platform Lead, Security Lead
+**Resolves:** Q-017, Q-018
+**Implements:** FR-V3-21, FR-V3-22, FR-V3-23
+
+## Context
+
+Audit finding F-04: no IaC-side supply-chain scanning. Cosign + Kyverno (ADR-008-v2) covers the **image** supply chain at admission. The **Terraform** supply chain — misconfigured Storage Accounts, open NSGs, public AKS endpoints, missing encryption — has no equivalent gate. Checkov is the industry-standard scanner for this surface.
+
+## Decision
+
+1. Run **`checkov`** against all Terraform and Dockerfile content using a single `.checkov.yaml` at the repo root. The same config is consumed by **both** pre-commit and CI — local failures are reproducible.
+2. Track accepted findings in `.checkov.baseline` at the repo root. The baseline is **CODEOWNERS-protected**: ownership is assigned to `@<org>/platform-team` as interim owner. (When a dedicated Platform Security guild exists, the entry is re-pointed via follow-up PR.)
+3. **Inline suppressions** use the form `# checkov:skip=CKV_*:<jira-ticket>`. The referenced Jira ticket must exist and must carry an expiry date. A CI step queries Jira and **fails the build** if any suppression lacks a ticket, references a closed ticket, or references a ticket whose expiry has passed.
+4. Checkov is **advisory in sprint-1** and **blocking from sprint-2** once the baseline has landed and the team has had a sprint to adjust.
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| `tfsec` | Functionally similar; Checkov has broader framework coverage (including Dockerfiles) |
+| Scan only in CI (no pre-commit) | Slower feedback loop; contributors discover failures post-push |
+| No baseline (all findings must be fixed before adoption) | Unrealistic for a large existing codebase; baseline is the on-ramp |
+| Ungated suppression syntax (`checkov:skip` with no ticket) | Suppressions silently inflate; a year later nobody knows why |
+
+## Consequences
+
+**Easier:**
+- IaC-side defects are caught in the same loop as image-side defects.
+- Baseline ratchets findings down over time.
+- Suppression discipline is enforceable.
+
+**Harder:**
+- Sprint-1 advisory phase requires the team to triage warnings without merge-blocking.
+- CODEOWNERS routing of baseline PRs adds a review hop.
+
+**Will need to revisit if:**
+- A Platform Security guild team is stood up (then re-point CODEOWNERS).
+- Checkov rule coverage moves significantly faster than v3 cadence (then evaluate `checkov --check` allow-listing).
+
+## Action Items
+1. [ ] Land `.checkov.yaml` and an initial `.checkov.baseline`.
+2. [ ] Add `.checkov.baseline` to `CODEOWNERS` pointing at `@<org>/platform-team`.
+3. [ ] Wire the Jira-expiry suppression-validator CI step.
+4. [ ] Flip Checkov from advisory to blocking at sprint-2.
+
+## Related ADRs
+- ADR-008-v2 — Cosign + Kyverno; covers the image supply chain. This ADR is the IaC complement.
+- ADR-025-v3 — Quality gates; Checkov runs in both hooks.
+
+---
+
+# ADR-028-v3: SonarQube Static Analysis (TS + Dockerfile Scope, Configurable Hosting)
+
+**Status:** Proposed (PRD-v3)
+**Date:** 2026-05-22
+**Deciders:** Platform Lead, Principal Architect
+**Resolves:** Q-019, Q-020, Q-021; clarifications A1 and A7
+**Implements:** FR-V3-24, FR-V3-25, FR-V3-25a, FR-V3-26
+
+## Context
+
+The Backstage portal (`backstage/`) is TypeScript and ships several Dockerfiles. Static analysis for code quality + coverage gating is industry standard; SonarQube/SonarCloud is the chosen tool. Two open questions: scope (does Sonar also cover HCL?) and hosting (SaaS vs self-hosted?).
+
+The HCL question is resolved by other v3 ADRs — `tflint` (ADR-026-v3) and `checkov` (ADR-027-v3) cover that surface; double-coverage with Sonar adds CI time without adding signal.
+
+The hosting question is operator-dependent: future data-residency or cost constraints may make SaaS untenable. A toggle is required.
+
+## Decision
+
+1. **Scope:** Sonar analyzes Backstage TypeScript (`backstage/packages/`) and Dockerfiles (`backstage/**/Dockerfile*`) only. HCL is **excluded**.
+2. **Onboarding is greenfield** (clarification A7): no prior Sonar project, profile, or finding history exists. The Platform team delivers `backstage/sonar-project.properties`, the GHA scan step, and the initial quality-gate configuration.
+3. **Hosting is configurable** via the Terraform variable `var.sonar_hosting`:
+   - Type: `string`, default `"saas"`, inline `validation {}` restricting values to `"saas" | "cipool"`.
+   - `"saas"` → SonarCloud (`sonarcloud.io`). No in-cluster footprint.
+   - `"cipool"` → Self-hosted Sonar Helm release on the `cipool` node pool of `mgmt-we` (`nodeSelector: { nodepool: cipool }`, `tolerations: [{ key: workload, value: ci, effect: NoSchedule }]`). Never on `systempool`; never on `mgmt-ne` or any workload cluster.
+4. The `"cipool"` value depends on **ADR-016-v3-amendment** being `Accepted`. Until then, `var.sonar_hosting` must remain at its default `"saas"`.
+5. **Quality gate:** Sonar Way profile with one override — **new-code coverage greater than or equal to 80%**. Advisory for one sprint, blocking from sprint-2 onward, scoped to `packages/backend`.
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| Sonar also covering HCL | Duplicates tflint + checkov; no incremental signal |
+| Hard-coded SaaS (no toggle) | Forecloses future data-residency / cost-control needs |
+| Hard-coded self-hosted on `mgmt-we` | Violates ADR-016's spirit even with the amendment; SaaS-by-default is the lower-friction baseline |
+| Custom quality profile fork | Maintenance burden; Sonar Way + one override is sufficient |
+| Block immediately (no advisory phase) | Greenfield onboarding will surface findings the team has not yet triaged |
+
+## Consequences
+
+**Easier:**
+- Coverage gating drives test discipline on the Backstage codebase.
+- Hosting can pivot from SaaS → self-hosted with a variable flip, not a re-engineering.
+
+**Harder:**
+- The "cipool" path requires the ADR-016 amendment to be `Accepted` (cross-coupling).
+- Greenfield onboarding produces a burst of initial findings that need triage in sprint-1.
+- Quality-gate failures on `packages/backend` may surface latent coverage gaps that pre-date v3.
+
+**Will need to revisit if:**
+- SonarCloud line-of-code pricing crosses a budget threshold (then flip to `"cipool"`).
+- The Sonar Way profile changes upstream in ways that disagree with the 80% override (re-evaluate the override).
+
+## Action Items
+1. [ ] Author `backstage/sonar-project.properties` (Platform team).
+2. [ ] Add the `sonar-scanner` step to `backstage.yml` workflow.
+3. [ ] Configure the initial quality gate (Sonar Way + 80% new-code coverage).
+4. [ ] Land `var.sonar_hosting` with `validation {}` (default `"saas"`).
+5. [ ] Conditional Helm release for the `"cipool"` path — gated on ADR-016-v3-amendment Accepted.
+6. [ ] Flip to blocking at sprint-2.
+
+## Related ADRs
+- ADR-016 — Original terminology decision.
+- ADR-016-v3-amendment — Permits Sonar on `cipool`.
+- ADR-025-v3 — Quality gates; Sonar runs as part of the Backstage workflow.
+- ADR-026-v3 — `var.sonar_hosting` `validation {}` block lives in the same regime.
+
+---
+
+# ADR-029-v3: Terraform Version Pin (`~> 1.5.0`) and `uuid()` Drift Fix
+
+**Status:** Proposed (PRD-v3)
+**Date:** 2026-05-22
+**Deciders:** Platform Lead
+**Resolves:** Q-022 (corrected from `~> 1.15.0` to `~> 1.5.0`), Q-023
+**Implements:** FR-V3-27, FR-V3-28
+
+## Context
+
+Audit findings F-08 and F-09:
+
+- **F-08:** The Terraform version floor is too permissive. Without a pin, contributors and CI runners can drift across minor versions, producing inconsistent plan output and surfacing bugs that are specific to one version.
+- **F-09:** Several modules use `uuid()` interpolations directly. `uuid()` regenerates on every plan, surfacing spurious diffs and forcing recreation of dependent resources on every apply.
+
+The initial grilling-session pin proposal was `~> 1.15.0`. That number was an error — the intended pin is the LTS-ish **1.5.x** line, the last MPL-licensed Terraform release series, broadly supported by `tflint`, `checkov`, and the current `azurerm` provider. Clarification A2 corrects the pin to `~> 1.5.0`.
+
+## Decision
+
+1. Pin `required_version = "~> 1.5.0"` in every module. This allows patch upgrades within 1.5.x while blocking unscheduled minor jumps.
+2. CI rejects any module declaring a `required_version` other than `~> 1.5.0`.
+3. Replace every occurrence of `uuid()` with a `random_uuid` resource keyed by a stable input via `keepers`:
+
+   ```hcl
+   resource "random_uuid" "example" {
+     keepers = {
+       trigger = var.cluster_name
+     }
+   }
+   ```
+
+   The UUID is stable across plans, regenerates only when `var.cluster_name` changes, and produces empty diffs on consecutive applies.
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| `~> 1.15.0` (original grilling-session pin) | Numerical error; intended pin was the LTS-ish 1.5.x line |
+| `>= 1.5.0` (floor only) | Allows unbounded drift; defeats the purpose of pinning |
+| Stay on `uuid()` and accept the drift | The drift forces resource recreation on every apply — operationally untenable |
+| Use `random_id` instead of `random_uuid` | `random_uuid` is the semantically correct primitive when downstream APIs require a UUID format |
+
+## Consequences
+
+**Easier:**
+- Plans are deterministic; consecutive `terraform plan` runs produce empty diffs.
+- All contributors and CI run the same version.
+
+**Harder:**
+- Migration from `uuid()` to `random_uuid` requires `terraform state mv` or targeted replacement; rehearse on `dev` first.
+- Patch-version updates require explicit re-pinning when 1.5.x reaches end-of-life.
+
+**Will need to revisit if:**
+- The 1.5.x line is no longer maintained or a required provider drops support (then re-evaluate the next stable pin, with an ADR).
+
+## Action Items
+1. [ ] Set `required_version = "~> 1.5.0"` in every `versions.tf`.
+2. [ ] CI assertion rejecting other `required_version` values.
+3. [ ] Migrate `uuid()` to `random_uuid` with `keepers`; rehearse on `dev`.
+4. [ ] Add `grep -R 'uuid()' terraform/` as a CI guard.
+
+## Related ADRs
+- ADR-023-v3 — Remote state backend; same versioning regime applies.
+- ADR-025-v3 — Quality gates; the version assertion runs in this CI.
+
+---
+
+# ADR-030-v3: Credential Sourcing via OIDC + AKV (No Plaintext Defaults)
+
+**Status:** Proposed (PRD-v3)
+**Date:** 2026-05-22
+**Deciders:** Principal Architect, Security Lead, Platform Lead
+**Resolves:** Q-005, Q-006, Q-007, Q-009
+**Implements:** FR-V3-08, FR-V3-09, FR-V3-12
+
+## Context
+
+Audit finding F-05: sensitive Terraform inputs (subscription IDs, client secrets, SAS tokens, SaaS API tokens, connection strings) were carried as `default = "..."` on variable declarations, then materialized into Terraform state on every apply. Once in state, they are visible to anyone who can read the state file.
+
+Clarification A3: the OIDC federated credential for GitHub Actions → Azure is **already provisioned**. v3 must reference and consume it, not re-provision it. The federated credential maps the GitHub Actions OIDC issuer (`token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`, subject pinned per repo + protected `main` GitHub Environment) to the `gha-platform-ci` user-assigned managed identity.
+
+## Decision
+
+1. **No sensitive variable carries a `default = "..."` value.** Sensitive inputs are sourced via `data "azurerm_key_vault_secret"` blocks or via `TF_VAR_*` populated by CI.
+2. **No plaintext `*.tfvars` containing sensitive material may be committed.** A pre-commit hook scans for variable names matching `password|secret|token|key|conn` in any `*.tfvars`.
+3. **CI fetches sensitive values from AKV** using the already-provisioned `gha-platform-ci` UAMI via the existing OIDC federated credential. v3 references this credential; v3 does not re-provision it.
+4. The `gha-platform-ci` UAMI holds only `Key Vault Secrets User` scoped to each per-env AKV — read-only at TF-time. No write roles, no subscription scope (cross-referenced with ADR-024-v3).
+5. **Rotation model:**
+   - AKV keys and certificates rotate quarterly via AKV-native rotation policies. No code, no CronJob.
+   - Workload Identity federation has no rotating secret — nothing to rotate.
+   - SaaS tokens (Bitbucket, Jira) continue to rotate via the existing `saas-token-rotator` CronJob (unchanged by v3).
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| Long-lived service-principal client secrets in CI | Defeats the purpose of OIDC federation; rotation toil |
+| Personal Access Tokens for GitHub Actions → Azure | Per-user trust boundary; not auditable; not in the federated-trust regime |
+| Sensitive values in repo-encrypted GitHub Secrets | Less auditable than AKV (no per-secret RBAC, no rotation policies, no soft-delete) |
+| Provision a new federated credential in v3 | Duplicates the existing wiring (clarification A3); risk of misconfiguration |
+
+## Consequences
+
+**Easier:**
+- Sensitive material never lands in `*.tfvars`, in `default = "..."`, or in repo-encrypted secrets.
+- Rotation is AKV-native; v3 introduces zero new manual rotation toil.
+- Credential audit is "list role assignments on `gha-platform-ci`" — one query.
+
+**Harder:**
+- CI cold-starts include an AKV round trip per fetched secret (sub-second; acceptable).
+- The OIDC subject claim must be kept aligned with the GitHub Environment names — drift breaks the federation.
+
+**Will need to revisit if:**
+- A second CI system (beyond GitHub Actions) needs to invoke Terraform (then add a parallel federated credential, do not share `gha-platform-ci`).
+- AKV regional outage frequency makes the AKV-fetch step a reliability hotspot.
+
+## Action Items
+1. [ ] Sweep variables for `default = "..."` on sensitive inputs; replace with AKV data sources or `TF_VAR_*`.
+2. [ ] Pre-commit hook scanning `*.tfvars` for sensitive variable names.
+3. [ ] Document the existing OIDC federated-credential subject pinning per env-state.
+4. [ ] In-CI assertion: `terraform state pull | grep -iE 'password|secret|token|key|conn'` returns only baseline-known entries.
+
+## Related ADRs
+- ADR-005-v2 — ESO + per-region AKV; underlies the AKV-as-truth posture.
+- ADR-006-v2 — Workload Identity foundational decision.
+- ADR-024-v3 — `gha-platform-ci` UAMI scope-down (referenced here).
+- ADR-025-v3 — The CI workflow that consumes this credential.
+
+---
+
+# ADR-016-v3-amendment: Permit DX Tools (Jenkins, Sonar) on `cipool` Cluster
+
+**Status:** Proposed — amends ADR-016
+**Date:** 2026-05-22
+**Deciders:** Principal Architect, Platform Lead
+**Resolves:** Clarification A5, PRD-v3 OQ-V3-05
+
+## Context
+
+ADR-016 (Platform Terminology) defines "workload" vs "platform component" and is widely read as "no DX-plane tooling on management clusters." That reading was always inexact — Jenkins has run on `mgmt-we`'s `cipool` node pool since v2 GA per ADR-001-v2. PRD-v3 makes the inexactness explicit: when `var.sonar_hosting = "cipool"` (ADR-028-v3), a self-hosted Sonar Helm release lands on the same `cipool` node pool.
+
+Without an explicit amendment, two readings of ADR-016 contradict the v3 design: a strict reading forbids Sonar on `cipool`, while ADR-001-v2's continued operation of Jenkins on `cipool` demonstrates the strict reading was never the intent.
+
+## Decision
+
+Amend ADR-016 to scope the "no DX tooling on management clusters" rule **strictly to management `systempool`s**:
+
+1. **Management cluster `systempool`** (both `mgmt-we` and `mgmt-ne`): **platform-only**. Kyverno's `tier=platform` requirement is unchanged.
+2. **Management cluster `cipool`** (which exists only on `mgmt-we`): **allowed host for DX-plane tooling**. Currently hosts Jenkins (ADR-001-v2); optionally hosts self-hosted Sonar when `var.sonar_hosting = "cipool"` (ADR-028-v3).
+3. **Workload clusters** (`aks-dev-we`, `aks-staging-we`, `aks-prod-we`, `aks-prod-ne`): no DX tooling. No Jenkins, no Sonar.
+4. **Seed cluster** (`seed-wus`): no DX tooling. Catastrophic bootstrap only.
+5. New DX tools landing on `cipool` require an ADR that explicitly invokes this amendment.
+
+The amendment does **not** weaken the cardinal rule that management clusters host no customer/business workloads.
+
+## Alternatives Considered
+
+| Option | Why rejected |
+|---|---|
+| Keep ADR-016 strict; move Jenkins off `cipool` | Would re-open ADR-001-v2 (settled); no operational gain |
+| Permit DX tools anywhere on management clusters | Defeats the failure-domain isolation that ADR-016 protects |
+| Allow Sonar but reject any future DX tool until per-tool ADR | Status-quo, but creates ambiguity for the next DX tool; this amendment establishes the rule |
+
+## Consequences
+
+**Easier:**
+- The Jenkins-on-`cipool` precedent (ADR-001-v2) becomes consistent with documented terminology.
+- The Sonar self-hosted path is unblocked once this amendment is `Accepted`.
+- Future DX tools have a clear pattern: `cipool` is the allowed host.
+
+**Harder:**
+- Each new DX tool must explicitly invoke this amendment in its own ADR.
+- Kyverno policy for `tier=platform` on management clusters must distinguish `systempool` from `cipool` (already the case in practice).
+
+**Will need to revisit if:**
+- A second `cipool`-equivalent node pool is added to `mgmt-ne` (then re-scope this amendment).
+- A new DX tool's resource footprint risks crowding Jenkins on `cipool` (capacity, not policy, conversation).
+
+## Action Items
+1. [ ] Cross-reference this amendment from ADR-016 (one-line "Amended by" pointer).
+2. [ ] Verify Kyverno policy permits non-`tier=platform` pods on `cipool` (and only on `cipool`).
+3. [ ] Update §22 of `docs/architect.md` if any operational detail changes when this amendment moves to `Accepted`.
+
+## Related ADRs
+- ADR-016 — The amended decision.
+- ADR-001-v2 — Establishes Jenkins on `cipool`; this amendment ratifies that placement explicitly.
+- ADR-028-v3 — Sonar configurable hosting; depends on this amendment for the `"cipool"` value.
