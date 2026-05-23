@@ -116,3 +116,4 @@ scripts/*
 !scripts/validate-akv-rotation-policies.sh
 !scripts/setup-branch-protection.sh
 !scripts/setup-gha-environments.sh
+!scripts/check-var-validation.py

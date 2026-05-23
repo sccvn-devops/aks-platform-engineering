@@ -272,6 +272,11 @@ variable "network_policy" {
   description = "Specifies the type of network policy to use for Kubernetes."
   type        = string
   default     = "azure"
+
+  validation {
+    condition     = contains(["azure", "calico", "cilium", "none"], var.network_policy)
+    error_message = "network_policy must be one of: azure, calico, cilium, none."
+  }
 }
 
 variable "microsoft_defender_enabled" {

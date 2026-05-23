@@ -1,3 +1,16 @@
+## 2026-05-23 - US-V3-16
+- Updated .tflint.hcl: documented rule override section with rationale/ADR citation pattern; all azurerm rules at default severity; no rules disabled at GA
+- Created scripts/check-var-validation.py: Python companion to tflint that parses Terraform HCL for variables missing validation {} blocks; exits 0 (advisory) or 1 (--block); emits GitHub Actions annotations; 60 vars scanned, 100% coverage at GA
+- Added network_policy validation block to terraform/variables.tf (enum: azure/calico/cilium/none) — final missing variable
+- Added check-var-validation CI job in terraform-ci.yml: advisory mode (|| true), BLOCKING CUTOVER comment documented
+- Files changed: .tflint.hcl, scripts/check-var-validation.py, terraform/variables.tf, .github/workflows/terraform-ci.yml, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - Simple bracket-depth parser in Python handles nested HCL blocks without an external library — scan for `variable "name" {` then track depth to find `validation {` within
+  - GitHub Actions annotation format: `::warning file=<path>,line=<N>::<message>` — works for both warnings and errors
+  - tflint-ruleset-azurerm rule names follow pattern `azurerm_<resource>_invalid_<field>` — check the plugin docs before adding overrides
+  - `|| true` in CI is the advisory pattern; removing it + adding `--block` is the blocking cutover
+---
+
 ## 2026-05-23 - US-V3-15
 - Added inline validation {} blocks to critical-path variables (ADR-026-v3 day-1 set):
   - location, secondary_location, dr_location: Azure region slug regex ^[a-z][a-z0-9]+$

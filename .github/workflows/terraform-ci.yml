@@ -103,6 +103,27 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
 
   # ---------------------------------------------------------------------------
+  # Day-1 gate companion: custom unvalidated-variable detector (US-V3-16, ADR-026-v3)
+  # Advisory during ratchet (exits 0); blocking at 100%-coverage cutover (add --block).
+  # BLOCKING CUTOVER: remove `|| true` below when 100% variable coverage is declared.
+  # ---------------------------------------------------------------------------
+  check-var-validation:
+    name: Check Variable Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run check-var-validation
+        # Advisory mode (exits 0 even on findings).
+        # Sprint-2 cutover: add --block flag to exit 1 on unvalidated variables.
+        run: python3 scripts/check-var-validation.py --dir terraform || true
+
+  # ---------------------------------------------------------------------------
   # Checkov security scan — advisory in sprint-1, blocking in sprint-2.
   # Gate phase is controlled by `soft-fail` in .checkov.yaml (ADR-027-v3).
   # Sprint-2 cutover: set soft-fail: false in .checkov.yaml; do NOT change this file.
