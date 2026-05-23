@@ -1,3 +1,17 @@
+## 2026-05-23 - US-V3-13
+- Created .checkov.yaml at repo root: single source of truth for checkov config (directory=terraform, framework=terraform, baseline=.checkov.baseline, soft-fail=true for sprint-1 advisory)
+- Created .checkov.baseline as empty valid JSON baseline (to be populated with 'checkov --create-baseline' before sprint-2 cutover)
+- Updated .github/workflows/terraform-ci.yml: checkov job now uses config_file=.checkov.yaml and baseline=.checkov.baseline; removed inline params; day-1 jobs (format/validate/tflint) unchanged as blocking jobs
+- Created scripts/setup-branch-protection.sh: idempotent gh CLI script that sets format/Validate/tflint as required status checks (day-1); --sprint2 flag adds checkov and reminds operator to flip soft-fail
+- Added !scripts/setup-branch-protection.sh exception in .gitignore
+- Files changed: .checkov.yaml, .checkov.baseline, .github/workflows/terraform-ci.yml, scripts/setup-branch-protection.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - bridgecrewio/checkov-action@v12 accepts `config_file` and `baseline` inputs directly; no need to pass via extra_args
+  - Sprint gate phase is controlled by `soft-fail` in .checkov.yaml — both CI and pre-commit read the same file, so one flip covers both (ADR-027-v3 decision #1)
+  - Branch protection "required status checks" use the job `name:` field exactly as it appears in the workflow (e.g., "Terraform Format" not the job key "format")
+  - checkov --create-baseline should be run immediately before sprint-2 cutover to grandfather all current findings; running it too early captures future-fixed findings unnecessarily
+---
+
 ## 2026-05-22 - US-V3-07
 - Removed default= from jenkins_webhook_https_keystore_base64 and jenkins_webhook_https_keystore_password (already sensitive=true)
 - Removed unused cosign_public_key_pem variable entirely (dead code — only existed in variables.tf, never referenced in any .tf expression)

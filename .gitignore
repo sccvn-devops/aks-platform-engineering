@@ -114,3 +114,4 @@ scripts/*
 !scripts/purge-tls-history.sh
 !scripts/fetch-tf-secrets.sh
 !scripts/validate-akv-rotation-policies.sh
+!scripts/setup-branch-protection.sh

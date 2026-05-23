@@ -1,11 +1,15 @@
-# terraform-ci.yml — GitHub Actions meta-CI for platform Terraform (US-V3-12)
+# terraform-ci.yml — GitHub Actions meta-CI for platform Terraform (US-V3-12, US-V3-13)
 #
 # Runs on every PR targeting main.  Application CI stays on Jenkins (ADR-001-v2).
 #
 # Gate phases (ADR-025-v3, ADR-027-v3):
-#   Day-1  : terraform_fmt, terraform_validate, tflint  — blocking (required checks)
-#   Sprint-1: checkov                                   — advisory (soft_fail: true)
-#   Sprint-2: checkov                                   — blocking (flip soft_fail: false per US-V3-13/US-V3-18)
+#   Day-1  : terraform_fmt, terraform_validate, tflint  — blocking (required status checks in branch protection)
+#   Sprint-1: checkov                                   — advisory (soft_fail controlled by .checkov.yaml)
+#   Sprint-2: checkov                                   — blocking (flip soft-fail in .checkov.yaml → false)
+#
+# Branch protection (day-1 required checks — configure once via scripts/setup-branch-protection.sh):
+#   Required status checks: "Terraform Format", "Terraform Validate", "TFLint"
+#   Checkov is NOT a required check in sprint-1; becomes required in sprint-2.
 #
 # Required GitHub Secrets:
 #   ARM_CLIENT_ID       — platform CI UAMI client ID (OIDC-federated)
@@ -26,6 +30,7 @@ on:
       - ".checkov.yaml"
       - ".checkov.baseline"
       - "scripts/fetch-tf-secrets.sh"
+      - "scripts/setup-branch-protection.sh"
 
 env:
   TF_VERSION: "1.5.7"
@@ -98,23 +103,26 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
 
   # ---------------------------------------------------------------------------
-  # Sprint-1: checkov security scan (advisory — soft_fail: true)
-  # US-V3-13 / US-V3-18 will flip soft_fail to false at sprint-2 cutover.
+  # Checkov security scan — advisory in sprint-1, blocking in sprint-2.
+  # Gate phase is controlled by `soft-fail` in .checkov.yaml (ADR-027-v3).
+  # Sprint-2 cutover: set soft-fail: false in .checkov.yaml; do NOT change this file.
   # ---------------------------------------------------------------------------
   checkov:
     name: Checkov Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
-          directory: terraform
-          framework: terraform
-          # soft_fail: true — advisory in sprint-1 (ADR-027-v3).
-          # Flip to false when .checkov.baseline and sprint-2 gate are in place (US-V3-13, US-V3-18).
-          soft_fail: true
+          # Configuration and advisory/blocking mode are centralised in .checkov.yaml.
+          # Both CI and pre-commit consume the same file (ADR-027-v3, US-V3-18).
+          config_file: .checkov.yaml
+          baseline: .checkov.baseline
           output_format: cli,sarif
           output_file_path: console,checkov-results.sarif
 
