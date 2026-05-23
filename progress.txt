@@ -1,3 +1,22 @@
+## 2026-05-23 - US-V3-15
+- Added inline validation {} blocks to critical-path variables (ADR-026-v3 day-1 set):
+  - location, secondary_location, dr_location: Azure region slug regex ^[a-z][a-z0-9]+$
+  - prefix: cluster name regex ^[a-z][a-z0-9-]{1,19}$
+  - sku_tier: enum validation (Free/Standard/Premium)
+  - net_profile_service_cidr: cidrhost() function-based CIDR validation
+  - net_profile_dns_service_ip, jenkins_webhook_internal_load_balancer_ip: IPv4 regex
+  - infrastructure_provider: enum (capz/crossplane)
+  - network_plugin: enum (azure/kubenet/none)
+- Added new variable 'environment' with validation regex ^(dev|staging|prod)$ (default: dev)
+- terraform validate passes with all new validation blocks
+- Files changed: terraform/variables.tf, prd.json
+- **Learnings for future iterations:**
+  - `can(cidrhost(var.net_profile_service_cidr, 0))` is the idiomatic Terraform CIDR validation — no need for a custom regex
+  - validation {} blocks fire at plan time regardless of whether the variable is used in count=0 resources — add them carefully for sensitive/required vars
+  - Adding a new variable with default= does NOT break existing applies; existing state still works
+  - Terraform validation {} regex requires double-escaping backslashes in the HCL string (\\d for \d)
+---
+
 ## 2026-05-23 - US-V3-14
 - Created .github/workflows/terraform-apply.yml: triggered on push to main + workflow_dispatch
 - Plan stage: 7-env matrix identical to CI, posts summaries to GitHub Step Summary

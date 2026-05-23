@@ -668,8 +668,8 @@
         "Given v3 + 2 sprints, When I audit variable coverage, Then 100% of variables carry a validation {} block or are explicitly exempted via a tflint allow-list with rationale."
       ],
       "priority": 42,
-      "passes": false,
-      "notes": "PRD-v3 [P1]. FR: FR-V3-18. ADR: ADR-026-v3. Closes P1 finding F-03. Day-1 set: region, cluster name, SKU tier, CIDR, environment. 100% coverage ratchet over two subsequent sprints."
+      "passes": true,
+      "notes": "Implemented on 2026-05-23. Added inline validation {} blocks to critical-path variables in terraform/variables.tf: location/secondary_location/dr_location (Azure region slug regex ^[a-z][a-z0-9]+$), prefix/cluster-name (^[a-z][a-z0-9-]{1,19}$), sku_tier (enum: Free/Standard/Premium), net_profile_service_cidr (cidrhost() function check), net_profile_dns_service_ip/jenkins_webhook_internal_load_balancer_ip (IPv4 regex), infrastructure_provider (enum: capz/crossplane), network_plugin (enum: azure/kubenet/none). Added new variable 'environment' with validation regex ^(dev|staging|prod)$ per ADR-026-v3 decision #1. terraform validate passes with all validation blocks in place. The 100% variable coverage ratchet (criterion 3) is deferred to sprints 1-2 per ADR-026-v3 — US-V3-16 custom tflint rule will detect unvalidated variables and enforce the ratchet."
     },
     {
       "id": "US-V3-16",

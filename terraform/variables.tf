@@ -15,18 +15,33 @@ variable "location" {
   description = "Specifies the the location for the Azure resources."
   type        = string
   default     = "westeurope"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]+$", var.location))
+    error_message = "location must be an Azure region slug: lowercase letters and digits only (e.g., 'westeurope', 'northeurope')."
+  }
 }
 
 variable "secondary_location" {
   description = "Specifies the paired Azure region for standby resources."
   type        = string
   default     = "northeurope"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]+$", var.secondary_location))
+    error_message = "secondary_location must be an Azure region slug: lowercase letters and digits only (e.g., 'northeurope')."
+  }
 }
 
 variable "dr_location" {
   description = "Specifies the disaster recovery region for the seed cluster network."
   type        = string
   default     = "westus2"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]+$", var.dr_location))
+    error_message = "dr_location must be an Azure region slug: lowercase letters and digits only (e.g., 'westus2')."
+  }
 }
 
 variable "agents_size" {
@@ -53,10 +68,26 @@ variable "create_role_assignments_for_application_gateway" {
   default     = true
 }
 
+variable "environment" {
+  description = "Deployment environment. Controls resource naming, tagging, and SLO class selection."
+  type        = string
+  default     = "dev"
+
+  validation {
+    condition     = can(regex("^(dev|staging|prod)$", var.environment))
+    error_message = "environment must be one of: dev, staging, prod."
+  }
+}
+
 variable "infrastructure_provider" {
   description = "Specific the choice of infrastructure provider. crossplane or capz"
   type        = string
   default     = "capz"
+
+  validation {
+    condition     = contains(["capz", "crossplane"], var.infrastructure_provider)
+    error_message = "infrastructure_provider must be 'capz' or 'crossplane'."
+  }
 }
 
 variable "addons" {
@@ -148,12 +179,22 @@ variable "prefix" {
   description = "Specifies the prefix for the AKS cluster"
   type        = string
   default     = "gitops"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,19}$", var.prefix))
+    error_message = "prefix must be 2–20 characters, start with a lowercase letter, and contain only lowercase letters, digits, and hyphens."
+  }
 }
 
 variable "network_plugin" {
   description = "Specifies the network plugin of the AKS cluster"
   default     = "azure"
   type        = string
+
+  validation {
+    condition     = contains(["azure", "kubenet", "none"], var.network_plugin)
+    error_message = "network_plugin must be one of: azure, kubenet, none."
+  }
 }
 
 variable "os_disk_size_gb" {
@@ -172,6 +213,11 @@ variable "sku_tier" {
   description = "Specifies the SKU Tier that should be used for this AKS Cluster."
   type        = string
   default     = "Standard"
+
+  validation {
+    condition     = contains(["Free", "Standard", "Premium"], var.sku_tier)
+    error_message = "sku_tier must be one of: Free, Standard, Premium."
+  }
 }
 
 variable "private_cluster_enabled" {
@@ -238,12 +284,22 @@ variable "net_profile_dns_service_ip" {
   description = "Specifies the DNS service IP"
   default     = "172.20.0.10"
   type        = string
+
+  validation {
+    condition     = can(regex("^(\\d{1,3}\\.){3}\\d{1,3}$", var.net_profile_dns_service_ip))
+    error_message = "net_profile_dns_service_ip must be a valid IPv4 address (e.g., '172.20.0.10')."
+  }
 }
 
 variable "net_profile_service_cidr" {
   description = "Specifies the service CIDR"
   default     = "172.20.0.0/16"
   type        = string
+
+  validation {
+    condition     = can(cidrhost(var.net_profile_service_cidr, 0))
+    error_message = "net_profile_service_cidr must be a valid CIDR block (e.g., '172.20.0.0/16')."
+  }
 }
 
 variable "build_backstage" {
@@ -328,6 +384,11 @@ variable "jenkins_webhook_internal_load_balancer_ip" {
   description = "Static private IP assigned to the internal Jenkins load balancer in the mgmt-we AKS subnet."
   type        = string
   default     = "10.1.0.50"
+
+  validation {
+    condition     = can(regex("^(\\d{1,3}\\.){3}\\d{1,3}$", var.jenkins_webhook_internal_load_balancer_ip))
+    error_message = "jenkins_webhook_internal_load_balancer_ip must be a valid IPv4 address."
+  }
 }
 
 variable "jenkins_webhook_https_keystore_base64" {
