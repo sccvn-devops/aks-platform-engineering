@@ -1,0 +1,26 @@
+# CODEOWNERS — GitHub-enforced code ownership for the platform repo
+#
+# Any PR that modifies a file listed here requires approval from at least one
+# member of the owning team before it can be merged (enforced by branch protection).
+#
+# References: ADR-027-v3 (checkov baseline ownership), ADR-025-v3 (quality gates)
+
+# ---------------------------------------------------------------------------
+# Checkov baseline — owned by @platform-team as interim security owner.
+# TODO: hand off to @sccvn-devops/platform-security-guild once the guild is
+#       established (v3+1 backlog item, tracked in PROJ-NNN).
+# ---------------------------------------------------------------------------
+.checkov.baseline @sccvn-devops/platform-team
+
+# ---------------------------------------------------------------------------
+# CI/CD and quality gate configuration — high blast-radius files.
+# Changes require platform-team review to prevent unreviewed gate bypasses.
+# ---------------------------------------------------------------------------
+.github/workflows/        @sccvn-devops/platform-team
+.github/CODEOWNERS        @sccvn-devops/platform-team
+.checkov.yaml             @sccvn-devops/platform-team
+.tflint.hcl               @sccvn-devops/platform-team
+.pre-commit-config.yaml   @sccvn-devops/platform-team
+scripts/fetch-tf-secrets.sh  @sccvn-devops/platform-team
+scripts/setup-branch-protection.sh @sccvn-devops/platform-team
+scripts/setup-gha-environments.sh  @sccvn-devops/platform-team

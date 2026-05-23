@@ -124,6 +124,32 @@ jobs:
         run: python3 scripts/check-var-validation.py --dir terraform || true
 
   # ---------------------------------------------------------------------------
+  # Inline suppression validator — blocking (day-1). Validates checkov:skip
+  # comments have a Jira ticket ref; queries Jira to verify ticket is open
+  # and not expired when JIRA_BASE_URL + JIRA_TOKEN are set (ADR-027-v3).
+  # ---------------------------------------------------------------------------
+  validate-suppressions:
+    name: Validate Checkov Suppressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate inline suppressions
+        run: |
+          python3 scripts/validate-checkov-suppressions.py \
+            --dir terraform \
+            --jira-url "${JIRA_BASE_URL:-}" \
+            --jira-token "${JIRA_TOKEN:-}"
+        env:
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_SERVICE_ACCOUNT_TOKEN }}
+
+  # ---------------------------------------------------------------------------
   # Checkov security scan — advisory in sprint-1, blocking in sprint-2.
   # Gate phase is controlled by `soft-fail` in .checkov.yaml (ADR-027-v3).
   # Sprint-2 cutover: set soft-fail: false in .checkov.yaml; do NOT change this file.

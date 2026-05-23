@@ -1,3 +1,16 @@
+## 2026-05-23 - US-V3-17
+- Created .github/CODEOWNERS: .checkov.baseline → @sccvn-devops/platform-team; TODO comment for Security guild handoff; also covers .github/workflows/, key config files and scripts
+- Created scripts/validate-checkov-suppressions.py: validates # checkov:skip=CKV_*:PROJ-NNN format, queries Jira REST API for ticket status/expiry when configured, gracefully degrades offline
+- Added validate-suppressions CI job (blocking): runs on every PR, fails if suppression lacks ticket or references closed/expired ticket
+- CODEOWNERS enforcement requires branch protection 'require_code_owner_reviews: true' (already set in setup-branch-protection.sh)
+- Files changed: .github/CODEOWNERS, scripts/validate-checkov-suppressions.py, .github/workflows/terraform-ci.yml, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - CODEOWNERS file lives at .github/CODEOWNERS (GitHub checks this location first)
+  - Jira REST API endpoint for ticket: /rest/api/3/issue/{ticket}?fields=status,duedate,summary
+  - statusCategory.key == 'done' is the canonical closed-ticket check (not status.name which varies per project)
+  - urllib.request.urlopen with timeout=10 gracefully handles unreachable Jira (URLError caught)
+---
+
 ## 2026-05-23 - US-V3-16
 - Updated .tflint.hcl: documented rule override section with rationale/ADR citation pattern; all azurerm rules at default severity; no rules disabled at GA
 - Created scripts/check-var-validation.py: Python companion to tflint that parses Terraform HCL for variables missing validation {} blocks; exits 0 (advisory) or 1 (--block); emits GitHub Actions annotations; 60 vars scanned, 100% coverage at GA

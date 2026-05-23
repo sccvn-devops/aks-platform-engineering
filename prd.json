@@ -693,8 +693,8 @@
         "Given an inline # checkov:skip=CKV_*:<ticket> without a referenced Jira ticket or with an expired ticket, When checkov runs, Then the build fails."
       ],
       "priority": 44,
-      "passes": false,
-      "notes": "PRD-v3 [P1]. FR: FR-V3-21, FR-V3-22. ADR: ADR-027-v3. Closes P1 finding F-04 (partial). Interim CODEOWNERS owner is @<org>/platform-team; hand-off to Security guild is v3+1 backlog. Inline suppressions require ticket + expiry."
+      "passes": true,
+      "notes": "Implemented on 2026-05-23. Created .github/CODEOWNERS: .checkov.baseline owned by @sccvn-devops/platform-team with TODO comment for future platform-security-guild handoff; also covers high-blast-radius CI/CD config files (.github/workflows/, .checkov.yaml, .tflint.hcl, .pre-commit-config.yaml, key scripts). Created scripts/validate-checkov-suppressions.py: validates inline # checkov:skip=CKV_*:PROJ-NNN comments — checks format (must have PROJ-NNN Jira ticket), and when JIRA_BASE_URL + JIRA_TOKEN are set, queries Jira REST API to confirm ticket exists, is not in 'done' statusCategory, and has not passed its duedate. Added validate-suppressions CI job (blocking, day-1): runs suppression validator with JIRA_BASE_URL from repo vars and JIRA_SERVICE_ACCOUNT_TOKEN secret; gracefully degrades to format-only check when Jira is unreachable. No suppressions exist in current codebase (OK exit). CODEOWNERS enforcement of .checkov.baseline review requires GitHub branch protection with 'Require review from Code Owners' enabled (done via scripts/setup-branch-protection.sh which sets require_code_owner_reviews: true)."
     },
     {
       "id": "US-V3-18",

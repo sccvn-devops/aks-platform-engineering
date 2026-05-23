@@ -117,3 +117,4 @@ scripts/*
 !scripts/setup-branch-protection.sh
 !scripts/setup-gha-environments.sh
 !scripts/check-var-validation.py
+!scripts/validate-checkov-suppressions.py
