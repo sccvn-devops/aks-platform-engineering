@@ -377,6 +377,19 @@
   - detect-private-key from pre-commit-hooks catches PEM material regardless of filename, satisfying criterion 3 independent of .gitignore
 ---
 
+## 2026-05-23 - US-V3-09
+- Added rotation_policy block to azurerm_key_vault_key.management_ci_cosign in terraform/jenkins.tf: expire_after=P90D (quarterly), automatic time_before_expiry=P30D, notify_before_expiry=P29D
+- Updated azurerm_key_vault_certificate.platform_tls in terraform/external_secrets.tf: validity_in_months 12→3 (quarterly cert life), AutoRenew trigger 30→14 days before expiry
+- Criterion 2 (no static credentials): all 9 UAMIs already use azurerm_federated_identity_credential (Workload Identity federation) — no SP passwords present
+- Created scripts/validate-akv-rotation-policies.sh: static checks (rotation_policy, expire_after=P90D, validity_in_months=3, AutoRenew, no SP passwords) + AZURE_ONLINE=1 path for live AKV rotation policy query
+- All static checks pass; terraform validate passes; live AKV inspection blocked (no az login)
+- Files changed: terraform/jenkins.tf, terraform/external_secrets.tf, scripts/validate-akv-rotation-policies.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - azurerm_key_vault_key rotation_policy: expire_after sets key lifetime; automatic.time_before_expiry triggers new version creation before expiry; effective rotation is at (expire_after - time_before_expiry) — e.g. P90D - P30D = P60D (every 2 months a new version is created, overlap until P90D expiry)
+  - azurerm_key_vault_certificate quarterly rotation: set validity_in_months=3 and days_before_expiry=14 (not 30) to guarantee AutoRenew fires well within the 3-month window and leaves enough overlap for ESO refreshInterval=60s to re-sync
+  - grep for rotation_policy presence should target the whole file, not just lines after the resource header (use `grep -q 'rotation_policy' file.tf`, not `grep -A N 'resource...' | grep`)
+---
+
 ## 2026-05-23 - US-V3-08
 - Replaced subscription-wide Owner role for akspe with two RG-scoped assignments in terraform/main.tf: Contributor and User Access Administrator both on azurerm_resource_group.this
 - Removed data.azurerm_resource_group.mgmt_we_node from terraform/velero.tf (only existed for the now-removed node-RG scope)
