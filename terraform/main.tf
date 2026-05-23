@@ -288,12 +288,30 @@ resource "azurerm_federated_identity_credential" "service_operator" {
 
 
 
+resource "random_uuid" "backstage_role_user_read" {
+  keepers = {
+    trigger = var.prefix
+  }
+}
+
+resource "random_uuid" "backstage_role_user_read_all" {
+  keepers = {
+    trigger = var.prefix
+  }
+}
+
+resource "random_uuid" "backstage_role_group_member_read_all" {
+  keepers = {
+    trigger = var.prefix
+  }
+}
+
 resource "azuread_application" "backstage-app" {
   count        = local.build_backstage ? 1 : 0
   display_name = "Backstage"
 
   app_role {
-    id                   = uuid() # Generate a unique ID for the role
+    id                   = random_uuid.backstage_role_user_read.result
     allowed_member_types = ["User"]
     description          = "Allows the app to read the profile of signed-in users."
     display_name         = "User.Read"
@@ -301,7 +319,7 @@ resource "azuread_application" "backstage-app" {
   }
 
   app_role {
-    id                   = uuid() # Generate a unique ID for the role
+    id                   = random_uuid.backstage_role_user_read_all.result
     allowed_member_types = ["User"]
     description          = "Allows the app to read all users' full profiles."
     display_name         = "User.Read.All"
@@ -309,7 +327,7 @@ resource "azuread_application" "backstage-app" {
   }
 
   app_role {
-    id                   = uuid() # Generate a unique ID for the role
+    id                   = random_uuid.backstage_role_group_member_read_all.result
     allowed_member_types = ["User"]
     description          = "Allows the app to read the memberships of all groups."
     display_name         = "GroupMember.Read.All"

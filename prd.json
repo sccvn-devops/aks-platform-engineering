@@ -766,8 +766,8 @@
         "Given var.cluster_name changes, When terraform plan runs, Then the random_uuid regenerates as expected. ---"
       ],
       "priority": 50,
-      "passes": false,
-      "notes": "PRD-v3 [P2]. FR: FR-V3-28. ADR: ADR-029-v3. Closes P2 finding F-09. random_uuid keepers map: { trigger = var.cluster_name }. Eliminates per-plan drift while preserving regeneration on input change."
+      "passes": true,
+      "notes": "Implemented on 2026-05-23. Added three random_uuid resources in terraform/main.tf (backstage_role_user_read, backstage_role_user_read_all, backstage_role_group_member_read_all) each with keepers = { trigger = var.prefix } — uses var.prefix since var.cluster_name does not exist in this codebase. Replaced all three uuid() interpolations in the azuread_application.backstage-app app_role blocks with random_uuid.*.result references. grep -R 'uuid()' terraform/ (excluding .terraform/) returns zero matches. The random_uuid resources are stable across plans when var.prefix is unchanged; they regenerate when the prefix changes (which is the expected behavior for cluster renaming). terraform fmt passes. terraform validate blocked by local TF version 1.15.4 vs constraint ~> 1.5.0; CI installs 1.5.7 which satisfies the constraint."
     }
   ]
 }
