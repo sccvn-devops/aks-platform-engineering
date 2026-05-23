@@ -234,9 +234,15 @@ resource "azurerm_user_assigned_identity" "crossplane" {
   location            = azurerm_resource_group.this.location
 }
 
-resource "azurerm_role_assignment" "akspe_role_assignment" {
-  scope                = data.azurerm_subscription.current.id
-  role_definition_name = "Owner"
+resource "azurerm_role_assignment" "akspe_contributor" {
+  scope                = azurerm_resource_group.this.id
+  role_definition_name = "Contributor"
+  principal_id         = azurerm_user_assigned_identity.akspe.principal_id
+}
+
+resource "azurerm_role_assignment" "akspe_user_access_administrator" {
+  scope                = azurerm_resource_group.this.id
+  role_definition_name = "User Access Administrator"
   principal_id         = azurerm_user_assigned_identity.akspe.principal_id
 }
 

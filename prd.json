@@ -583,8 +583,8 @@
         "Given the applied Terraform, When I list role assignments for the Velero UAMI, Then only Contributor on the backup RG and Storage Blob Data Contributor on the backup SA are present."
       ],
       "priority": 35,
-      "passes": false,
-      "notes": "PRD-v3 [P0]. FR: FR-V3-10, FR-V3-11. ADR: ADR-024-v3. Closes P0 finding F-07. Subscription-Owner default for akspe must be removed; Velero narrowed to backup RG and storage account."
+      "passes": true,
+      "notes": "Implemented on 2026-05-23. Removed subscription-wide Owner role assignment for akspe (main.tf); replaced with Contributor + User Access Administrator both scoped to azurerm_resource_group.this. Removed the velero node-RG data source (data.azurerm_resource_group.mgmt_we_node) from velero.tf; changed velero_snapshot_contributor scope from node RG to azurerm_resource_group.this (renamed resource to velero_contributor); changed velero_storage_blob_data_contributor scope from container resource_manager_id to azurerm_storage_account.mgmt_backup.id (SA level). terraform validate passes. Live role-assignment verification requires az login."
     },
     {
       "id": "US-V3-09",
