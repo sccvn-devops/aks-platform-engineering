@@ -377,6 +377,17 @@
   - detect-private-key from pre-commit-hooks catches PEM material regardless of filename, satisfying criterion 3 independent of .gitignore
 ---
 
+## 2026-05-23 - US-V3-11
+- .pre-commit-config.yaml already exists from US-V3-05 with exactly 6 hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace
+- File comment at line 3 explicitly documents the "exactly 6 hooks" constraint referencing ADR-025-v3 and FR-V3-14
+- Acceptance criterion satisfied: no more, no fewer than 6 hooks at v3 GA
+- No code changes required; prd.json updated to passes=true
+- Files changed: prd.json
+- **Learnings for future iterations:**
+  - US-V3-05 (TLS purge) implemented both US-V3-10 and US-V3-11 as side-effects; US-V3-10 was caught in the previous iteration; US-V3-11 caught here
+  - When implementing a story, check if it also satisfies adjacent stories (US-V3-05 notes explicitly said it covered US-V3-10 and US-V3-11)
+---
+
 ## 2026-05-23 - US-V3-10
 - .pre-commit-config.yaml already exists from US-V3-05 with correct hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace
 - .tflint.hcl already exists from US-V3-05 with tflint-ruleset-azurerm v0.26.0

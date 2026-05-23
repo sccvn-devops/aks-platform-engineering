@@ -617,8 +617,8 @@
         "Given .pre-commit-config.yaml at HEAD, When I enumerate the hooks, Then exactly terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, and trailing-whitespace are configured \u2014 no more, no fewer, at v3 GA."
       ],
       "priority": 38,
-      "passes": false,
-      "notes": "PRD-v3 [P1]. FR: FR-V3-14. ADR: ADR-025-v3. Exactly 6 hooks required at v3 GA. Additional hooks must be proposed via ADR."
+      "passes": true,
+      "notes": "Implemented as side-effect of US-V3-05 on 2026-05-22. .pre-commit-config.yaml at repo root contains exactly 6 hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace \u2014 no more, no fewer. Comment at top of the file explicitly documents the count requirement. Additional hooks require an ADR per the constraint. terraform validate passes."
     },
     {
       "id": "US-V3-12",
