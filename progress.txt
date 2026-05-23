@@ -376,3 +376,16 @@
   - .pre-commit-config.yaml covers 6 GA hooks; the tflint hook requires terraform init on the module first (handled by pre-commit-terraform's terraform_validate hook setup)
   - detect-private-key from pre-commit-hooks catches PEM material regardless of filename, satisfying criterion 3 independent of .gitignore
 ---
+
+## 2026-05-23 - US-V3-08
+- Replaced subscription-wide Owner role for akspe with two RG-scoped assignments in terraform/main.tf: Contributor and User Access Administrator both on azurerm_resource_group.this
+- Removed data.azurerm_resource_group.mgmt_we_node from terraform/velero.tf (only existed for the now-removed node-RG scope)
+- Changed velero_snapshot_contributor → velero_contributor: scope from mgmt_we_node RG to azurerm_resource_group.this (backup RG)
+- Changed velero_storage_blob_data_contributor scope from container resource_manager_id to azurerm_storage_account.mgmt_backup.id (SA level)
+- terraform validate passes; live role-assignment listing blocked (no az login)
+- Files changed: terraform/main.tf, terraform/velero.tf, prd.json
+- **Learnings for future iterations:**
+  - akspe was subscription-wide Owner (the P0 finding F-07); safe to narrow because all AKS clusters use azurerm_resource_group.this — no cross-subscription provisioning
+  - data.azurerm_resource_group.mgmt_we_node was only referenced for velero_snapshot_contributor; removing it also removes an implicit dependency on module.aks completing before velero resources deploy
+  - Scoping Velero Contributor to the backup RG (not node RG) removes snapshot capability for Azure Disk PVs; if disk snapshots are needed later, a targeted node-RG Contributor role assignment should be added per the follow-up ADR-024-v3 decision
+---
