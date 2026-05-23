@@ -32,7 +32,8 @@ terraform {
       version = "~> 2.17"
     }
   }
-  required_version = ">= 1.1.0"
+  # Pin to 1.5.x (last MPL-licensed line; compatible with tflint, checkov, azurerm toolchain — ADR-029-v3, FR-V3-27)
+  required_version = "~> 1.5.0"
 }
 
 data "azurerm_client_config" "current" {}

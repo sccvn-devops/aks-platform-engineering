@@ -1,3 +1,13 @@
+## 2026-05-23 - US-V3-22
+- terraform/provider.tf already contained required_version = "~> 1.5.0" with ADR-029-v3/FR-V3-27 comment — no code change needed
+- Both .github/workflows/terraform-ci.yml and .github/workflows/terraform-apply.yml already set TF_VERSION: "1.5.7" satisfying ~> 1.5.0
+- Story was implemented as a side-effect of earlier US-V3-* work; only prd.json updated to passes=true
+- Files changed: prd.json
+- **Learnings for future iterations:**
+  - US-V3-22 (pin Terraform ~> 1.5.0) was implemented implicitly during earlier story work; check provider.tf and CI env vars before re-implementing
+  - The pattern of stories being pre-implemented as side effects of other stories is common in this codebase (see US-V3-10, US-V3-11, US-V3-22)
+---
+
 ## 2026-05-23 - US-V3-19, US-V3-20, US-V3-21
 - Created backstage/sonar-project.properties: TypeScript/Dockerfile inclusions, explicit HCL exclusions, coverage LCOV paths (US-V3-19, ADR-028-v3)
 - Created .github/workflows/sonar.yml: SonarCloud scan on PR+push to main, runs yarn test:all --coverage, uploads LCOV; continue-on-error=true for sprint-1 advisory; SPRINT-2 CUTOVER comment to remove it (US-V3-21)

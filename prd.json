@@ -753,8 +753,8 @@
         "Given CI, When the workflow boots, Then the installed Terraform version satisfies ~> 1.5.0."
       ],
       "priority": 49,
-      "passes": false,
-      "notes": "PRD-v3 [P2]. FR: FR-V3-27. ADR: ADR-029-v3. Closes P2 finding F-08. ~> 1.5.0 is last MPL-licensed line; compatible with current tflint, checkov, and azurerm provider toolchain matrix."
+      "passes": true,
+      "notes": "Implemented as side-effect of earlier US-V3-* work on 2026-05-23. terraform/provider.tf already contains required_version = \"~> 1.5.0\" with a comment referencing ADR-029-v3 and FR-V3-27 (pinned to last MPL-licensed Terraform line). Both .github/workflows/terraform-ci.yml and .github/workflows/terraform-apply.yml set TF_VERSION: \"1.5.7\" which satisfies ~> 1.5.0. No code changes were needed; prd.json updated to reflect the pre-existing implementation."
     },
     {
       "id": "US-V3-23",
