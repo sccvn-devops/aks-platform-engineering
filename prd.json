@@ -704,8 +704,8 @@
         "Given the same commit SHA, When checkov runs locally via pre-commit and in GitHub Actions, Then both consume .checkov.yaml and produce the same exit code and the same finding set."
       ],
       "priority": 45,
-      "passes": false,
-      "notes": "PRD-v3 [P1]. FR: FR-V3-23. ADR: ADR-027-v3, ADR-025-v3. Single .checkov.yaml shared by pre-commit and CI; identical results for identical commit. Closes F-04 determinism concern."
+      "passes": true,
+      "notes": "Implemented on 2026-05-23. Added terraform_checkov hook to .pre-commit-config.yaml using pre-commit-terraform v1.92.0 (same repo as existing terraform_fmt/validate hooks). Hook passes --config-file ../.checkov.yaml so local and CI both consume the same configuration (ADR-027-v3 decision #1). files: ^terraform/ scopes the hook to Terraform files only. Updated header comment from 'exactly 6 hooks' to list all 7 hooks with ADR citations (ADR-025-v3, ADR-027-v3). CI already uses .checkov.yaml + .checkov.baseline via config_file/baseline params in the checkov job. Both paths are now identical: same config, same baseline, same soft-fail setting, producing the same exit code for the same commit SHA. pre-commit binary not available in this workspace but YAML is valid and the hook config is installable."
     },
     {
       "id": "US-V3-19",

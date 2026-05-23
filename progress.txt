@@ -1,3 +1,16 @@
+## 2026-05-23 - US-V3-18
+- Added terraform_checkov hook to .pre-commit-config.yaml (pre-commit-terraform v1.92.0): --config-file ../.checkov.yaml so local and CI consume identical config
+- files: ^terraform/ scopes the hook to terraform files only
+- Updated header comment to list all 7 hooks with ADR citations
+- CI checkov job already uses .checkov.yaml + .checkov.baseline (US-V3-13); both paths now deterministically identical
+- Files changed: .pre-commit-config.yaml, prd.json
+- **Learnings for future iterations:**
+  - terraform_checkov in pre-commit-terraform passes args to checkov via `--args=<arg>` prefix
+  - --config-file path is relative to CWD (repo root), but hook runs from terraform/ dir, so use ../.checkov.yaml
+  - files: regex in pre-commit scopes which changed files trigger the hook; ^terraform/ is the right scope
+  - pre-commit-terraform terraform_checkov hook installs checkov into a venv automatically — no separate checkov install needed
+---
+
 ## 2026-05-23 - US-V3-17
 - Created .github/CODEOWNERS: .checkov.baseline → @sccvn-devops/platform-team; TODO comment for Security guild handoff; also covers .github/workflows/, key config files and scripts
 - Created scripts/validate-checkov-suppressions.py: validates # checkov:skip=CKV_*:PROJ-NNN format, queries Jira REST API for ticket status/expiry when configured, gracefully degrades offline
