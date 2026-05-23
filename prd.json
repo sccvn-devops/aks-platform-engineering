@@ -629,8 +629,8 @@
         "Given the platform-repo CI exists, When I inspect Jenkins, Then application CI continues to run there per ADR-001-v2 with no v3-driven change."
       ],
       "priority": 39,
-      "passes": false,
-      "notes": "PRD-v3 [P1]. FR: FR-V3-15. ADR: ADR-025-v3, ADR-001-v2. GitHub Actions for platform meta-CI only. App CI stays on Jenkins per ADR-001-v2. No displacement of Jenkins by v3."
+      "passes": true,
+      "notes": "Implemented on 2026-05-23. Created .github/workflows/terraform-ci.yml triggered on PRs to main (paths: terraform/**, .github/workflows/terraform-ci.yml, .tflint.hcl, .checkov.yaml, .checkov.baseline, scripts/fetch-tf-secrets.sh). Four jobs: format (terraform fmt -check, blocking), validate (terraform init -backend=false + terraform validate, blocking), tflint (tflint with azurerm ruleset, blocking), checkov (bridgecrewio/checkov-action with soft_fail: true for sprint-1 advisory mode per ADR-027-v3), and plan matrix (7 envs: mgmt-we, mgmt-ne, dev, staging, prod-we, prod-ne, seed-wus; runs after day-1 gates pass; uses ARM OIDC for Azure auth; posts plan diff as PR comment; -detailed-exitcode distinguishes 0=no-changes/2=changes/1=error). Checkov SARIF uploaded to GitHub Security. Concurrency group set to cancel in-progress runs on new push. Updated scripts/fetch-tf-secrets.sh to write TF_VAR_* to $GITHUB_ENV (in addition to export) so values persist across GHA steps. App CI unchanged on Jenkins (ADR-001-v2). terraform validate and fmt -check pass."
     },
     {
       "id": "US-V3-13",

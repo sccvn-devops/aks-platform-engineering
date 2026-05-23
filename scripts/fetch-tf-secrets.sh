@@ -68,9 +68,10 @@ fetch_secret() {
     return
   fi
 
-  # Mask in GitHub Actions logs
+  # Mask in GitHub Actions logs and persist across steps via GITHUB_ENV
   if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
     echo "::add-mask::${value}"
+    printf '%s=%s\n' "${tf_var_name}" "${value}" >> "${GITHUB_ENV}"
   fi
 
   export "${tf_var_name}=${value}"

@@ -423,3 +423,24 @@
   - data.azurerm_resource_group.mgmt_we_node was only referenced for velero_snapshot_contributor; removing it also removes an implicit dependency on module.aks completing before velero resources deploy
   - Scoping Velero Contributor to the backup RG (not node RG) removes snapshot capability for Azure Disk PVs; if disk snapshots are needed later, a targeted node-RG Contributor role assignment should be added per the follow-up ADR-024-v3 decision
 ---
+
+## 2026-05-23 - US-V3-12
+- Created .github/workflows/terraform-ci.yml: GitHub Actions meta-CI triggered on PRs to main targeting terraform/**, CI workflow files, .tflint.hcl, .checkov.yaml, .checkov.baseline, and scripts/fetch-tf-secrets.sh
+- Four jobs with correct dependency chain:
+  - format: terraform fmt -recursive -check -diff (day-1 blocking gate)
+  - validate: terraform init -backend=false + terraform validate -no-color (day-1 blocking gate)
+  - tflint: tflint --init + tflint --recursive --format=compact with azurerm ruleset (day-1 blocking gate)
+  - checkov: bridgecrewio/checkov-action with soft_fail: true (sprint-1 advisory, ADR-027-v3); uploads SARIF to GitHub Security
+  - plan: matrix of 7 envs (mgmt-we/ne, dev, staging, prod-we/ne, seed-wus); runs after day-1 gates; ARM OIDC auth; -detailed-exitcode; posts plan diff as PR comment; fails on exitcode=1 only
+- Updated scripts/fetch-tf-secrets.sh: added printf '%s=%s\n' >> $GITHUB_ENV so TF_VAR_* values persist across GHA steps (in addition to existing export for same-shell use)
+- App CI untouched on Jenkins per ADR-001-v2
+- Concurrency group set to cancel in-progress runs on new commit
+- Files changed: .github/workflows/terraform-ci.yml (new), scripts/fetch-tf-secrets.sh, prd.json
+- **Learnings for future iterations:**
+  - GHA `export` in a `source`d script does NOT persist across steps — must write to $GITHUB_ENV for cross-step persistence
+  - terraform plan exit codes with -detailed-exitcode: 0=no changes, 1=error, 2=changes pending; without -detailed-exitcode only 0 and 1 are used
+  - Use `shell: bash` and `set +e` then `PIPESTATUS[0]` to capture pipeline exit code without failing the step
+  - checkov soft_fail: true keeps it advisory (non-blocking); flip to false at sprint-2 cutover per US-V3-13/US-V3-18
+  - tflint --config=../.tflint.hcl is relative to working-directory (terraform/), so ../ points to repo root
+  - The plan job posts a comment to the PR using actions/github-script@v7; requires pull-requests: write permission
+---
