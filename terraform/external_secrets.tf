@@ -106,12 +106,15 @@ resource "azurerm_key_vault_certificate" "platform_tls" {
       key_type   = "RSA"
       reuse_key  = false
     }
+    # AKV-native quarterly rotation: cert valid for 3 months, auto-renewed 14 days
+    # before expiry so there is always an overlap window for ESO to re-sync the
+    # new PEM bundle before the old cert expires (ESO refreshInterval = 60s).
     lifetime_action {
       action {
         action_type = "AutoRenew"
       }
       trigger {
-        days_before_expiry = 30
+        days_before_expiry = 14
       }
     }
     secret_properties {
@@ -121,7 +124,7 @@ resource "azurerm_key_vault_certificate" "platform_tls" {
       extended_key_usage = ["1.3.6.1.5.5.7.3.1"]
       key_usage          = ["digitalSignature", "keyEncipherment"]
       subject            = "CN=platform.internal"
-      validity_in_months = 12
+      validity_in_months = 3
       subject_alternative_names {
         dns_names = ["*.platform.internal"]
       }

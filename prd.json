@@ -595,8 +595,8 @@
         "Given a UAMI or SP used by the platform, When I inspect its credential profile, Then it is federated via Workload Identity with no client secret on record."
       ],
       "priority": 36,
-      "passes": false,
-      "notes": "PRD-v3 [P0]. FR: FR-V3-12. ADR: ADR-006-v2, ADR-030-v3. AKV-native quarterly rotation policies required on all v3-provisioned keys and certs. No static credentials on any UAMI or SP."
+      "passes": true,
+      "notes": "Implemented on 2026-05-23. Added AKV-native rotation_policy block to azurerm_key_vault_key.management_ci_cosign in terraform/jenkins.tf: expire_after=P90D (quarterly), automatic rotation triggered at P30D before expiry (P60D effective rotation point), notify_before_expiry=P29D. Updated azurerm_key_vault_certificate.platform_tls in terraform/external_secrets.tf: changed validity_in_months from 12 to 3 (quarterly cert life) and tightened the AutoRenew trigger from 30 days to 14 days before expiry to maintain ESO re-sync overlap. All 9 UAMIs in the platform use azurerm_federated_identity_credential (Workload Identity federation) — no azurerm_service_principal_password or azuread_application_password resources exist anywhere in the codebase. Added scripts/validate-akv-rotation-policies.sh with static checks (rotation_policy present, expire_after=P90D, validity_in_months=3, AutoRenew, no SP passwords) and an AZURE_ONLINE=1 path for live AKV rotation policy inspection. All static checks pass; live AKV inspection remains blocked until az login is available."
     },
     {
       "id": "US-V3-10",

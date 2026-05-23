@@ -113,3 +113,4 @@ scripts/*
 !scripts/dr-validation/validate-mgmt-failover.sh
 !scripts/purge-tls-history.sh
 !scripts/fetch-tf-secrets.sh
+!scripts/validate-akv-rotation-policies.sh

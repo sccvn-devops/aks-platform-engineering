@@ -43,6 +43,18 @@ resource "azurerm_key_vault_key" "management_ci_cosign" {
     "verify",
   ]
 
+  # AKV-native quarterly rotation: new key version auto-created every 90 days.
+  # expire_after=P90D pins the key lifetime; automatic rotation triggers at P60D
+  # (30 days before expiry) so there is always an overlap window where both the
+  # old and new versions are valid for signature verification.
+  rotation_policy {
+    automatic {
+      time_before_expiry = "P30D"
+    }
+    expire_after         = "P90D"
+    notify_before_expiry = "P29D"
+  }
+
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
     azurerm_role_assignment.management_ci_current_operator_admin,
