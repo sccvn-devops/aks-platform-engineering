@@ -377,6 +377,16 @@
   - detect-private-key from pre-commit-hooks catches PEM material regardless of filename, satisfying criterion 3 independent of .gitignore
 ---
 
+## 2026-05-23 - US-V3-10
+- .pre-commit-config.yaml already exists from US-V3-05 with correct hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace
+- .tflint.hcl already exists from US-V3-05 with tflint-ruleset-azurerm v0.26.0
+- Acceptance criterion satisfied: 'pre-commit install' on a fresh clone will register all 6 hooks; subsequent commits trigger them
+- No code changes required; prd.json updated to passes=true
+- Files changed: prd.json
+- **Learnings for future iterations:**
+  - US-V3-05 (TLS purge) implemented both US-V3-10 and US-V3-11 as side-effects; always check if earlier stories already deliver an AC before implementing from scratch
+---
+
 ## 2026-05-23 - US-V3-09
 - Added rotation_policy block to azurerm_key_vault_key.management_ci_cosign in terraform/jenkins.tf: expire_after=P90D (quarterly), automatic time_before_expiry=P30D, notify_before_expiry=P29D
 - Updated azurerm_key_vault_certificate.platform_tls in terraform/external_secrets.tf: validity_in_months 12→3 (quarterly cert life), AutoRenew trigger 30→14 days before expiry
