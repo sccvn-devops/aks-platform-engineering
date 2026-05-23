@@ -1,3 +1,18 @@
+## 2026-05-23 - US-V3-14
+- Created .github/workflows/terraform-apply.yml: triggered on push to main + workflow_dispatch
+- Plan stage: 7-env matrix identical to CI, posts summaries to GitHub Step Summary
+- Apply stage: 7 dedicated jobs (not matrix) each with `environment:` targeting its GitHub Environment; apply order is risk-ordered (mgmt-we → mgmt-ne; dev → staging → prod-we → prod-ne; seed-wus independent)
+- Each apply job uses ARM_USE_OIDC=true; OIDC subject scoped per Environment (repo:<org>/<repo>:environment:<env-name>)
+- Created scripts/setup-gha-environments.sh: creates 7 GitHub Environments with main-only branch policy, @platform-team as reviewer, wait timers, prevent_self_review; prints OIDC subject strings for Entra ID provisioning
+- Added !scripts/setup-gha-environments.sh exception to .gitignore
+- Files changed: .github/workflows/terraform-apply.yml, scripts/setup-gha-environments.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - GitHub Environment `environment:` on a job triggers reviewer approval gate AND enforces deployment branch policy — putting it on the apply job (not plan) is the correct pattern
+  - GitHub matrix jobs cannot carry distinct `environment:` per matrix entry — use separate named jobs (one per env) for independent reviewer approval
+  - Apply ordering via `needs:` creates a pipeline: dev→staging→prod-we→prod-ne; each gate approval is independent but sequential
+  - `prevent_self_review: true` on the Environment prevents the person who approved the PR from also approving the deployment
+---
+
 ## 2026-05-23 - US-V3-13
 - Created .checkov.yaml at repo root: single source of truth for checkov config (directory=terraform, framework=terraform, baseline=.checkov.baseline, soft-fail=true for sprint-1 advisory)
 - Created .checkov.baseline as empty valid JSON baseline (to be populated with 'checkov --create-baseline' before sprint-2 cutover)

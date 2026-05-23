@@ -655,8 +655,8 @@
         "Given an attempt to invoke terraform apply from a PR branch, When the job starts, Then Environment branch protection rejects the deploy because the branch is not main."
       ],
       "priority": 41,
-      "passes": false,
-      "notes": "PRD-v3 [P1]. FR: FR-V3-17. ADR: ADR-025-v3, ADR-030-v3. One GHA Environment per env-state (7 total). At least two @<org>/platform-team members as required reviewers. OIDC subject scoped per Environment. Apply restricted to main branch only."
+      "passes": true,
+      "notes": "Implemented on 2026-05-23. Created .github/workflows/terraform-apply.yml triggered on push to main or workflow_dispatch. Plan stage is a 7-env matrix (same envs as CI plan) posting summaries to the GitHub Step Summary. Apply stage has one dedicated job per env-state, each targeting its corresponding GitHub Environment (mgmt-we, mgmt-ne, dev, staging, prod-we, prod-ne, seed-wus) so each pauses for reviewer approval before applying. Apply order is risk-aware: mgmt-we first, mgmt-ne after mgmt-we, dev independently, staging after dev, prod-we after staging, prod-ne after prod-we, seed-wus independently. Each apply job uses ARM_USE_OIDC=true with the Environment OIDC subject (repo:<org>/<repo>:environment:<env-name> per ADR-030-v3). Branch restriction to main on each Environment prevents PR-branch deploys. Added scripts/setup-gha-environments.sh (idempotent, uses gh CLI): creates all 7 Environments with main-only deployment branch policy, @platform-team as required reviewers, wait timers (dev=0, staging/seed-wus=5m, prod/mgmt=10m), and prevent_self_review=true; also prints the OIDC subject strings to provision in Entra ID. YAML validation passes. Live apply and reviewer gate require GitHub admin access and Azure credentials."
     },
     {
       "id": "US-V3-15",
