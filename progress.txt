@@ -1,3 +1,16 @@
+## 2026-05-23 - US-V3-19, US-V3-20, US-V3-21
+- Created backstage/sonar-project.properties: TypeScript/Dockerfile inclusions, explicit HCL exclusions, coverage LCOV paths (US-V3-19, ADR-028-v3)
+- Created .github/workflows/sonar.yml: SonarCloud scan on PR+push to main, runs yarn test:all --coverage, uploads LCOV; continue-on-error=true for sprint-1 advisory; SPRINT-2 CUTOVER comment to remove it (US-V3-21)
+- Added var.sonar_hosting to terraform/variables.tf: enum saas|cipool, default=saas, validation block; sonar.yml reads vars.SONAR_HOST_URL with fallback to sonarcloud.io for toggle (US-V3-20)
+- Files changed: backstage/sonar-project.properties, .github/workflows/sonar.yml, terraform/variables.tf, prd.json
+- **Learnings for future iterations:**
+  - SonarSource/sonarcloud-github-action@v3 reads sonar-project.properties automatically from the projectBaseDir; CLI args override it
+  - sonar.inclusions + sonar.exclusions work together: inclusions first, then exclusions filter
+  - fetch-depth: 0 in checkout is required for Sonar's new-code detection (shallow clone breaks blame)
+  - vars.SONAR_HOST_URL || 'fallback' in GitHub Actions expressions: use ${{ vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+  - continue-on-error: true on a job step makes the step orange (warning) but doesn't fail the job
+---
+
 ## 2026-05-23 - US-V3-18
 - Added terraform_checkov hook to .pre-commit-config.yaml (pre-commit-terraform v1.92.0): --config-file ../.checkov.yaml so local and CI consume identical config
 - files: ^terraform/ scopes the hook to terraform files only

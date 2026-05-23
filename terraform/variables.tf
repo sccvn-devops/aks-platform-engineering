@@ -79,6 +79,17 @@ variable "environment" {
   }
 }
 
+variable "sonar_hosting" {
+  description = "Controls SonarQube hosting mode. 'saas' uses SonarCloud; 'cipool' deploys self-hosted Sonar on the mgmt-we cipool node pool (requires ADR-016-v3-amendment Accepted)."
+  type        = string
+  default     = "saas"
+
+  validation {
+    condition     = contains(["saas", "cipool"], var.sonar_hosting)
+    error_message = "sonar_hosting must be 'saas' (default) or 'cipool'. See ADR-028-v3."
+  }
+}
+
 variable "infrastructure_provider" {
   description = "Specific the choice of infrastructure provider. crossplane or capz"
   type        = string
