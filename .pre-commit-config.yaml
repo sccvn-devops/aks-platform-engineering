@@ -1,0 +1,49 @@
+# .pre-commit-config.yaml — canonical local hook runner (US-V3-10, US-V3-11, US-V3-18)
+#
+# Hook set at v3 GA (ADR-025-v3, ADR-027-v3, FR-V3-14):
+#   terraform_fmt, terraform_validate, tflint, detect-private-key,
+#   end-of-file-fixer, trailing-whitespace, terraform_checkov
+#
+# Checkov is added here (US-V3-18) so local and CI runs produce identical
+# results from the same .checkov.yaml config (ADR-027-v3 decision #1).
+# Additional hooks require an ADR per ADR-025-v3.
+#
+# Install: pre-commit install
+# Run all: pre-commit run --all-files
+# Run single: pre-commit run <hook-id> --all-files
+
+repos:
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.92.0
+    hooks:
+      - id: terraform_fmt
+        args:
+          - --args=-recursive
+      - id: terraform_validate
+        args:
+          - --args=-no-color
+        additional_dependencies:
+          - terraform>=1.5.0,<2.0.0
+      # Checkov via pre-commit-terraform — reads .checkov.yaml so the same
+      # config drives both local commits and CI (US-V3-18, ADR-027-v3).
+      # Scope is terraform/ only; Dockerfile coverage is CI-only (no Dockerfile pre-commit hook).
+      - id: terraform_checkov
+        args:
+          - --args=--config-file ../.checkov.yaml
+        files: ^terraform/
+
+  - repo: https://github.com/terraform-linters/tflint
+    rev: v0.55.0
+    hooks:
+      - id: tflint
+        args:
+          - --config=.tflint.hcl
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: detect-private-key
+      - id: end-of-file-fixer
+        exclude: '^(backstage/)'
+      - id: trailing-whitespace
+        exclude: '^(backstage/)'

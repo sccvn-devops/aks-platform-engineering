@@ -1,5 +1,161 @@
+## 2026-05-23 - US-V3-23
+- Added three random_uuid resources in terraform/main.tf: backstage_role_user_read, backstage_role_user_read_all, backstage_role_group_member_read_all
+- Each resource uses keepers = { trigger = var.prefix } (PRD mentions var.cluster_name but only var.prefix exists in this codebase)
+- Replaced all three uuid() calls in azuread_application.backstage-app app_role blocks with random_uuid.*.result
+- grep -R 'uuid()' terraform/ (excluding .terraform/ third-party modules) returns zero matches
+- UUIDs are now stable across plans when var.prefix is unchanged; regenerate on prefix change
+- Files changed: terraform/main.tf, prd.json
+- **Learnings for future iterations:**
+  - uuid() built-in generates a new UUID on every plan — the fix is random_uuid resources with keepers that trigger on meaningful input changes
+  - Use `keepers = { trigger = var.prefix }` (not var.cluster_name which doesn't exist in this codebase)
+  - .terraform/ directory contains third-party module copies — uuid() there cannot be patched; only first-party .tf files count for grep criterion
+  - random_uuid resources need the `random` provider (already declared in provider.tf ~> 3.7)
+---
+
+## 2026-05-23 - US-V3-22
+- terraform/provider.tf already contained required_version = "~> 1.5.0" with ADR-029-v3/FR-V3-27 comment — no code change needed
+- Both .github/workflows/terraform-ci.yml and .github/workflows/terraform-apply.yml already set TF_VERSION: "1.5.7" satisfying ~> 1.5.0
+- Story was implemented as a side-effect of earlier US-V3-* work; only prd.json updated to passes=true
+- Files changed: prd.json
+- **Learnings for future iterations:**
+  - US-V3-22 (pin Terraform ~> 1.5.0) was implemented implicitly during earlier story work; check provider.tf and CI env vars before re-implementing
+  - The pattern of stories being pre-implemented as side effects of other stories is common in this codebase (see US-V3-10, US-V3-11, US-V3-22)
+---
+
+## 2026-05-23 - US-V3-19, US-V3-20, US-V3-21
+- Created backstage/sonar-project.properties: TypeScript/Dockerfile inclusions, explicit HCL exclusions, coverage LCOV paths (US-V3-19, ADR-028-v3)
+- Created .github/workflows/sonar.yml: SonarCloud scan on PR+push to main, runs yarn test:all --coverage, uploads LCOV; continue-on-error=true for sprint-1 advisory; SPRINT-2 CUTOVER comment to remove it (US-V3-21)
+- Added var.sonar_hosting to terraform/variables.tf: enum saas|cipool, default=saas, validation block; sonar.yml reads vars.SONAR_HOST_URL with fallback to sonarcloud.io for toggle (US-V3-20)
+- Files changed: backstage/sonar-project.properties, .github/workflows/sonar.yml, terraform/variables.tf, prd.json
+- **Learnings for future iterations:**
+  - SonarSource/sonarcloud-github-action@v3 reads sonar-project.properties automatically from the projectBaseDir; CLI args override it
+  - sonar.inclusions + sonar.exclusions work together: inclusions first, then exclusions filter
+  - fetch-depth: 0 in checkout is required for Sonar's new-code detection (shallow clone breaks blame)
+  - vars.SONAR_HOST_URL || 'fallback' in GitHub Actions expressions: use ${{ vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+  - continue-on-error: true on a job step makes the step orange (warning) but doesn't fail the job
+---
+
+## 2026-05-23 - US-V3-18
+- Added terraform_checkov hook to .pre-commit-config.yaml (pre-commit-terraform v1.92.0): --config-file ../.checkov.yaml so local and CI consume identical config
+- files: ^terraform/ scopes the hook to terraform files only
+- Updated header comment to list all 7 hooks with ADR citations
+- CI checkov job already uses .checkov.yaml + .checkov.baseline (US-V3-13); both paths now deterministically identical
+- Files changed: .pre-commit-config.yaml, prd.json
+- **Learnings for future iterations:**
+  - terraform_checkov in pre-commit-terraform passes args to checkov via `--args=<arg>` prefix
+  - --config-file path is relative to CWD (repo root), but hook runs from terraform/ dir, so use ../.checkov.yaml
+  - files: regex in pre-commit scopes which changed files trigger the hook; ^terraform/ is the right scope
+  - pre-commit-terraform terraform_checkov hook installs checkov into a venv automatically — no separate checkov install needed
+---
+
+## 2026-05-23 - US-V3-17
+- Created .github/CODEOWNERS: .checkov.baseline → @sccvn-devops/platform-team; TODO comment for Security guild handoff; also covers .github/workflows/, key config files and scripts
+- Created scripts/validate-checkov-suppressions.py: validates # checkov:skip=CKV_*:PROJ-NNN format, queries Jira REST API for ticket status/expiry when configured, gracefully degrades offline
+- Added validate-suppressions CI job (blocking): runs on every PR, fails if suppression lacks ticket or references closed/expired ticket
+- CODEOWNERS enforcement requires branch protection 'require_code_owner_reviews: true' (already set in setup-branch-protection.sh)
+- Files changed: .github/CODEOWNERS, scripts/validate-checkov-suppressions.py, .github/workflows/terraform-ci.yml, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - CODEOWNERS file lives at .github/CODEOWNERS (GitHub checks this location first)
+  - Jira REST API endpoint for ticket: /rest/api/3/issue/{ticket}?fields=status,duedate,summary
+  - statusCategory.key == 'done' is the canonical closed-ticket check (not status.name which varies per project)
+  - urllib.request.urlopen with timeout=10 gracefully handles unreachable Jira (URLError caught)
+---
+
+## 2026-05-23 - US-V3-16
+- Updated .tflint.hcl: documented rule override section with rationale/ADR citation pattern; all azurerm rules at default severity; no rules disabled at GA
+- Created scripts/check-var-validation.py: Python companion to tflint that parses Terraform HCL for variables missing validation {} blocks; exits 0 (advisory) or 1 (--block); emits GitHub Actions annotations; 60 vars scanned, 100% coverage at GA
+- Added network_policy validation block to terraform/variables.tf (enum: azure/calico/cilium/none) — final missing variable
+- Added check-var-validation CI job in terraform-ci.yml: advisory mode (|| true), BLOCKING CUTOVER comment documented
+- Files changed: .tflint.hcl, scripts/check-var-validation.py, terraform/variables.tf, .github/workflows/terraform-ci.yml, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - Simple bracket-depth parser in Python handles nested HCL blocks without an external library — scan for `variable "name" {` then track depth to find `validation {` within
+  - GitHub Actions annotation format: `::warning file=<path>,line=<N>::<message>` — works for both warnings and errors
+  - tflint-ruleset-azurerm rule names follow pattern `azurerm_<resource>_invalid_<field>` — check the plugin docs before adding overrides
+  - `|| true` in CI is the advisory pattern; removing it + adding `--block` is the blocking cutover
+---
+
+## 2026-05-23 - US-V3-15
+- Added inline validation {} blocks to critical-path variables (ADR-026-v3 day-1 set):
+  - location, secondary_location, dr_location: Azure region slug regex ^[a-z][a-z0-9]+$
+  - prefix: cluster name regex ^[a-z][a-z0-9-]{1,19}$
+  - sku_tier: enum validation (Free/Standard/Premium)
+  - net_profile_service_cidr: cidrhost() function-based CIDR validation
+  - net_profile_dns_service_ip, jenkins_webhook_internal_load_balancer_ip: IPv4 regex
+  - infrastructure_provider: enum (capz/crossplane)
+  - network_plugin: enum (azure/kubenet/none)
+- Added new variable 'environment' with validation regex ^(dev|staging|prod)$ (default: dev)
+- terraform validate passes with all new validation blocks
+- Files changed: terraform/variables.tf, prd.json
+- **Learnings for future iterations:**
+  - `can(cidrhost(var.net_profile_service_cidr, 0))` is the idiomatic Terraform CIDR validation — no need for a custom regex
+  - validation {} blocks fire at plan time regardless of whether the variable is used in count=0 resources — add them carefully for sensitive/required vars
+  - Adding a new variable with default= does NOT break existing applies; existing state still works
+  - Terraform validation {} regex requires double-escaping backslashes in the HCL string (\\d for \d)
+---
+
+## 2026-05-23 - US-V3-14
+- Created .github/workflows/terraform-apply.yml: triggered on push to main + workflow_dispatch
+- Plan stage: 7-env matrix identical to CI, posts summaries to GitHub Step Summary
+- Apply stage: 7 dedicated jobs (not matrix) each with `environment:` targeting its GitHub Environment; apply order is risk-ordered (mgmt-we → mgmt-ne; dev → staging → prod-we → prod-ne; seed-wus independent)
+- Each apply job uses ARM_USE_OIDC=true; OIDC subject scoped per Environment (repo:<org>/<repo>:environment:<env-name>)
+- Created scripts/setup-gha-environments.sh: creates 7 GitHub Environments with main-only branch policy, @platform-team as reviewer, wait timers, prevent_self_review; prints OIDC subject strings for Entra ID provisioning
+- Added !scripts/setup-gha-environments.sh exception to .gitignore
+- Files changed: .github/workflows/terraform-apply.yml, scripts/setup-gha-environments.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - GitHub Environment `environment:` on a job triggers reviewer approval gate AND enforces deployment branch policy — putting it on the apply job (not plan) is the correct pattern
+  - GitHub matrix jobs cannot carry distinct `environment:` per matrix entry — use separate named jobs (one per env) for independent reviewer approval
+  - Apply ordering via `needs:` creates a pipeline: dev→staging→prod-we→prod-ne; each gate approval is independent but sequential
+  - `prevent_self_review: true` on the Environment prevents the person who approved the PR from also approving the deployment
+---
+
+## 2026-05-23 - US-V3-13
+- Created .checkov.yaml at repo root: single source of truth for checkov config (directory=terraform, framework=terraform, baseline=.checkov.baseline, soft-fail=true for sprint-1 advisory)
+- Created .checkov.baseline as empty valid JSON baseline (to be populated with 'checkov --create-baseline' before sprint-2 cutover)
+- Updated .github/workflows/terraform-ci.yml: checkov job now uses config_file=.checkov.yaml and baseline=.checkov.baseline; removed inline params; day-1 jobs (format/validate/tflint) unchanged as blocking jobs
+- Created scripts/setup-branch-protection.sh: idempotent gh CLI script that sets format/Validate/tflint as required status checks (day-1); --sprint2 flag adds checkov and reminds operator to flip soft-fail
+- Added !scripts/setup-branch-protection.sh exception in .gitignore
+- Files changed: .checkov.yaml, .checkov.baseline, .github/workflows/terraform-ci.yml, scripts/setup-branch-protection.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - bridgecrewio/checkov-action@v12 accepts `config_file` and `baseline` inputs directly; no need to pass via extra_args
+  - Sprint gate phase is controlled by `soft-fail` in .checkov.yaml — both CI and pre-commit read the same file, so one flip covers both (ADR-027-v3 decision #1)
+  - Branch protection "required status checks" use the job `name:` field exactly as it appears in the workflow (e.g., "Terraform Format" not the job key "format")
+  - checkov --create-baseline should be run immediately before sprint-2 cutover to grandfather all current findings; running it too early captures future-fixed findings unnecessarily
+---
+
+## 2026-05-22 - US-V3-07
+- Removed default= from jenkins_webhook_https_keystore_base64 and jenkins_webhook_https_keystore_password (already sensitive=true)
+- Removed unused cosign_public_key_pem variable entirely (dead code — only existed in variables.tf, never referenced in any .tf expression)
+- Flagged jenkins_admin_password, jenkins_bitbucket_workspace_token, jenkins_jira_service_account_token, postgres_password as sensitive=true and removed their plaintext defaults
+- Added azurerm_key_vault_secret.backstage_postgres_password in terraform/jenkins.tf to seed AKV with the now-required postgres_password variable
+- Created scripts/fetch-tf-secrets.sh: OIDC-federated AKV fetch script for CI; authenticates via GitHub Actions OIDC (ARM_CLIENT_ID/TENANT/SUBSCRIPTION env vars) or falls back to existing az login; reads all sensitive vars from kv-platform-mgmt-we; exports TF_VAR_* and applies ::add-mask:: for CI log masking
+- Zero sensitive variables have default= values (verified by grep/Python check)
+- Files changed: terraform/variables.tf, terraform/jenkins.tf, scripts/fetch-tf-secrets.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - Terraform validates ALL declared variables at plan time regardless of count=0 usage — removing a variable's default makes it required even if it's only used in count=0 resources
+  - Variables that are truly dead code (declared but never referenced) should be deleted outright rather than left as orphaned required vars
+  - GitHub Actions ::add-mask:: must be applied BEFORE the value is used in any subsequent step/echo to guarantee masking
+  - `export "VAR_NAME=value"` with quotes ensures values with spaces/newlines export correctly in bash; the fetch script uses `"${tf_var_name}=${value}"` pattern
+---
+
+## 2026-05-22 - US-V3-06
+- Created gitops/platform/akv-tls-cert/ Helm chart: Chart.yaml, values.yaml, templates/externalsecret.yaml
+- ExternalSecret generates type: kubernetes.io/tls with refreshInterval: 60s (p95 ≤ 90s SLO)
+- Uses ESO v2 template engineVersion with Sprig regexFind to split PEM bundle into tls.crt and tls.key
+- Fetches via secret/<certName> (AKV backing secret for certificate) — covered by existing Key Vault Secrets User role
+- Created addons-akv-tls-cert-sync-appset.yaml (sync-wave=35): matrix generator git dirs + workload clusters, deploys to <svc>-<env> namespaces using azure-keyvault SecretStore from NamespaceVaultBinding
+- Extended terraform/external_secrets.tf: azurerm_key_vault_certificate.platform_tls in all workload AKVs (self-signed, CN=platform.internal, *.platform.internal SAN, content_type=application/x-pem-file, AutoRenew 30d before expiry)
+- terraform validate and helm template pass; live ESO sync verification blocked (no az login)
+- Files changed: gitops/platform/akv-tls-cert/{Chart.yaml,values.yaml,templates/externalsecret.yaml}, gitops/bootstrap/control-plane/addons/oss/addons-akv-tls-cert-sync-appset.yaml, terraform/external_secrets.tf, prd.json
+- **Learnings for future iterations:**
+  - Helm escapes ESO template delimiters: use `{{ "{{" }}` and `{{ "}}" }}` to pass `{{ }}` through as ESO template expressions
+  - ESO v2 template with `engineVersion: v2` supports Sprig functions including `regexFind` with Go regex (?s) flag for multiline PEM matching
+  - AKV certificate backing secret (secret/<name>) is accessible via Key Vault Secrets User role — no need for Key Vault Certificates Officer for ESO cert sync
+  - content_type = "application/x-pem-file" on azurerm_key_vault_certificate ensures PEM-encoded backing secret; application/x-pkcs12 would give base64 PKCS#12 blob that can't be regex-parsed
+  - `(?s)-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----` and `(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----` are the correct Go regex patterns for extracting PEM blocks
+---
+
 ## Codebase Patterns
-- Terraform `validate` is the "typecheck" gate — run from `terraform/` directory
+- Terraform `validate` is the "typecheck" gate — run from `terraform/` directory with `terraform init -backend=false -input=false` first (now required since provider.tf has a backend block)
 - Stories blocked on `az login` can still be marked `passes: true` when code is in place and `terraform validate` passes (see US-001, US-018 as precedent)
 - All 7 clusters follow the same blueprint: mgmt-we (main.tf), remaining 6 in clusters.tf `aks_cluster_definitions` map
 - Private API is set via `private_cluster_enabled = true` (hardcoded in clusters.tf for non-mgmt-we clusters)
@@ -10,6 +166,8 @@
 - ESO workload identities are in `terraform/external_secrets.tf` (per workload cluster)
 - Jenkins, Velero, and cosign resources are in `terraform/jenkins.tf` and `terraform/velero.tf`
 - AKV sync exporter wiring is in `terraform/akv_sync_exporter.tf`
+- Remote backend block is in terraform/provider.tf (partial config); per-env keys are in terraform/backends/*.tfbackend
+- .gitignore has `scripts/*` with explicit exceptions: use `!scripts/<name>` pattern to track new scripts
 
 ---
 
@@ -271,4 +429,142 @@
   - Catastrophic-recovery drills need both control-plane evidence and workload-serving evidence; cluster API readiness alone is not enough for the `US-025` acceptance bar
   - Failing fast on placeholder-filled claims is safer than letting Crossplane or ArgoCD fail later with partial side effects
   - Simple HTTP continuity probes are a good default, but business-critical services should also expose or reuse authenticated synthetic checks for stronger DR evidence
+---
+
+## 2026-05-22 - US-V3-02
+- Verified 7 partitioned backend config files from US-V3-01 satisfy acceptance criterion 1 (exactly 7 keys: tfstate/mgmt-we/mgmt-we.tfstate, tfstate/mgmt-ne/mgmt-ne.tfstate, tfstate/dev/aks-dev-we.tfstate, tfstate/staging/aks-staging-we.tfstate, tfstate/prod-we/aks-prod-we.tfstate, tfstate/prod-ne/aks-prod-ne.tfstate, tfstate/seed-wus/seed-wus.tfstate)
+- Cross-env lease isolation (criterion 2) is inherent to azurerm backend: distinct blob paths = distinct leases = no cross-env blocking
+- Fixed scripts/bootstrap-tfstate.sh: added --allow-shared-key-access false per ADR-023-v3 decision #6
+- Created scripts/validate-state-partitioning.sh: validates 7 backends exist with correct key patterns, checks no backend "local" declarations, optionally lists Azure blobs with AZURE_ONLINE=1
+- Updated .gitignore to track scripts/validate-state-partitioning.sh (scripts/* is excluded by default)
+- Files changed: scripts/bootstrap-tfstate.sh, scripts/validate-state-partitioning.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - Azure blob lease locking is per-blob by azurerm backend default; no additional configuration needed for cross-env isolation
+  - --allow-shared-key-access false is required for ADR-023-v3 compliance; prevents key-based auth to the state SA (OIDC/Entra auth only)
+  - validate-state-partitioning.sh doubles as a CI-compatible check (exit 1 on failure) and a pre-flight operator check (AZURE_ONLINE=1 for live blob listing)
+---
+
+## 2026-05-22 - US-V3-04
+- Updated scripts/bootstrap-tfstate.sh: added --encryption-services blob to az storage account create (explicit MSE) and added inline post-creation assertion checking keySource=Microsoft.Storage, blob.enabled=true, keyVaultUri=empty
+- Created scripts/validate-mse-encryption.sh: standalone checker that reads live Azure SA encryption properties (requires az login) and statically checks terraform/provider.tf for CMK config
+- Updated .gitignore with !scripts/validate-mse-encryption.sh exception
+- No CMK references (customer_managed_key, key_vault_key_id, infrastructure_encryption) exist in terraform/provider.tf or any backend config
+- `terraform validate` passes; live az-based check blocked (no az login)
+- Files changed: scripts/bootstrap-tfstate.sh, scripts/validate-mse-encryption.sh, .gitignore, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - Azure `az storage account show --query "encryption.keySource"` returns "Microsoft.Storage" for MSE and "Microsoft.Keyvault" for CMK
+  - `--encryption-services blob` in az storage account create makes MSE explicit (it's the default, but explicit is better for compliance evidence)
+  - CMK migration requires a separate ADR per ADR-023-v3 decision #5; do not add customer_managed_key blocks to the state SA in v3
+---
+
+## 2026-05-22 - US-V3-03
+- Created scripts/validate-blob-lease-locking.sh: static-only validation that verifies (1) backend "azurerm" is declared, (2) no forbidden lock-store attributes (lock_table, dynamodb_table, lock_service_url, cosmos lock, table_name lock) in terraform/, (3) no competing lock resources (aws_dynamodb_table, etc.), (4) all .tfbackend files contain only the 'key' directive
+- With AZURE_ONLINE=1 the script also acquires a blob lease on an existing state blob and attempts a second acquire, expecting a 409/LeaseAlreadyPresent error — proving no external lock service is consulted
+- Updated .gitignore with !scripts/validate-blob-lease-locking.sh exception
+- Offline checks pass: `bash scripts/validate-blob-lease-locking.sh` exits 0
+- `terraform validate` passes (no changes to .tf files required — provider.tf already had the correct backend)
+- Files changed: scripts/validate-blob-lease-locking.sh, .gitignore, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - The azurerm backend provides native blob-lease locking with zero config — just declaring `backend "azurerm"` is sufficient; there is no `lock_table` attribute in this provider
+  - Static checks are sufficient to prove "no external lock store consulted" in offline environments; live verification only adds the actual 409 error message as evidence
+  - .tfbackend files should contain only `key = ...`; any additional directive (resource_group_name, storage_account_name in a partial config) belongs in provider.tf, not per-env files
+---
+
+## 2026-05-22 - US-V3-01
+- Created scripts/bootstrap-tfstate.sh: idempotent Azure CLI script that creates rg-tfstate-bootstrap with CanNotDelete management lock, storage account stplatformtfstate (GRS, StorageV2, TLS1.2, no public blob access), enables blob versioning, and creates the tfstate container
+- Added azurerm backend block (partial config) to terraform/provider.tf: resource_group_name, storage_account_name, container_name hardcoded; key supplied per-env via -backend-config flag
+- Created 7 per-environment backend config files in terraform/backends/: mgmt-we, mgmt-ne, dev, staging, prod-we, prod-ne, seed-wus — each with partitioned key tfstate/<env>/<cluster>.tfstate
+- Added !scripts/bootstrap-tfstate.sh exception to .gitignore (scripts/* is excluded by default)
+- `terraform init -backend=false && terraform validate` passes
+- **Learnings for future iterations:**
+  - `terraform validate` now requires `terraform init -backend=false` first since provider.tf has a backend block (without -backend=false, init tries to connect to Azure)
+  - .gitignore blocks scripts/* — always add a `!scripts/<filename>` exception for new tracked scripts
+  - azurerm backend with partial config (no key in provider.tf) allows per-env init via -backend-config; this is the correct pattern for multi-environment state partitioning
+---
+
+## 2026-05-22 - US-V3-05
+- Deleted terraform/tls.key, terraform/tls.crt, backstage/etc/tls/tls.key, backstage/etc/tls/tls.crt from git tracking (git rm)
+- Added *.key, *.crt, *.pem to .gitignore to prevent future TLS material commits
+- Updated terraform/main.tf: replaced file("tls.crt")/file("tls.key") with data.azurerm_key_vault_secret references (count-aware, reads from kv-platform-mgmt-we)
+- Added azurerm_key_vault_secret.backstage_tls_crt and backstage_tls_key to terraform/jenkins.tf (provisioned from sensitive vars)
+- Added sensitive var.backstage_tls_crt and var.backstage_tls_key to terraform/variables.tf with PEM-format validation blocks
+- Updated backstage/app-config-local.yaml: replaced $file references with $env: BACKSTAGE_TLS_KEY / BACKSTAGE_TLS_CRT
+- Created scripts/purge-tls-history.sh: wraps git-filter-repo invocation to purge all four TLS paths from complete branch history; includes dry-run mode, pre-flight checks, post-purge verification, and CA revocation instructions
+- Created .pre-commit-config.yaml with 6 v3 GA hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace (covers US-V3-10, US-V3-11)
+- Created .tflint.hcl with tflint-ruleset-azurerm v0.26.0 (covers US-V3-16)
+- terraform validate passes; script syntax passes (bash -n)
+- Files changed: .gitignore, .pre-commit-config.yaml, .tflint.hcl, backstage/app-config-local.yaml, backstage/etc/tls/{tls.crt,tls.key} (deleted), scripts/purge-tls-history.sh (new), terraform/jenkins.tf, terraform/main.tf, terraform/tls.{crt,key} (deleted), terraform/variables.tf
+- **Learnings for future iterations:**
+  - git-filter-repo is available at /home/tuanna47/.pyenv/shims/git-filter-repo; run scripts/purge-tls-history.sh (with --dry-run first) when force-push window opens
+  - data.azurerm_key_vault_secret with count = local.build_backstage ? 1 : 0 is the correct pattern for conditional AKV data sources (matches the count on the dependent kubernetes_secret)
+  - .pre-commit-config.yaml covers 6 GA hooks; the tflint hook requires terraform init on the module first (handled by pre-commit-terraform's terraform_validate hook setup)
+  - detect-private-key from pre-commit-hooks catches PEM material regardless of filename, satisfying criterion 3 independent of .gitignore
+---
+
+## 2026-05-23 - US-V3-11
+- .pre-commit-config.yaml already exists from US-V3-05 with exactly 6 hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace
+- File comment at line 3 explicitly documents the "exactly 6 hooks" constraint referencing ADR-025-v3 and FR-V3-14
+- Acceptance criterion satisfied: no more, no fewer than 6 hooks at v3 GA
+- No code changes required; prd.json updated to passes=true
+- Files changed: prd.json
+- **Learnings for future iterations:**
+  - US-V3-05 (TLS purge) implemented both US-V3-10 and US-V3-11 as side-effects; US-V3-10 was caught in the previous iteration; US-V3-11 caught here
+  - When implementing a story, check if it also satisfies adjacent stories (US-V3-05 notes explicitly said it covered US-V3-10 and US-V3-11)
+---
+
+## 2026-05-23 - US-V3-10
+- .pre-commit-config.yaml already exists from US-V3-05 with correct hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace
+- .tflint.hcl already exists from US-V3-05 with tflint-ruleset-azurerm v0.26.0
+- Acceptance criterion satisfied: 'pre-commit install' on a fresh clone will register all 6 hooks; subsequent commits trigger them
+- No code changes required; prd.json updated to passes=true
+- Files changed: prd.json
+- **Learnings for future iterations:**
+  - US-V3-05 (TLS purge) implemented both US-V3-10 and US-V3-11 as side-effects; always check if earlier stories already deliver an AC before implementing from scratch
+---
+
+## 2026-05-23 - US-V3-09
+- Added rotation_policy block to azurerm_key_vault_key.management_ci_cosign in terraform/jenkins.tf: expire_after=P90D (quarterly), automatic time_before_expiry=P30D, notify_before_expiry=P29D
+- Updated azurerm_key_vault_certificate.platform_tls in terraform/external_secrets.tf: validity_in_months 12→3 (quarterly cert life), AutoRenew trigger 30→14 days before expiry
+- Criterion 2 (no static credentials): all 9 UAMIs already use azurerm_federated_identity_credential (Workload Identity federation) — no SP passwords present
+- Created scripts/validate-akv-rotation-policies.sh: static checks (rotation_policy, expire_after=P90D, validity_in_months=3, AutoRenew, no SP passwords) + AZURE_ONLINE=1 path for live AKV rotation policy query
+- All static checks pass; terraform validate passes; live AKV inspection blocked (no az login)
+- Files changed: terraform/jenkins.tf, terraform/external_secrets.tf, scripts/validate-akv-rotation-policies.sh, .gitignore, prd.json
+- **Learnings for future iterations:**
+  - azurerm_key_vault_key rotation_policy: expire_after sets key lifetime; automatic.time_before_expiry triggers new version creation before expiry; effective rotation is at (expire_after - time_before_expiry) — e.g. P90D - P30D = P60D (every 2 months a new version is created, overlap until P90D expiry)
+  - azurerm_key_vault_certificate quarterly rotation: set validity_in_months=3 and days_before_expiry=14 (not 30) to guarantee AutoRenew fires well within the 3-month window and leaves enough overlap for ESO refreshInterval=60s to re-sync
+  - grep for rotation_policy presence should target the whole file, not just lines after the resource header (use `grep -q 'rotation_policy' file.tf`, not `grep -A N 'resource...' | grep`)
+---
+
+## 2026-05-23 - US-V3-08
+- Replaced subscription-wide Owner role for akspe with two RG-scoped assignments in terraform/main.tf: Contributor and User Access Administrator both on azurerm_resource_group.this
+- Removed data.azurerm_resource_group.mgmt_we_node from terraform/velero.tf (only existed for the now-removed node-RG scope)
+- Changed velero_snapshot_contributor → velero_contributor: scope from mgmt_we_node RG to azurerm_resource_group.this (backup RG)
+- Changed velero_storage_blob_data_contributor scope from container resource_manager_id to azurerm_storage_account.mgmt_backup.id (SA level)
+- terraform validate passes; live role-assignment listing blocked (no az login)
+- Files changed: terraform/main.tf, terraform/velero.tf, prd.json
+- **Learnings for future iterations:**
+  - akspe was subscription-wide Owner (the P0 finding F-07); safe to narrow because all AKS clusters use azurerm_resource_group.this — no cross-subscription provisioning
+  - data.azurerm_resource_group.mgmt_we_node was only referenced for velero_snapshot_contributor; removing it also removes an implicit dependency on module.aks completing before velero resources deploy
+  - Scoping Velero Contributor to the backup RG (not node RG) removes snapshot capability for Azure Disk PVs; if disk snapshots are needed later, a targeted node-RG Contributor role assignment should be added per the follow-up ADR-024-v3 decision
+---
+
+## 2026-05-23 - US-V3-12
+- Created .github/workflows/terraform-ci.yml: GitHub Actions meta-CI triggered on PRs to main targeting terraform/**, CI workflow files, .tflint.hcl, .checkov.yaml, .checkov.baseline, and scripts/fetch-tf-secrets.sh
+- Four jobs with correct dependency chain:
+  - format: terraform fmt -recursive -check -diff (day-1 blocking gate)
+  - validate: terraform init -backend=false + terraform validate -no-color (day-1 blocking gate)
+  - tflint: tflint --init + tflint --recursive --format=compact with azurerm ruleset (day-1 blocking gate)
+  - checkov: bridgecrewio/checkov-action with soft_fail: true (sprint-1 advisory, ADR-027-v3); uploads SARIF to GitHub Security
+  - plan: matrix of 7 envs (mgmt-we/ne, dev, staging, prod-we/ne, seed-wus); runs after day-1 gates; ARM OIDC auth; -detailed-exitcode; posts plan diff as PR comment; fails on exitcode=1 only
+- Updated scripts/fetch-tf-secrets.sh: added printf '%s=%s\n' >> $GITHUB_ENV so TF_VAR_* values persist across GHA steps (in addition to existing export for same-shell use)
+- App CI untouched on Jenkins per ADR-001-v2
+- Concurrency group set to cancel in-progress runs on new commit
+- Files changed: .github/workflows/terraform-ci.yml (new), scripts/fetch-tf-secrets.sh, prd.json
+- **Learnings for future iterations:**
+  - GHA `export` in a `source`d script does NOT persist across steps — must write to $GITHUB_ENV for cross-step persistence
+  - terraform plan exit codes with -detailed-exitcode: 0=no changes, 1=error, 2=changes pending; without -detailed-exitcode only 0 and 1 are used
+  - Use `shell: bash` and `set +e` then `PIPESTATUS[0]` to capture pipeline exit code without failing the step
+  - checkov soft_fail: true keeps it advisory (non-blocking); flip to false at sprint-2 cutover per US-V3-13/US-V3-18
+  - tflint --config=../.tflint.hcl is relative to working-directory (terraform/), so ../ points to repo root
+  - The plan job posts a comment to the PR using actions/github-script@v7; requires pull-requests: write permission
 ---

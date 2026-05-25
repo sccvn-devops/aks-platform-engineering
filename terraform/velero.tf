@@ -1,7 +1,3 @@
-data "azurerm_resource_group" "mgmt_we_node" {
-  name = module.aks.node_resource_group
-}
-
 resource "azurerm_storage_account" "mgmt_backup" {
   name                     = "stplatformmgmtbackup"
   resource_group_name      = azurerm_resource_group.this.name
@@ -73,13 +69,13 @@ resource "azurerm_federated_identity_credential" "velero" {
 }
 
 resource "azurerm_role_assignment" "velero_storage_blob_data_contributor" {
-  scope                = azurerm_storage_container.mgmt_backup.resource_manager_id
+  scope                = azurerm_storage_account.mgmt_backup.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.velero.principal_id
 }
 
-resource "azurerm_role_assignment" "velero_snapshot_contributor" {
-  scope                = data.azurerm_resource_group.mgmt_we_node.id
+resource "azurerm_role_assignment" "velero_contributor" {
+  scope                = azurerm_resource_group.this.id
   role_definition_name = "Contributor"
   principal_id         = azurerm_user_assigned_identity.velero.principal_id
 }

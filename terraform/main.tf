@@ -52,21 +52,21 @@ locals {
   cluster_metadata = merge(local.environment_metadata, local.addons_metadata)
 
   environment_metadata = {
-    infrastructure_provider                = var.infrastructure_provider
-    akspe_identity_id                      = azurerm_user_assigned_identity.akspe.client_id
-    crossplane_identity_client_id          = azurerm_user_assigned_identity.crossplane.client_id
-    git_public_ssh_key                     = var.git_public_ssh_key
-    jenkins_bitbucket_server_url           = var.jenkins_bitbucket_server_url
-    jenkins_bitbucket_repo_owner           = var.jenkins_bitbucket_repo_owner
-    jenkins_service_repository             = var.jenkins_service_repository
-    jenkins_platform_gitops_repo_url       = var.jenkins_platform_gitops_repo_url
-    jira_base_url                          = var.jira_base_url
-    jira_project_key                       = var.jira_project_key
-    jira_service_account_email             = var.jira_service_account_email
-    kv_prod_we_url                         = azurerm_key_vault.platform["prod-we"].vault_uri
-    kv_prod_ne_url                         = azurerm_key_vault.platform["prod-ne"].vault_uri
-    akv_sync_exporter_identity_client_id   = azurerm_user_assigned_identity.akv_sync_exporter.client_id
-    saas_rotator_identity_client_id        = azurerm_user_assigned_identity.saas_token_rotator.client_id
+    infrastructure_provider              = var.infrastructure_provider
+    akspe_identity_id                    = azurerm_user_assigned_identity.akspe.client_id
+    crossplane_identity_client_id        = azurerm_user_assigned_identity.crossplane.client_id
+    git_public_ssh_key                   = var.git_public_ssh_key
+    jenkins_bitbucket_server_url         = var.jenkins_bitbucket_server_url
+    jenkins_bitbucket_repo_owner         = var.jenkins_bitbucket_repo_owner
+    jenkins_service_repository           = var.jenkins_service_repository
+    jenkins_platform_gitops_repo_url     = var.jenkins_platform_gitops_repo_url
+    jira_base_url                        = var.jira_base_url
+    jira_project_key                     = var.jira_project_key
+    jira_service_account_email           = var.jira_service_account_email
+    kv_prod_we_url                       = azurerm_key_vault.platform["prod-we"].vault_uri
+    kv_prod_ne_url                       = azurerm_key_vault.platform["prod-ne"].vault_uri
+    akv_sync_exporter_identity_client_id = azurerm_user_assigned_identity.akv_sync_exporter.client_id
+    saas_rotator_identity_client_id      = azurerm_user_assigned_identity.saas_token_rotator.client_id
   }
 
   addons_metadata = {
@@ -234,9 +234,15 @@ resource "azurerm_user_assigned_identity" "crossplane" {
   location            = azurerm_resource_group.this.location
 }
 
-resource "azurerm_role_assignment" "akspe_role_assignment" {
-  scope                = data.azurerm_subscription.current.id
-  role_definition_name = "Owner"
+resource "azurerm_role_assignment" "akspe_contributor" {
+  scope                = azurerm_resource_group.this.id
+  role_definition_name = "Contributor"
+  principal_id         = azurerm_user_assigned_identity.akspe.principal_id
+}
+
+resource "azurerm_role_assignment" "akspe_user_access_administrator" {
+  scope                = azurerm_resource_group.this.id
+  role_definition_name = "User Access Administrator"
   principal_id         = azurerm_user_assigned_identity.akspe.principal_id
 }
 
@@ -282,12 +288,30 @@ resource "azurerm_federated_identity_credential" "service_operator" {
 
 
 
+resource "random_uuid" "backstage_role_user_read" {
+  keepers = {
+    trigger = var.prefix
+  }
+}
+
+resource "random_uuid" "backstage_role_user_read_all" {
+  keepers = {
+    trigger = var.prefix
+  }
+}
+
+resource "random_uuid" "backstage_role_group_member_read_all" {
+  keepers = {
+    trigger = var.prefix
+  }
+}
+
 resource "azuread_application" "backstage-app" {
   count        = local.build_backstage ? 1 : 0
   display_name = "Backstage"
 
   app_role {
-    id                   = uuid() # Generate a unique ID for the role
+    id                   = random_uuid.backstage_role_user_read.result
     allowed_member_types = ["User"]
     description          = "Allows the app to read the profile of signed-in users."
     display_name         = "User.Read"
@@ -295,7 +319,7 @@ resource "azuread_application" "backstage-app" {
   }
 
   app_role {
-    id                   = uuid() # Generate a unique ID for the role
+    id                   = random_uuid.backstage_role_user_read_all.result
     allowed_member_types = ["User"]
     description          = "Allows the app to read all users' full profiles."
     display_name         = "User.Read.All"
@@ -303,7 +327,7 @@ resource "azuread_application" "backstage-app" {
   }
 
   app_role {
-    id                   = uuid() # Generate a unique ID for the role
+    id                   = random_uuid.backstage_role_group_member_read_all.result
     allowed_member_types = ["User"]
     description          = "Allows the app to read the memberships of all groups."
     display_name         = "GroupMember.Read.All"
@@ -594,6 +618,20 @@ module "gitops_bridge_bootstrap" {
 # Backstage: Bootstrap
 ################################################################################
 
+data "azurerm_key_vault_secret" "backstage_tls_crt" {
+  count        = local.build_backstage ? 1 : 0
+  name         = "backstage-tls-crt"
+  key_vault_id = azurerm_key_vault.management_ci.id
+  depends_on   = [azurerm_role_assignment.management_ci_key_vault_admin]
+}
+
+data "azurerm_key_vault_secret" "backstage_tls_key" {
+  count        = local.build_backstage ? 1 : 0
+  name         = "backstage-tls-key"
+  key_vault_id = azurerm_key_vault.management_ci.id
+  depends_on   = [azurerm_role_assignment.management_ci_key_vault_admin]
+}
+
 resource "kubernetes_secret" "tls_secret" {
   count      = local.build_backstage ? 1 : 0
   depends_on = [kubernetes_namespace.backstage_nammespace]
@@ -606,8 +644,8 @@ resource "kubernetes_secret" "tls_secret" {
   type = "kubernetes.io/tls"
 
   data = {
-    "tls.crt" = file("tls.crt") # Adjust the path accordingly
-    "tls.key" = file("tls.key") # Adjust the path accordingly
+    "tls.crt" = data.azurerm_key_vault_secret.backstage_tls_crt[0].value
+    "tls.key" = data.azurerm_key_vault_secret.backstage_tls_key[0].value
   }
 }
 

@@ -1,4 +1,15 @@
 terraform {
+  # Remote state backend provisioned out-of-band by scripts/bootstrap-tfstate.sh.
+  # Initialise with a per-environment key:
+  #   terraform init -backend-config=backends/<env>.tfbackend
+  backend "azurerm" {
+    resource_group_name  = "rg-tfstate-bootstrap"
+    storage_account_name = "stplatformtfstate"
+    container_name       = "tfstate"
+    # key is supplied per-environment via -backend-config=backends/<env>.tfbackend
+    # Native blob-lease locking is used automatically; no external lock store needed.
+  }
+
   required_providers {
     azuread = {
       source  = "hashicorp/azuread"
@@ -21,7 +32,8 @@ terraform {
       version = "~> 2.17"
     }
   }
-  required_version = ">= 1.1.0"
+  # Pin to 1.5.x (last MPL-licensed line; compatible with tflint, checkov, azurerm toolchain — ADR-029-v3, FR-V3-27)
+  required_version = "~> 1.5.0"
 }
 
 data "azurerm_client_config" "current" {}

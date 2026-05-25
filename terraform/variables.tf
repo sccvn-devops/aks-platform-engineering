@@ -15,18 +15,33 @@ variable "location" {
   description = "Specifies the the location for the Azure resources."
   type        = string
   default     = "westeurope"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]+$", var.location))
+    error_message = "location must be an Azure region slug: lowercase letters and digits only (e.g., 'westeurope', 'northeurope')."
+  }
 }
 
 variable "secondary_location" {
   description = "Specifies the paired Azure region for standby resources."
   type        = string
   default     = "northeurope"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]+$", var.secondary_location))
+    error_message = "secondary_location must be an Azure region slug: lowercase letters and digits only (e.g., 'northeurope')."
+  }
 }
 
 variable "dr_location" {
   description = "Specifies the disaster recovery region for the seed cluster network."
   type        = string
   default     = "westus2"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]+$", var.dr_location))
+    error_message = "dr_location must be an Azure region slug: lowercase letters and digits only (e.g., 'westus2')."
+  }
 }
 
 variable "agents_size" {
@@ -53,10 +68,37 @@ variable "create_role_assignments_for_application_gateway" {
   default     = true
 }
 
+variable "environment" {
+  description = "Deployment environment. Controls resource naming, tagging, and SLO class selection."
+  type        = string
+  default     = "dev"
+
+  validation {
+    condition     = can(regex("^(dev|staging|prod)$", var.environment))
+    error_message = "environment must be one of: dev, staging, prod."
+  }
+}
+
+variable "sonar_hosting" {
+  description = "Controls SonarQube hosting mode. 'saas' uses SonarCloud; 'cipool' deploys self-hosted Sonar on the mgmt-we cipool node pool (requires ADR-016-v3-amendment Accepted)."
+  type        = string
+  default     = "saas"
+
+  validation {
+    condition     = contains(["saas", "cipool"], var.sonar_hosting)
+    error_message = "sonar_hosting must be 'saas' (default) or 'cipool'. See ADR-028-v3."
+  }
+}
+
 variable "infrastructure_provider" {
   description = "Specific the choice of infrastructure provider. crossplane or capz"
   type        = string
   default     = "capz"
+
+  validation {
+    condition     = contains(["capz", "crossplane"], var.infrastructure_provider)
+    error_message = "infrastructure_provider must be 'capz' or 'crossplane'."
+  }
 }
 
 variable "addons" {
@@ -148,12 +190,22 @@ variable "prefix" {
   description = "Specifies the prefix for the AKS cluster"
   type        = string
   default     = "gitops"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,19}$", var.prefix))
+    error_message = "prefix must be 2–20 characters, start with a lowercase letter, and contain only lowercase letters, digits, and hyphens."
+  }
 }
 
 variable "network_plugin" {
   description = "Specifies the network plugin of the AKS cluster"
   default     = "azure"
   type        = string
+
+  validation {
+    condition     = contains(["azure", "kubenet", "none"], var.network_plugin)
+    error_message = "network_plugin must be one of: azure, kubenet, none."
+  }
 }
 
 variable "os_disk_size_gb" {
@@ -172,6 +224,11 @@ variable "sku_tier" {
   description = "Specifies the SKU Tier that should be used for this AKS Cluster."
   type        = string
   default     = "Standard"
+
+  validation {
+    condition     = contains(["Free", "Standard", "Premium"], var.sku_tier)
+    error_message = "sku_tier must be one of: Free, Standard, Premium."
+  }
 }
 
 variable "private_cluster_enabled" {
@@ -226,6 +283,11 @@ variable "network_policy" {
   description = "Specifies the type of network policy to use for Kubernetes."
   type        = string
   default     = "azure"
+
+  validation {
+    condition     = contains(["azure", "calico", "cilium", "none"], var.network_policy)
+    error_message = "network_policy must be one of: azure, calico, cilium, none."
+  }
 }
 
 variable "microsoft_defender_enabled" {
@@ -238,12 +300,22 @@ variable "net_profile_dns_service_ip" {
   description = "Specifies the DNS service IP"
   default     = "172.20.0.10"
   type        = string
+
+  validation {
+    condition     = can(regex("^(\\d{1,3}\\.){3}\\d{1,3}$", var.net_profile_dns_service_ip))
+    error_message = "net_profile_dns_service_ip must be a valid IPv4 address (e.g., '172.20.0.10')."
+  }
 }
 
 variable "net_profile_service_cidr" {
   description = "Specifies the service CIDR"
   default     = "172.20.0.0/16"
   type        = string
+
+  validation {
+    condition     = can(cidrhost(var.net_profile_service_cidr, 0))
+    error_message = "net_profile_service_cidr must be a valid CIDR block (e.g., '172.20.0.0/16')."
+  }
 }
 
 variable "build_backstage" {
@@ -253,9 +325,9 @@ variable "build_backstage" {
 }
 
 variable "postgres_password" {
-  description = "Password for the Backstage Postgres database"
+  description = "Password for the Backstage Postgres database, sourced from AKV at apply time via OIDC federation."
   type        = string
-  default     = "secretPassword123!"
+  sensitive   = true
 }
 
 variable "jenkins_admin_username" {
@@ -265,21 +337,21 @@ variable "jenkins_admin_username" {
 }
 
 variable "jenkins_admin_password" {
-  description = "Bootstrap admin password to seed in the management Key Vault for Jenkins."
+  description = "Bootstrap admin password to seed in the management Key Vault for Jenkins. Sourced from AKV at apply time via OIDC federation."
   type        = string
-  default     = "ChangeMe-Jenkins-Admin-123!"
+  sensitive   = true
 }
 
 variable "jenkins_bitbucket_workspace_token" {
-  description = "Bootstrap Bitbucket workspace token to seed in the management Key Vault for Jenkins."
+  description = "Bootstrap Bitbucket workspace token to seed in the management Key Vault for Jenkins. Sourced from AKV at apply time via OIDC federation."
   type        = string
-  default     = "replace-me-bitbucket-workspace-token"
+  sensitive   = true
 }
 
 variable "jenkins_jira_service_account_token" {
-  description = "Bootstrap Jira service account token to seed in the management Key Vault for Jenkins."
+  description = "Bootstrap Jira service account token to seed in the management Key Vault for Jenkins. Sourced from AKV at apply time via OIDC federation."
   type        = string
-  default     = "replace-me-jira-service-account-token"
+  sensitive   = true
 }
 
 variable "jira_base_url" {
@@ -328,20 +400,23 @@ variable "jenkins_webhook_internal_load_balancer_ip" {
   description = "Static private IP assigned to the internal Jenkins load balancer in the mgmt-we AKS subnet."
   type        = string
   default     = "10.1.0.50"
+
+  validation {
+    condition     = can(regex("^(\\d{1,3}\\.){3}\\d{1,3}$", var.jenkins_webhook_internal_load_balancer_ip))
+    error_message = "jenkins_webhook_internal_load_balancer_ip must be a valid IPv4 address."
+  }
 }
 
 variable "jenkins_webhook_https_keystore_base64" {
-  description = "Base64-encoded Jenkins HTTPS keystore content used by the controller to terminate TLS for Bitbucket webhook ingress."
+  description = "Base64-encoded Jenkins HTTPS keystore content used by the controller to terminate TLS for Bitbucket webhook ingress. Sourced from AKV at apply time via OIDC federation."
   type        = string
   sensitive   = true
-  default     = ""
 }
 
 variable "jenkins_webhook_https_keystore_password" {
-  description = "Password for the Jenkins HTTPS keystore mounted into the controller pod."
+  description = "Password for the Jenkins HTTPS keystore mounted into the controller pod. Sourced from AKV at apply time via OIDC federation."
   type        = string
   sensitive   = true
-  default     = "changeit"
 }
 
 variable "jenkins_webhook_allowed_ipv4_cidrs" {
@@ -400,14 +475,24 @@ variable "jenkins_webhook_allowed_ipv4_cidrs" {
   ]
 }
 
-variable "cosign_public_key_pem" {
-  description = "PEM-encoded Cosign public key distributed to workload clusters through Azure Key Vault."
+variable "backstage_tls_crt" {
+  description = "PEM-encoded TLS certificate for Backstage, sourced from AKV at apply time via OIDC federation. Never stored in tfvars."
   type        = string
   sensitive   = true
-  default     = <<-EOT
-  -----BEGIN PUBLIC KEY-----
-  MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPZrfM
-  5/KAQN0/KjHcorm/J5yctVd7iEcnessRQjU917hmKO6JWVGHpDguIyakZA==
-  -----END PUBLIC KEY-----
-  EOT
+
+  validation {
+    condition     = can(regex("^-----BEGIN CERTIFICATE-----", var.backstage_tls_crt))
+    error_message = "backstage_tls_crt must be a PEM-encoded certificate beginning with '-----BEGIN CERTIFICATE-----'."
+  }
+}
+
+variable "backstage_tls_key" {
+  description = "PEM-encoded TLS private key for Backstage, sourced from AKV at apply time via OIDC federation. Never stored in tfvars."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^-----BEGIN (RSA |EC |PRIVATE KEY)", var.backstage_tls_key))
+    error_message = "backstage_tls_key must be a PEM-encoded private key."
+  }
 }

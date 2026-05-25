@@ -1,0 +1,91 @@
+# sonar.yml — SonarCloud static analysis for Backstage (US-V3-19, US-V3-20, US-V3-21, ADR-028-v3)
+#
+# Scope: TypeScript under backstage/packages/ and Dockerfiles only.
+# HCL is excluded — tflint + checkov cover that surface (ADR-028-v3 decision #1).
+#
+# Hosting toggle (US-V3-20, var.sonar_hosting):
+#   saas  (default): SonarCloud SaaS — uses SONAR_HOST_URL=https://sonarcloud.io
+#   cipool         : self-hosted Sonar on mgmt-we cipool — uses SONAR_HOST_URL from repo var
+#
+# Gate phases (US-V3-21, ADR-028-v3):
+#   Sprint-1: Sonar gate advisory (continue-on-error: true) — warning posted, PR not blocked
+#   Sprint-2: Sonar gate blocking (remove continue-on-error)
+#   SPRINT-2 CUTOVER: remove `continue-on-error: true` from the scan step below.
+#
+# Required GitHub Secrets:
+#   SONAR_TOKEN — SonarCloud token (project analysis token)
+# Required GitHub Variables (optional — only for cipool hosting):
+#   SONAR_HOST_URL — override for self-hosted Sonar (default: https://sonarcloud.io)
+
+name: Sonar Analysis
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "backstage/packages/**"
+      - "backstage/**/Dockerfile*"
+      - "backstage/sonar-project.properties"
+      - ".github/workflows/sonar.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "backstage/packages/**"
+      - "backstage/**/Dockerfile*"
+      - "backstage/sonar-project.properties"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonar:
+    name: SonarCloud Scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backstage
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch full history for accurate blame and new-code detection
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "yarn"
+          cache-dependency-path: backstage/yarn.lock
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build
+        run: yarn build:all
+
+      - name: Run tests with coverage
+        run: yarn test:all --coverage --coverageReporters=lcov
+
+      - name: SonarCloud Scan
+        # Sprint-1: advisory mode — warning posted but PR not blocked.
+        # Sprint-2 cutover: remove `continue-on-error: true` to block on gate failure.
+        continue-on-error: true
+        uses: SonarSource/sonarcloud-github-action@v3
+        with:
+          projectBaseDir: backstage
+          args: >
+            -Dsonar.projectKey=sccvn-devops_aks-platform-engineering
+            -Dsonar.organization=sccvn-devops
+            -Dsonar.sources=packages/app/src,packages/backend/src
+            -Dsonar.inclusions=**/*.ts,**/*.tsx,**/Dockerfile*
+            -Dsonar.exclusions=**/*.tf,**/*.tfvars,**/*.hcl,**/node_modules/**,**/dist/**,**/coverage/**
+            -Dsonar.tests=packages/app/src,packages/backend/src
+            -Dsonar.test.inclusions=**/*.test.ts,**/*.spec.ts,**/*.test.tsx,**/*.spec.tsx
+            -Dsonar.typescript.lcov.reportPaths=packages/app/coverage/lcov.info,packages/backend/coverage/lcov.info
+            -Dsonar.host.url=${{ vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

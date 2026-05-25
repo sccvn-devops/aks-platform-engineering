@@ -1,0 +1,303 @@
+# terraform-ci.yml — GitHub Actions meta-CI for platform Terraform (US-V3-12, US-V3-13)
+#
+# Runs on every PR targeting main.  Application CI stays on Jenkins (ADR-001-v2).
+#
+# Gate phases (ADR-025-v3, ADR-027-v3):
+#   Day-1  : terraform_fmt, terraform_validate, tflint  — blocking (required status checks in branch protection)
+#   Sprint-1: checkov                                   — advisory (soft_fail controlled by .checkov.yaml)
+#   Sprint-2: checkov                                   — blocking (flip soft-fail in .checkov.yaml → false)
+#
+# Branch protection (day-1 required checks — configure once via scripts/setup-branch-protection.sh):
+#   Required status checks: "Terraform Format", "Terraform Validate", "TFLint"
+#   Checkov is NOT a required check in sprint-1; becomes required in sprint-2.
+#
+# Required GitHub Secrets:
+#   ARM_CLIENT_ID       — platform CI UAMI client ID (OIDC-federated)
+#   ARM_TENANT_ID       — Azure AD tenant ID
+#   ARM_SUBSCRIPTION_ID — Azure subscription ID
+#   GITOPS_ADDONS_ORG   — gitops addons org URL (e.g. https://github.com/myorg)
+
+name: Terraform CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-ci.yml"
+      - ".tflint.hcl"
+      - ".checkov.yaml"
+      - ".checkov.baseline"
+      - "scripts/fetch-tf-secrets.sh"
+      - "scripts/setup-branch-protection.sh"
+
+env:
+  TF_VERSION: "1.5.7"
+  TFLINT_VERSION: "v0.55.0"
+  WORKING_DIR: terraform
+
+# Cancel in-progress runs when a new commit is pushed to the same PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Day-1 gate: terraform fmt (blocking)
+  # ---------------------------------------------------------------------------
+  format:
+    name: Terraform Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Check formatting
+        run: terraform fmt -recursive -check -diff
+        working-directory: ${{ env.WORKING_DIR }}
+
+  # ---------------------------------------------------------------------------
+  # Day-1 gate: terraform validate (blocking)
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init (offline — no backend)
+        run: terraform init -backend=false -input=false
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Validate
+        run: terraform validate -no-color
+        working-directory: ${{ env.WORKING_DIR }}
+
+  # ---------------------------------------------------------------------------
+  # Day-1 gate: tflint (blocking)
+  # ---------------------------------------------------------------------------
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - name: Init tflint plugins
+        run: tflint --init --config=../.tflint.hcl
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Run tflint
+        run: tflint --config=../.tflint.hcl --format=compact --recursive
+        working-directory: ${{ env.WORKING_DIR }}
+
+  # ---------------------------------------------------------------------------
+  # Day-1 gate companion: custom unvalidated-variable detector (US-V3-16, ADR-026-v3)
+  # Advisory during ratchet (exits 0); blocking at 100%-coverage cutover (add --block).
+  # BLOCKING CUTOVER: remove `|| true` below when 100% variable coverage is declared.
+  # ---------------------------------------------------------------------------
+  check-var-validation:
+    name: Check Variable Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run check-var-validation
+        # Advisory mode (exits 0 even on findings).
+        # Sprint-2 cutover: add --block flag to exit 1 on unvalidated variables.
+        run: python3 scripts/check-var-validation.py --dir terraform || true
+
+  # ---------------------------------------------------------------------------
+  # Inline suppression validator — blocking (day-1). Validates checkov:skip
+  # comments have a Jira ticket ref; queries Jira to verify ticket is open
+  # and not expired when JIRA_BASE_URL + JIRA_TOKEN are set (ADR-027-v3).
+  # ---------------------------------------------------------------------------
+  validate-suppressions:
+    name: Validate Checkov Suppressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate inline suppressions
+        run: |
+          python3 scripts/validate-checkov-suppressions.py \
+            --dir terraform \
+            --jira-url "${JIRA_BASE_URL:-}" \
+            --jira-token "${JIRA_TOKEN:-}"
+        env:
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_SERVICE_ACCOUNT_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Checkov security scan — advisory in sprint-1, blocking in sprint-2.
+  # Gate phase is controlled by `soft-fail` in .checkov.yaml (ADR-027-v3).
+  # Sprint-2 cutover: set soft-fail: false in .checkov.yaml; do NOT change this file.
+  # ---------------------------------------------------------------------------
+  checkov:
+    name: Checkov Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          # Configuration and advisory/blocking mode are centralised in .checkov.yaml.
+          # Both CI and pre-commit consume the same file (ADR-027-v3, US-V3-18).
+          config_file: .checkov.yaml
+          baseline: .checkov.baseline
+          output_format: cli,sarif
+          output_file_path: console,checkov-results.sarif
+
+      - name: Upload Checkov SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+          category: checkov
+
+  # ---------------------------------------------------------------------------
+  # Terraform plan — one job per env-state (informational diff posted to PR).
+  # Runs only after day-1 gates pass.
+  # ---------------------------------------------------------------------------
+  plan:
+    name: Plan (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    needs: [format, validate, tflint]
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - mgmt-we
+          - mgmt-ne
+          - dev
+          - staging
+          - prod-we
+          - prod-ne
+          - seed-wus
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Fetch sensitive TF vars from AKV
+        # fetch-tf-secrets.sh sources itself: exports TF_VAR_* in the current
+        # shell AND writes them to $GITHUB_ENV so subsequent steps inherit them.
+        run: source scripts/fetch-tf-secrets.sh
+        shell: bash
+        env:
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config=backends/${{ matrix.env }}.tfbackend \
+            -input=false \
+            -no-color
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          set +e
+          terraform plan \
+            -no-color \
+            -input=false \
+            -detailed-exitcode \
+            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}" \
+            2>&1 | tee "${{ runner.temp }}/plan-${{ matrix.env }}.txt"
+          TF_EXIT="${PIPESTATUS[0]}"
+          echo "exitcode=${TF_EXIT}" >> "$GITHUB_OUTPUT"
+        shell: bash
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Post plan diff to PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request' && always()
+        env:
+          PLAN_ENV: ${{ matrix.env }}
+          PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
+          PLAN_FILE: ${{ runner.temp }}/plan-${{ matrix.env }}.txt
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const env = process.env.PLAN_ENV;
+            const exitCode = process.env.PLAN_EXITCODE;
+            const planFile = process.env.PLAN_FILE;
+            let planOutput = '';
+            try {
+              planOutput = fs.readFileSync(planFile, 'utf8');
+            } catch (_) {
+              planOutput = '(plan output not available)';
+            }
+            // Truncate to stay within GitHub comment limits (~65 KB)
+            if (planOutput.length > 60000) {
+              planOutput = planOutput.slice(0, 60000) + '\n... (output truncated)';
+            }
+            const icon = exitCode === '0' ? '✅' : (exitCode === '2' ? '📋' : '❌');
+            const statusLabel = exitCode === '0' ? 'no changes' : (exitCode === '2' ? 'changes pending' : 'error');
+            const body = [
+              `#### ${icon} Terraform Plan \`${env}\` — ${statusLabel}`,
+              '',
+              '<details><summary>Show Plan Output</summary>',
+              '',
+              '```hcl',
+              planOutput,
+              '```',
+              '',
+              '</details>',
+              '',
+              `*Commit: ${context.sha.slice(0, 7)} · Workflow: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Fail if plan errored
+        # Exit code 2 means changes pending (not an error); 0 = no changes; 1 = error.
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          echo "::error::terraform plan failed for env: ${{ matrix.env }}"
+          exit 1

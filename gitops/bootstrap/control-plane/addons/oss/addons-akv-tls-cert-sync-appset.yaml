@@ -1,0 +1,98 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: addons-akv-tls-cert-sync
+  annotations:
+    argocd.argoproj.io/sync-wave: "35"
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: dev
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/dev
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: dev
+                  enable_external_secrets: "true"
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: staging
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/staging
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: staging
+                  enable_external_secrets: "true"
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: prod
+          - git:
+              repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+              revision: HEAD
+              directories:
+                - path: gitops/apps/*/workload/overlays/prod
+          - clusters:
+              selector:
+                matchLabels:
+                  role: workload
+                  env: prod
+                  enable_external_secrets: "true"
+  template:
+    metadata:
+      name: '{{index .path.segments 2}}-tls-cert-sync-{{.env}}-{{.name}}'
+      labels:
+        platform.ste.io/service: '{{index .path.segments 2}}'
+        platform.ste.io/env: '{{.env}}'
+        platform.ste.io/cluster: '{{.name}}'
+        platform.ste.io/tier: infra
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/sccvn-devops/aks-platform-engineering
+        targetRevision: HEAD
+        path: gitops/platform/akv-tls-cert
+        helm:
+          releaseName: akv-tls-cert-sync
+          values: |
+            namespace: "{{index .path.segments 2}}-{{.env}}"
+            secretStore:
+              name: azure-keyvault
+              kind: SecretStore
+            certificates:
+              - name: "platform-tls"
+                certName: "platform-tls"
+                targetName: "platform-tls"
+                refreshInterval: "60s"
+      destination:
+        name: '{{.name}}'
+        namespace: '{{index .path.segments 2}}-{{.env}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

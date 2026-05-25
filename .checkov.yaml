@@ -1,0 +1,41 @@
+# .checkov.yaml — shared Checkov configuration (US-V3-13, ADR-027-v3)
+#
+# Consumed identically by:
+#   - pre-commit (US-V3-18): checkov hook reads this file automatically
+#   - GitHub Actions CI (US-V3-12): checkov-action receives config_file: .checkov.yaml
+#
+# Running locally:
+#   checkov -d terraform/ --config-file .checkov.yaml
+#
+# Sprint gate phases (ADR-027-v3):
+#   Sprint-1: soft-fail true  — checkov warnings do not block CI or local commits
+#   Sprint-2: soft-fail false — flip this value and remove the sprint-1 comment at cutover
+#
+# SPRINT-2 CUTOVER CHECKLIST:
+#   1. Run: checkov -d terraform/ --config-file .checkov.yaml --create-baseline
+#   2. Commit the updated .checkov.baseline
+#   3. Change soft-fail below from true → false
+#   4. Open PR; @platform-team reviews .checkov.baseline change (CODEOWNERS)
+
+directory:
+  - terraform
+
+framework:
+  - terraform
+
+baseline: .checkov.baseline
+
+output:
+  - cli
+  - sarif
+
+output-file-path: "console,checkov-results.sarif"
+
+# Inline suppression format (ADR-027-v3 decision #3):
+#   # checkov:skip=CKV_AZURE_NNN:PROJ-NNNN — must reference an open Jira ticket with expiry date.
+#   CI validates suppression tickets are open and not expired (see .github/workflows/terraform-ci.yml).
+
+# soft-fail controls advisory vs blocking (ADR-027-v3, FR-V3-16):
+#   true  = sprint-1 advisory
+#   false = sprint-2 blocking
+soft-fail: true

@@ -43,6 +43,18 @@ resource "azurerm_key_vault_key" "management_ci_cosign" {
     "verify",
   ]
 
+  # AKV-native quarterly rotation: new key version auto-created every 90 days.
+  # expire_after=P90D pins the key lifetime; automatic rotation triggers at P60D
+  # (30 days before expiry) so there is always an overlap window where both the
+  # old and new versions are valid for signature verification.
+  rotation_policy {
+    automatic {
+      time_before_expiry = "P30D"
+    }
+    expire_after         = "P90D"
+    notify_before_expiry = "P29D"
+  }
+
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
     azurerm_role_assignment.management_ci_current_operator_admin,
@@ -198,6 +210,41 @@ resource "azurerm_key_vault_secret" "jenkins_webhook_https_keystore_password" {
   name         = "jenkins-webhook-https-keystore-password"
   value        = var.jenkins_webhook_https_keystore_password
   key_vault_id = azurerm_key_vault.management_ci.id
+
+  depends_on = [
+    azurerm_role_assignment.management_ci_key_vault_admin,
+    azurerm_role_assignment.management_ci_current_operator_admin,
+  ]
+}
+
+resource "azurerm_key_vault_secret" "backstage_postgres_password" {
+  name         = "backstage-postgres-password"
+  value        = var.postgres_password
+  key_vault_id = azurerm_key_vault.management_ci.id
+
+  depends_on = [
+    azurerm_role_assignment.management_ci_key_vault_admin,
+    azurerm_role_assignment.management_ci_current_operator_admin,
+  ]
+}
+
+resource "azurerm_key_vault_secret" "backstage_tls_crt" {
+  name         = "backstage-tls-crt"
+  value        = var.backstage_tls_crt
+  key_vault_id = azurerm_key_vault.management_ci.id
+  content_type = "application/x-pem-file"
+
+  depends_on = [
+    azurerm_role_assignment.management_ci_key_vault_admin,
+    azurerm_role_assignment.management_ci_current_operator_admin,
+  ]
+}
+
+resource "azurerm_key_vault_secret" "backstage_tls_key" {
+  name         = "backstage-tls-key"
+  value        = var.backstage_tls_key
+  key_vault_id = azurerm_key_vault.management_ci.id
+  content_type = "application/x-pem-file"
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
