@@ -110,6 +110,18 @@ repos:
         files: ^(terraform/modules/workload_identity/|terraform/(saas_token_rotator|velero|akv_sync_exporter|external_secrets|jenkins|acr)\.tf|tools/workload_identity_tests/.*\.py)$
         pass_filenames: false
 
+      # Go binary lifecycle + per-binary runners (US-V4-06, FR-V4-23..26).
+      # Asserts each cmd/*/main.go in tools/mgmt-plane-lock is ≤40 lines,
+      # no signal.Notify / os/signal import remains in cmd/* (signal
+      # handling lives in internal/bootstrap.SignalContext), and the
+      # full go build/vet/test pipeline is clean.
+      - id: validate-mgmt-plane-lock-runners
+        name: validate mgmt-plane-lock per-binary runners + signal seam
+        entry: bash scripts/validate-mgmt-plane-lock-runners.sh
+        language: system
+        files: ^tools/mgmt-plane-lock/.*\.go$
+        pass_filenames: false
+
       # Service-seed robustness validator (US-V4-10, FR-V4-43..44).
       # Asserts every external call in seed_job.py declares an explicit
       # timeout and that the cookiecutter fallback renderer rejects

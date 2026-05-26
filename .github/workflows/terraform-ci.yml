@@ -56,6 +56,7 @@ on:
       - "gitops/clusters/registry.schema.json"
       - "tools/workload_identity_tests/**"
       - "tools/service_seed/**"
+      - "tools/mgmt-plane-lock/**"
       - ".github/actions/setup-tf/**"
       - ".github/workflows/reusable/**"
 
@@ -356,6 +357,87 @@ jobs:
             tools.service_seed.tests.test_robustness \
             tools.service_seed.tests.test_seed_job \
             -v
+
+  # ---------------------------------------------------------------------------
+  # Go binary lifecycle + per-binary runners (US-V4-06, FR-V4-23..26) — blocking.
+  # Asserts:
+  #   - cmd/{controller-scaler,mgmt-leader-lease,saas-token-rotator,argocd-jira-bridge}/main.go
+  #     are each ≤40 lines (FR-V4-24 size bound).
+  #   - No `signal.Notify(...)` / `os/signal` import remains in cmd/* mains
+  #     (FR-V4-23: signal handling lives in internal/bootstrap.SignalContext).
+  #   - go build, go vet, and go test ./... all pass for the mgmt-plane-lock
+  #     module (the gate for the runner refactor).
+  #   - go test -race covers the two packages that don't import client-go (httpx,
+  #     bootstrap, akvwriter, rotation) — the k8s.io/client-go-importing packages
+  #     hit the documented Go 1.25.x bufio toolchain bug under -race, so they run
+  #     non-race here (matching the US-V4-04/US-V4-05 precedent).
+  # ---------------------------------------------------------------------------
+  validate-mgmt-plane-lock-runners:
+    name: Validate mgmt-plane-lock Runners
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # v5.5.0
+        with:
+          go-version: "1.24"
+          cache-dependency-path: tools/mgmt-plane-lock/go.sum
+
+      - name: Assert each cmd/*/main.go is ≤40 lines
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in cmd/controller-scaler/main.go cmd/mgmt-leader-lease/main.go \
+                   cmd/saas-token-rotator/main.go cmd/argocd-jira-bridge/main.go; do
+            lines=$(wc -l < "$f")
+            if [ "$lines" -gt 40 ]; then
+              echo "::error file=tools/mgmt-plane-lock/$f::main.go is $lines lines, FR-V4-24 limit is 40"
+              fail=1
+            else
+              echo "ok: $f = $lines lines"
+            fi
+          done
+          exit "$fail"
+
+      - name: Assert no signal.Notify in cmd/* mains (FR-V4-23)
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          if grep -RnE '"os/signal"|signal\.Notify' cmd/; then
+            echo "::error::cmd/* mains MUST use bootstrap.SignalContext() (FR-V4-23) — direct os/signal use is forbidden"
+            exit 1
+          fi
+
+      - name: go build / vet / test
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+
+      - name: go test -race on runner-safe packages
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          # Race-mode runs on packages this story owns that don't import
+          # k8s.io/client-go (documented Go 1.25.x toolchain bug under -race).
+          go test -race -count=1 \
+            ./internal/bootstrap/... \
+            ./internal/rotation/... \
+            ./internal/httpx/... \
+            ./internal/akvwriter/...
+
+      - name: Assert combined runner-package coverage ≥80% (FR-V4-26)
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          set -euo pipefail
+          go test \
+            -coverprofile=/tmp/runner-combined.cov \
+            -coverpkg=./internal/scaling,./internal/bloblease,./internal/rotation \
+            ./internal/scaling/... ./internal/bloblease/... ./internal/rotation/...
+          total=$(go tool cover -func=/tmp/runner-combined.cov | awk '/^total:/ {gsub("%",""); print $3}')
+          echo "combined coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { if (t+0 < 80) { print "FAIL: combined coverage " t "% < 80%"; exit 1 } }'
 
   # ---------------------------------------------------------------------------
   # Pre-commit drift check (US-V4-11, FR-V4-48..49) — blocking.
