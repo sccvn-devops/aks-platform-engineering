@@ -1,5 +1,8 @@
 // Package akvwriter writes secrets to Azure Key Vault using the REST API
 // authenticated via the default Azure credential (Workload Identity).
+//
+// All outbound HTTP runs through internal/httpx so timeouts, retries, and
+// error redaction are uniform across the binary fleet (FR-V4-15..18).
 package akvwriter
 
 import (
@@ -7,13 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/ste-cityos/aks-platform-engineering/tools/mgmt-plane-lock/internal/httpx"
 )
 
 const akvScope = "https://vault.azure.net/.default"
@@ -25,7 +28,9 @@ type Client struct {
 	credential azcore.TokenCredential
 }
 
-// New creates a Client for the given vault URL.
+// New creates a Client for the given vault URL. The HTTP client is built from
+// httpx.NewClient so retries/timeouts/redaction policy come from the single
+// transport seam.
 func New(vaultURL string) (*Client, error) {
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	if err != nil {
@@ -33,9 +38,15 @@ func New(vaultURL string) (*Client, error) {
 	}
 	return &Client{
 		vaultURL:   vaultURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpx.NewClient(httpx.WithPerAttemptTimeout(30 * time.Second)),
 		credential: cred,
 	}, nil
+}
+
+// newWithDeps is the test seam — lets tests inject a fake credential and a
+// stub HTTP client without touching azidentity or real networking.
+func newWithDeps(vaultURL string, cred azcore.TokenCredential, hc *http.Client) *Client {
+	return &Client{vaultURL: vaultURL, httpClient: hc, credential: cred}
 }
 
 type setSecretBody struct {
@@ -73,17 +84,16 @@ func (c *Client) SetSecret(ctx context.Context, name, value string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("set secret %s: status %d: %s", name, resp.StatusCode, string(respBody))
+	if checkErr := httpx.CheckResponse(resp, 0); checkErr != nil {
+		return fmt.Errorf("set secret %s: %w", name, checkErr)
 	}
 	return nil
 }
 
 type secretVersionItem struct {
-	ID         string            `json:"id"`
-	Attributes secretAttributes  `json:"attributes"`
-	Managed    bool              `json:"managed"`
+	ID         string           `json:"id"`
+	Attributes secretAttributes `json:"attributes"`
+	Managed    bool             `json:"managed"`
 }
 
 type secretVersionsResponse struct {
@@ -111,6 +121,10 @@ func (c *Client) DisableOldVersions(ctx context.Context, name string) error {
 	}
 	defer resp.Body.Close()
 
+	if checkErr := httpx.CheckResponse(resp, 0); checkErr != nil {
+		return fmt.Errorf("list secret versions %s: %w", name, checkErr)
+	}
+
 	var versions secretVersionsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&versions); err != nil {
 		return fmt.Errorf("decode versions: %w", err)
@@ -136,6 +150,10 @@ func (c *Client) DisableOldVersions(ctx context.Context, name string) error {
 		if err != nil {
 			return fmt.Errorf("disable version: %w", err)
 		}
+		if checkErr := httpx.CheckResponse(patchResp, 0); checkErr != nil {
+			patchResp.Body.Close()
+			return fmt.Errorf("disable version %s: %w", v.ID, checkErr)
+		}
 		patchResp.Body.Close()
 	}
 	return nil
@@ -160,6 +178,10 @@ func (c *Client) GetSecretUpdatedAt(ctx context.Context, name string) (time.Time
 		return time.Time{}, fmt.Errorf("get secret: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if checkErr := httpx.CheckResponse(resp, 0); checkErr != nil {
+		return time.Time{}, fmt.Errorf("get secret %s: %w", name, checkErr)
+	}
 
 	var result struct {
 		Attributes struct {

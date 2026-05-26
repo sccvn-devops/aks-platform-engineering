@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ste-cityos/aks-platform-engineering/tools/mgmt-plane-lock/internal/config"
+	"github.com/ste-cityos/aks-platform-engineering/tools/mgmt-plane-lock/internal/httpx"
 	"github.com/ste-cityos/aks-platform-engineering/tools/mgmt-plane-lock/internal/jirabridge"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -94,9 +95,7 @@ func main() {
 		email:     cfg.JiraUserEmail,
 		token:     cfg.JiraToken,
 		issueType: cfg.JiraIssueTypeName,
-		client: &http.Client{
-			Timeout: 15 * time.Second,
-		},
+		client: httpx.NewClient(httpx.WithPerAttemptTimeout(15 * time.Second)),
 	}
 
 	if err := reconcile(ctx, cfg, kubeClient, dynamicClient, jira); err != nil {
@@ -236,8 +235,8 @@ func (c jiraClient) CreateIssue(ctx context.Context, event jirabridge.Event) err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("jira returned status %s", resp.Status)
+	if checkErr := httpx.CheckResponse(resp, 0); checkErr != nil {
+		return fmt.Errorf("post jira issue: %w", checkErr)
 	}
 
 	return nil

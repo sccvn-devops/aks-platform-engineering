@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -20,11 +19,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/ste-cityos/aks-platform-engineering/tools/mgmt-plane-lock/internal/akvwriter"
+	"github.com/ste-cityos/aks-platform-engineering/tools/mgmt-plane-lock/internal/httpx"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+// httpClient is the binary-wide HTTP client. Constructed from httpx.NewClient
+// so timeouts, retries, and error redaction come from the single transport
+// seam (FR-V4-15..18). No http.DefaultClient anywhere in this binary.
+var httpClient = httpx.NewClient(httpx.WithPerAttemptTimeout(30 * time.Second))
 
 var (
 	tokenAgeDays = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -161,15 +166,14 @@ func rotateBitbucketToken(ctx context.Context) (string, error) {
 	req.SetBasicAuth(clientID, clientSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("bitbucket oauth: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("bitbucket oauth: status %d: %s", resp.StatusCode, string(respBody))
+	if checkErr := httpx.CheckResponse(resp, 0); checkErr != nil {
+		return "", fmt.Errorf("bitbucket oauth: %w", checkErr)
 	}
 
 	var result struct {
@@ -201,15 +205,14 @@ func rotateJiraToken(ctx context.Context) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("create jira api token: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("create jira api token: status %d: %s", resp.StatusCode, string(respBody))
+	if checkErr := httpx.CheckResponse(resp, 0); checkErr != nil {
+		return "", fmt.Errorf("create jira api token: %w", checkErr)
 	}
 
 	var result struct {
