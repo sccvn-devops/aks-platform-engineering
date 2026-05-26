@@ -128,3 +128,5 @@ scripts/*
 !scripts/validate-checkov-suppressions.py
 !scripts/validate-akv-null-expiry.py
 !scripts/validate-akv-catalogue.py
+!scripts/tls-history-purge-mirror.sh
+!scripts/verify-tls-history-clean.sh
