@@ -3,7 +3,7 @@ locals {
     "mgmt-ne" = {
       environment             = "control-plane"
       env                     = "control-plane"
-      region                  = var.secondary_location
+      region                  = local.cluster_registry["mgmt-ne"].region
       role                    = "management"
       lease_status            = "standby"
       enable_argocd           = "false"
@@ -17,7 +17,7 @@ locals {
     "aks-dev-we" = {
       environment             = "dev"
       env                     = "dev"
-      region                  = var.location
+      region                  = local.cluster_registry["aks-dev-we"].region
       role                    = "workload"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -32,7 +32,7 @@ locals {
     "aks-staging-we" = {
       environment             = "staging"
       env                     = "staging"
-      region                  = var.location
+      region                  = local.cluster_registry["aks-staging-we"].region
       role                    = "workload"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -47,7 +47,7 @@ locals {
     "aks-prod-we" = {
       environment             = "prod"
       env                     = "prod"
-      region                  = var.location
+      region                  = local.cluster_registry["aks-prod-we"].region
       role                    = "workload"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -62,7 +62,7 @@ locals {
     "aks-prod-ne" = {
       environment             = "prod"
       env                     = "prod"
-      region                  = var.secondary_location
+      region                  = local.cluster_registry["aks-prod-ne"].region
       role                    = "workload"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -77,7 +77,7 @@ locals {
     "seed-wus" = {
       environment             = "dr"
       env                     = "dr"
-      region                  = var.dr_location
+      region                  = local.cluster_registry["seed-wus"].region
       role                    = "bootstrap"
       lease_status            = "unmanaged"
       enable_argocd           = "false"

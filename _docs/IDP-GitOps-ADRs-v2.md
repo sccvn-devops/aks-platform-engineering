@@ -1775,12 +1775,12 @@ The decision **respects ADR-013-v2** (two-tier infra-then-workload): the registr
 
 ## Action Items
 
-1. [ ] Author `gitops/clusters/registry.yaml` with the seven day-1 cluster entries (mirrors current v3 state).
-2. [ ] Author `gitops/clusters/registry.schema.json` (draft-2020-12) and wire it into pre-commit + CI.
-3. [ ] Migrate `terraform/argocd_bootstrap.tf:2–100` locals to derive from `local.cluster_registry`.
-4. [ ] Migrate `terraform/clusters.tf` cluster-identity references to read from `local.cluster_registry`.
-5. [ ] Land `tools/service_seed/cli.py` registry loader once US-V4-07 (three-module split) lands.
-6. [ ] Add a CI step that fails any PR adding a hardcoded `subscription_id`, `region`, or `acr_hostname` outside the registry (regex-based linter scoped to `terraform/*.tf` and `tools/service_seed/**/*.py`).
+1. [x] Author `gitops/clusters/registry.yaml` with the seven day-1 cluster entries (mirrors current v3 state). _Landed 2026-05-26 via US-V4-01._
+2. [x] Author `gitops/clusters/registry.schema.json` (draft-07) and wire it into pre-commit + CI. _Landed 2026-05-26 via US-V4-01 (`scripts/validate-cluster-registry.py`, `validate-cluster-registry` CI job)._
+3. [x] Migrate `terraform/argocd_bootstrap.tf:2–100` locals to derive from `local.cluster_registry`. _Landed 2026-05-26: region per-cluster now reads from `local.cluster_registry[<key>].region`._
+4. [x] Migrate `terraform/clusters.tf` cluster-identity references to read from `local.cluster_registry`. _Landed 2026-05-26: location/sku_tier/azs sourced from registry via `local.aks_cluster_definitions`._
+5. [x] Land `tools/service_seed/cli.py` registry loader. _Landed 2026-05-26 via US-V4-01 ahead of US-V4-07; `seed_job.py:build_infra_files` now sources region/RG/AKV via `cli.get_cluster`/`cli.workload_keyvault_id`._
+6. [ ] Add a CI step that fails any PR adding a hardcoded `subscription_id`, `region`, or `acr_hostname` outside the registry (regex-based linter scoped to `terraform/*.tf` and `tools/service_seed/**/*.py`). _Deferred to follow-up: schema validator + registry-derived locals are the day-1 gate; the regex enforcement is a defense-in-depth addition._
 7. [ ] Update `docs/agents/domain.md` to name the registry as the canonical topology source.
 
 ## Related ADRs

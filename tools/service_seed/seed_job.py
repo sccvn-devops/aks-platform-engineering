@@ -14,8 +14,17 @@ from string import Template
 from typing import Any
 from urllib import error, parse, request
 
+from .cli import get_cluster, load_registry, workload_keyvault_id
+
 
 VALID_SLO_CLASSES = {"bronze", "silver", "gold"}
+
+# FR-V4-03: workload-cluster keys consumed by build_infra_files for the prod tier.
+# Any new prod region requires a registry entry, not a code change here.
+PROD_PRIMARY_CLUSTER = "aks-prod-we"
+PROD_SECONDARY_CLUSTER = "aks-prod-ne"
+PROD_WORKLOAD_KEYVAULT_WE = "kv-platform-prod-we"
+PROD_WORKLOAD_KEYVAULT_NE = "kv-platform-prod-ne"
 
 
 @dataclass(frozen=True)
@@ -274,6 +283,18 @@ def build_infra_files(req: ServiceRequest) -> dict[str, str]:
     service = req.service_slug
     slo = req.slo_class
     namespace_rollout_composition = f"namespacerolloutpolicy-{slo}.platform.cityos.io"
+
+    # FR-V4-03: source per-cluster identity from the committed registry, never from
+    # hardcoded literals. Adding a region = single PR to gitops/clusters/registry.yaml.
+    registry = load_registry()
+    prod_primary = get_cluster(PROD_PRIMARY_CLUSTER, registry=registry)
+    prod_secondary = get_cluster(PROD_SECONDARY_CLUSTER, registry=registry)
+    primary_region = prod_primary.region
+    primary_rg = prod_primary.resource_group
+    secondary_region = prod_secondary.region
+    kv_we_id = workload_keyvault_id(PROD_PRIMARY_CLUSTER, PROD_WORKLOAD_KEYVAULT_WE, registry=registry)
+    kv_ne_id = workload_keyvault_id(PROD_SECONDARY_CLUSTER, PROD_WORKLOAD_KEYVAULT_NE, registry=registry)
+
     files = {
         f"apps/{service}/infra/base/kustomization.yaml": "\n".join(
             [
@@ -311,13 +332,13 @@ def build_infra_files(req: ServiceRequest) -> dict[str, str]:
                 '    argocd.argoproj.io/sync-wave: "1"',
                 "spec:",
                 "  parameters:",
-                "    region: westeurope",
-                "    resourceGroupName: rg-platform-prod",
+                f"    region: {primary_region}",
+                f"    resourceGroupName: {primary_rg}",
                 f"    serverName: sql-{service}-prod",
                 f"    sloClass: {slo}",
                 f"    secretName: {service}-sql-conn",
-                "    keyVaultWeId: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-platform-prod/providers/Microsoft.KeyVault/vaults/kv-platform-prod-we",
-                "    keyVaultNeId: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-platform-prod/providers/Microsoft.KeyVault/vaults/kv-platform-prod-ne",
+                f"    keyVaultWeId: {kv_we_id}",
+                f"    keyVaultNeId: {kv_ne_id}",
             ]
         ),
         f"apps/{service}/infra/base/xrc-cosmos.yaml": "\n".join(
@@ -331,14 +352,14 @@ def build_infra_files(req: ServiceRequest) -> dict[str, str]:
                 '    argocd.argoproj.io/sync-wave: "1"',
                 "spec:",
                 "  parameters:",
-                "    region: westeurope",
-                "    resourceGroupName: rg-platform-prod",
-                "    primaryLocation: westeurope",
-                "    secondaryLocation: northeurope",
+                f"    region: {primary_region}",
+                f"    resourceGroupName: {primary_rg}",
+                f"    primaryLocation: {primary_region}",
+                f"    secondaryLocation: {secondary_region}",
                 f"    sloClass: {slo}",
                 f"    secretName: {service}-cosmos-conn",
-                "    keyVaultWeId: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-platform-prod/providers/Microsoft.KeyVault/vaults/kv-platform-prod-we",
-                "    keyVaultNeId: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-platform-prod/providers/Microsoft.KeyVault/vaults/kv-platform-prod-ne",
+                f"    keyVaultWeId: {kv_we_id}",
+                f"    keyVaultNeId: {kv_ne_id}",
             ]
         ),
         f"apps/{service}/infra/base/xrc-sb.yaml": "\n".join(
@@ -352,13 +373,13 @@ def build_infra_files(req: ServiceRequest) -> dict[str, str]:
                 '    argocd.argoproj.io/sync-wave: "1"',
                 "spec:",
                 "  parameters:",
-                "    region: westeurope",
-                "    location: westeurope",
-                "    resourceGroupName: rg-platform-prod",
+                f"    region: {primary_region}",
+                f"    location: {primary_region}",
+                f"    resourceGroupName: {primary_rg}",
                 f"    sloClass: {slo}",
                 f"    secretName: {service}-sb-conn",
-                "    keyVaultWeId: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-platform-prod/providers/Microsoft.KeyVault/vaults/kv-platform-prod-we",
-                "    keyVaultNeId: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-platform-prod/providers/Microsoft.KeyVault/vaults/kv-platform-prod-ne",
+                f"    keyVaultWeId: {kv_we_id}",
+                f"    keyVaultNeId: {kv_ne_id}",
             ]
         ),
         f"apps/{service}/infra/base/xrc-namespace-binding.yaml": "\n".join(

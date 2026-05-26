@@ -81,3 +81,11 @@ repos:
         language: system
         files: ^(\.tool-versions|\.github/workflows/.*\.ya?ml|.*Dockerfile.*)$
         pass_filenames: false
+
+      # Cluster topology registry schema validator (FR-V4-04, ADR-031-v4).
+      - id: validate-cluster-registry
+        name: validate gitops/clusters/registry.yaml against registry.schema.json
+        entry: python3 scripts/validate-cluster-registry.py
+        language: system
+        files: ^gitops/clusters/registry\.(yaml|schema\.json)$
+        pass_filenames: false

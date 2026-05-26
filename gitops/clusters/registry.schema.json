@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/sccvn-devops/aks-platform-engineering/blob/main/gitops/clusters/registry.schema.json",
+  "title": "Cluster Topology Registry",
+  "description": "Single committed source of truth for IDP cluster topology. Validates gitops/clusters/registry.yaml. See ADR-031-v4 and PRD-v4 FR-V4-01..04.",
+  "type": "object",
+  "minProperties": 1,
+  "additionalProperties": {
+    "type": "object",
+    "required": [
+      "subscription_id",
+      "region",
+      "region_abbrev",
+      "resource_group",
+      "acr_hostname",
+      "aks_name",
+      "mgmt_role",
+      "azs",
+      "sku_tier",
+      "gitops_addons"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "subscription_id": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        "description": "Azure subscription UUID."
+      },
+      "region": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]+$",
+        "description": "Azure region slug (lowercase, no spaces)."
+      },
+      "region_abbrev": {
+        "type": "string",
+        "enum": ["we", "ne", "wus", "eus", "sea"],
+        "description": "Short region code used in naming."
+      },
+      "resource_group": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_().\\-]{1,90}$",
+        "description": "Azure Resource Group name."
+      },
+      "acr_hostname": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+\\.azurecr\\.io$",
+        "description": "Fully-qualified ACR login server."
+      },
+      "aks_name": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{1,30}$",
+        "description": "Logical cluster key; must match the top-level YAML key."
+      },
+      "mgmt_role": {
+        "type": "string",
+        "enum": ["active", "standby", "workload", "seed"],
+        "description": "Cluster management plane role per ADR-004-v2 and ADR-022."
+      },
+      "azs": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "pattern": "^[1-3]$"
+        },
+        "description": "Availability zones for the default nodepool. Empty list = single-AZ."
+      },
+      "sku_tier": {
+        "type": "string",
+        "enum": ["Free", "Standard", "Premium"],
+        "description": "AKS SKU tier."
+      },
+      "gitops_addons": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enable_argocd", "enable_kyverno", "enable_external_secrets"],
+        "properties": {
+          "enable_argocd": { "type": "string", "enum": ["true", "false"] },
+          "enable_kyverno": { "type": "string", "enum": ["true", "false"] },
+          "enable_external_secrets": { "type": "string", "enum": ["true", "false"] }
+        }
+      }
+    }
+  }
+}

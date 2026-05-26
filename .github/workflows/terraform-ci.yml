@@ -48,6 +48,9 @@ on:
       - "scripts/validate-action-pins.py"
       - "scripts/validate-checkov-baseline.py"
       - "scripts/validate-tool-version-singleton.py"
+      - "scripts/validate-cluster-registry.py"
+      - "gitops/clusters/registry.yaml"
+      - "gitops/clusters/registry.schema.json"
 
 env:
   WORKING_DIR: terraform
@@ -269,6 +272,33 @@ jobs:
 
       - name: Run validator
         run: python3 scripts/validate-tool-version-singleton.py
+
+  # ---------------------------------------------------------------------------
+  # Cluster topology registry schema validator (US-V4-01, FR-V4-04, ADR-031-v4).
+  # Blocking from day-1: a registry edit that breaks the schema fails the PR.
+  # Runs the registry loader test suite as well, so any divergence between
+  # cli.py and the canonical registry shape surfaces in CI rather than at
+  # service-seed apply time.
+  # ---------------------------------------------------------------------------
+  validate-cluster-registry:
+    name: Validate Cluster Registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install jsonschema
+        run: pip install jsonschema==4.23.0
+
+      - name: Validate registry against JSON Schema
+        run: python3 scripts/validate-cluster-registry.py
+
+      - name: Run registry loader unit tests
+        run: python3 -m unittest tools.service_seed.tests.test_registry -v
 
   # ---------------------------------------------------------------------------
   # Pre-commit drift check (US-V4-11, FR-V4-48..49) — blocking.

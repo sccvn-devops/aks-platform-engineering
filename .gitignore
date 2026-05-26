@@ -133,3 +133,4 @@ scripts/*
 !scripts/validate-action-pins.py
 !scripts/validate-checkov-baseline.py
 !scripts/validate-tool-version-singleton.py
+!scripts/validate-cluster-registry.py
