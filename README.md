@@ -5,6 +5,9 @@ languages:
 - terraform
 - yaml
 - json
+- go
+- python
+- typescript
 products:
 - azure
 - azure-resource-manager
@@ -16,109 +19,239 @@ products:
 - azure-monitor
 - azure-log-analytics
 - azure-virtual-machines
-name:  Building a Platform Engineering Environment on Azure Kubernetes Service (AKS)
-description: This project demonstrates the process of implementing a consistent and solid platform engineering strategy on the Azure platform using Azure Kubernetes Service (AKS), ArgoCD, and Crossplane or Cluster API (CAPZ).
+name: Building a Platform Engineering Environment on Azure Kubernetes Service (AKS)
+description: Production-grade Internal Developer Platform (IDP) on Azure AKS using the GitOps Bridge pattern — multi-cluster, multi-region, with progressive delivery, supply-chain verification, and disaster recovery built in.
 urlFragment: aks-platform-engineering
 ---
 
-# Building a Platform Engineering Environment on Azure Kubernetes Service (AKS)
+# IDP GitOps Platform — Multi-Cluster AKS with the GitOps Bridge Pattern
 
-At its core, platform engineering is about constructing a solid and adaptable groundwork that simplifies and accelerates the development, deployment, and operation of software applications.  The goal is to abstract the complexity inherent in managing infrastructure and operational concerns, enabling dev teams to focus on crafting code that adds direct value. This environment is based on GitOps principles and includes a set of best practices and tools to manage the lifecycle of the applications and the underlying infrastructure. Many platform teams use multiple clusters to separate concerns and provide isolation between different environments, such as development, staging, and production. This guide provides a reference architecture and sample to build a platform engineering environment on Azure Kubernetes Service (AKS).
+This repository builds a production-grade **Internal Developer Platform (IDP)** on Azure AKS using the [GitOps Bridge Pattern](https://github.com/gitops-bridge-dev/gitops-bridge). It is forked from the upstream [Azure-Samples/aks-platform-engineering](https://github.com/Azure-Samples/aks-platform-engineering) sample and extends it with a complete control plane (mgmt-leader-lease, controller-scaler, saas-token-rotator, argocd-jira-bridge), a service-onboarding pipeline (`tools/service_seed/`), per-namespace secret isolation (ESO + per-region AKV + UAMI prefix RBAC), and progressive delivery via Argo Rollouts gated by SLO class.
 
-This sample will illustrate an end-to-end workflow that Platform Engineering and Development teams need to deploy multi-cluster environments on AKS:
+The repo's authoritative architecture documents live at:
 
-- Platform Engineering team deploys a control plane cluster with core infrastructure services and tools to support Day 2 Operations using Terraform and ArgoCD.
-- When a new development team is on boarded, the Platform Engineering team provisions new clusters dedicated to that team.  These new clusters will automatically have common required infrastructure tools installed via ArgoCD and have ArgoCD installed automatically.
-- The development team optionally installs additional infrastructure tools and customizes the Kubernetes configuration as desired with potential limits enforced by policies from the Platform Engineering team.
-- The development team deploys applications using GitOps principles and ArgoCD.
+- [`docs/architect.md`](docs/architect.md) — comprehensive architectural reference (start here)
+- [`walkthrough.md`](walkthrough.md) — runnable top-to-bottom code walkthrough (built with `uvx showboat`)
+- [`_docs/IDP-GitOps-ADRs-v2.md`](_docs/IDP-GitOps-ADRs-v2.md) — 32 ADRs, authoritative *why* for every decision
+- [`_docs/IDP-GitOps-Blueprint-PRD.md`](_docs/IDP-GitOps-Blueprint-PRD.md) + [v3](_docs/IDP-GitOps-Blueprint-PRD-v3.md), [v3.1](_docs/IDP-GitOps-Blueprint-PRD-v3.1.md), [v4](_docs/IDP-GitOps-Blueprint-PRD-v4.md) — functional contracts
 
-## Architecture
+## The three planes
 
-This sample leverages the [GitOps Bridge Pattern](https://github.com/gitops-bridge-dev/gitops-bridge?tab=readme-ov-file).  The following diagram shows the high-level architecture of the solution:  
+| Plane | What lives there | Failure isolation |
+|---|---|---|
+| **DX Plane** | Jira (intake), Bitbucket Cloud (git remote), Jenkins on mgmt-we (CI single-replica per ADR-001-v2) | Atlassian-SaaS-bounded; outage pauses CI only |
+| **Control Plane** | `mgmt-we` (active) + `mgmt-ne` (standby, controllers at zero) — ArgoCD hub, Crossplane, mgmt-plane-lock binaries, secret rotators, observability | Active-Passive — Azure Storage Blob lease arbitrates active cluster (ADR-022) |
+| **Data Plane** | `aks-dev-we`, `aks-staging-we`, `aks-prod-we`, `aks-prod-ne` workload clusters; `seed-wus` DR bootstrap | Active-Active reads + Active-Passive writes (ADR-004-v2) |
+
+## Architecture diagram
+
 ![Platform Engineering on AKS Architecture Diagram](./images/AKS-platform-engineering-architecture.png)
 
-The control plane cluster will be configured with addons via ArgoCD using Terraform and then bootstrapped with tools needed for Day Two operations.  
+## Cluster topology
 
-Choose Crossplane **or** Cluster API provider for Azure (CAPZ) to support deploying and managing clusters and Azure infrastructure for the application teams by changing the Terraform `infrastructure_provider` variable to either `crossplane` or `capz`.  [See this document](./docs/capz-or-crossplane.md) for further information on the comparison.  The default is `capz` if no value is specified. The Azure Service Operator (ASO) install which is a part of the CAPZ installation can be optionally customized with additional CRDs by editing the provided [values.yaml file](./gitops/environments/default/addons/cluster-api-provider-azure/values.yaml) and pushing updates to your repository.
+Authoritative topology lives in [`gitops/clusters/registry.yaml`](gitops/clusters/registry.yaml) — a single committed YAML registry consumed by Terraform (`yamldecode`), ArgoCD ApplicationSet locals, and `tools/service_seed/` (ADR-031-v4). Schema enforced by `gitops/clusters/registry.schema.json`.
+
+| Cluster | Region | Role |
+|---|---|---|
+| `mgmt-we` | West Europe | **Active control plane** — ArgoCD hub, Jenkins, Crossplane |
+| `mgmt-ne` | North Europe | Standby — controllers at zero replicas (ADR-017) |
+| `aks-dev-we` | West Europe | Dev workloads, single-AZ |
+| `aks-staging-we` | West Europe | Staging, multi-AZ |
+| `aks-prod-we` | West Europe | Production, multi-AZ, Premium SKU |
+| `aks-prod-ne` | North Europe | Production replica, multi-AZ, Premium SKU |
+| `seed-wus` | West US 2 | DR seed — single-node catastrophic bootstrap |
+
+## Module map
+
+### Infrastructure as Code — `terraform/`
+
+| File / module | Role |
+|---|---|
+| `terraform/registry.tf` | Loads `gitops/clusters/registry.yaml` into `local.cluster_registry` (ADR-031-v4) |
+| `terraform/clusters.tf` | Provisions workload AKS clusters via `Azure/aks/azurerm` module, parameterized by the registry |
+| `terraform/networking.tf` | Hub-spoke VNets, Azure Firewall (Premium), per-region UDR forcing egress through firewall |
+| `terraform/keyvaults.tf` | Per-region AKV pair in RBAC mode (ADR-019); private endpoints in hub |
+| `terraform/external_secrets.tf` | ESO UAMI per namespace per workload cluster (ADR-005-v2 + ADR-020) |
+| `terraform/argocd_bootstrap.tf` | Installs ArgoCD via Helm, applies App-of-Apps ApplicationSet |
+| `terraform/modules/workload_identity/` | Reusable workload-identity module: UAMI + federated credential + role assignments (FR-V4-05..09) |
+| `terraform/jenkins.tf`, `terraform/acr.tf`, `terraform/storage.tf`, `terraform/velero.tf` | Single-purpose resource files for each addon's Azure dependencies |
+
+### Go tooling — `tools/mgmt-plane-lock/`
+
+The Control Plane's lifecycle controllers. Each binary's `main.go` is ≤40 lines (FR-V4-26); orchestration lives in `internal/`.
+
+| Binary | Role | Internal package |
+|---|---|---|
+| **mgmt-leader-lease** | Holds the Azure Storage Blob lease that designates the active mgmt cluster | `bloblease.LeaseRunner` |
+| **controller-scaler** | Scales Crossplane/ArgoCD to 0 on standby; restores on lease change | `scaling.Runner` + `kube` |
+| **saas-token-rotator** | Quarterly rotation of Bitbucket OAuth + Jira API tokens → AKV | `rotation.Runner` + `akvwriter` + `httpx` |
+| **argocd-jira-bridge** | Opens Jira ticket when an ArgoCD Application enters Degraded (ADR-012) | `jirabridge` + `httpx` |
+| **mgmt-cli** | Operator escape hatch (fate under review — OQ-V4-04) | — |
+
+Shared internal packages:
+
+| Package | Purpose |
+|---|---|
+| `internal/httpx` | Transport seam — timeouts, retries, redacted errors (FR-V4-15..18) |
+| `internal/akvwriter` | Single AKV write path with typed errors + Strategy enum (FR-V4-19..22) |
+| `internal/bootstrap` | SIGTERM-aware context + metrics server (FR-V4-23) |
+| `internal/config` | Env-var-based configuration loader |
+| `internal/kube` | Kubernetes client wiring used by `scaling` |
+
+### Python tooling — `tools/service_seed/`
+
+Service onboarding pipeline. Per US-V4-07 the original 981-line `seed_job.py` has split into focused modules:
+
+| Module | Role |
+|---|---|
+| `jira_intake.py` | Jira fetch → typed `ServiceRequest` dataclass; pure parse/validate |
+| `service_template.py` | Render templates → working tree on disk; consumes SLO/rollout profiles from `profiles/{slo,rollout}.yaml` |
+| `gitops_pr.py` | Compose + push GitOps PR via Bitbucket; owns the git subprocess + Bitbucket client |
+| `cli.py` | Thin orchestrator — argparse + env-var load + cluster-registry load + wire three modules |
+| `cookiecutter-service/` | Cookiecutter template for the new service repo |
+| `templates/`, `profiles/` | Jinja2 templates and SLO/rollout profile YAML (FR-V4-32..35) |
+
+### GitOps content — `gitops/`
+
+ArgoCD-managed content, organised by the two-tier infra→workload pattern (ADR-013-v2).
+
+| Path | Tier | Content |
+|---|---|---|
+| `gitops/clusters/registry.yaml` | data | Cluster topology (ADR-031-v4) |
+| `gitops/bootstrap/control-plane/addons/azure/` | infra | Crossplane Azure provider configs |
+| `gitops/bootstrap/control-plane/addons/oss/` | infra | ESO, Kyverno, Argo Rollouts, Jenkins, Kargo, Velero, etc. |
+| `gitops/bootstrap/workloads/infra/` | infra | Per-workload-cluster infra (namespaces, Argo Rollouts policies) |
+| `gitops/environments/default/addons/` | infra | Per-addon Helm values overlays |
+| `gitops/platform/` | infra | Crossplane compositions, ESO bootstrap, Kyverno policies, mgmt-plane-lock manifests |
+| `gitops/apps/<service>/` | workload | Per-service kustomize overlays, Rollouts, Claims |
+
+### CI / quality gates — `.github/`, top-level
+
+| Workflow / file | Purpose |
+|---|---|
+| `.github/workflows/terraform-ci.yml` | PR-time pipeline: fmt → validate → tflint → checkov → plan → PR comment |
+| `.github/workflows/terraform-apply.yml` | Post-merge apply, two-phase matrix (mgmt-first, workloads-after; FR-V4-10..14) |
+| `.github/workflows/sonar.yml` | SonarQube for Backstage TypeScript + Dockerfiles (ADR-028-v3) |
+| `.github/workflows/reusable/` | `workflow_call:` reusable workflows for plan + apply |
+| `.pre-commit-config.yaml` | terraform_fmt, terraform_validate, terraform_checkov, tflint, detect-private-key |
+| `.tflint.hcl` | tflint with `tflint-ruleset-azurerm` |
+| `.checkov.yaml`, `.checkov.baseline` | Supply-chain scanning with per-finding rationale schema |
+| `prd.json` | Ralph autonomous-agent execution queue — 13 stories (PRD-v3.1 + PRD-v4) |
+
+## Domain glossary (quick reference)
+
+| Term | Meaning |
+|---|---|
+| **IDP** | Internal Developer Platform — the full system this repo provisions |
+| **mgmt cluster** | Management cluster — `mgmt-we` (active), `mgmt-ne` (standby) |
+| **workload cluster** | AKS cluster running tenant workloads — `aks-{dev,staging,prod-we,prod-ne}` |
+| **App-of-Apps** | ArgoCD pattern where one ApplicationSet manages child ApplicationSets/Applications |
+| **ESO** | External Secrets Operator — syncs secrets from AKV into Kubernetes |
+| **UAMI** | User-Assigned Managed Identity — per-namespace Azure identity for AKV access |
+| **AKV** | Azure Key Vault |
+| **SLO class** | bronze / silver / gold — tier of progressive delivery strictness |
+| **XRD** / **Claim** | Crossplane Composite Resource Definition / developer-facing Claim |
+| **mgmt-leader-lease** | Go controller holding the blob lease for active mgmt cluster |
+| **controller-scaler** | Go controller scaling Crossplane/ArgoCD to zero on standby |
+| **seed cluster** | `seed-wus` — West US 2 single-node DR bootstrap |
+| **CAPZ** | Cluster API Provider Azure — alternative infra provider (default is Crossplane) |
+
+Full glossary in [`docs/agents/domain.md`](docs/agents/domain.md).
+
+## End-to-end onboarding flow
+
+1. **Jira ticket** for a new service → `jira_intake.parse` produces typed `ServiceRequest`
+2. **Cluster registry** consulted → cluster identity (subscription, RG, ACR) resolved
+3. **Service repo** scaffolded via cookiecutter → pushed to Bitbucket
+4. **GitOps PR** composed by `gitops_pr.py` → kustomize overlays + Argo `Rollout` + Crossplane Claims
+5. **PR merges** → ArgoCD's App-of-Apps picks up → ApplicationSet fans out to target cluster
+6. **Crossplane** reconciles Claims → provisions Azure resources (SQL, Cosmos, Service Bus)
+7. **ESO** projects per-namespace secrets from per-region AKV
+8. **Argo Rollouts** canaries new version per SLO class (gold/silver/bronze)
+9. **argocd-jira-bridge** opens Jira ticket if rollout degrades
+10. **mgmt-leader-lease + controller-scaler** ensure only one mgmt cluster reconciles at a time
 
 ## Prerequisites
 
-- An active Azure subscription. If you don't have one, create a free Azure account before you begin.
-- Azure CLI version 2.60.0 or later installed. To install or upgrade, see Install Azure CLI.
-- Terraform v1.8.3 or later [configured for authentication](https://learn.microsoft.com/azure/developer/terraform/authenticate-to-azure?tabs=bash) where the user account has permissions to create resource groups and user managed identities on the subscription to setup workload identity for the AKS cluster (capz option).
-- kubectl version 1.28.9 or later installed. To install or upgrade, see Install kubectl.
+- An active Azure subscription
+- Azure CLI 2.60.0+
+- Terraform 1.5.x (pinned per ADR-029-v3 — see [`.tool-versions`](.tool-versions) for the full toolchain)
+- `kubectl` 1.28.9+
+- `pre-commit` (run `pre-commit install` after clone)
 
-## Getting Started
+## Getting started
 
-### Provisioning the Control Plane Cluster
+### Bootstrap remote Terraform state (one-time, per environment)
 
-- Fork the repo
-- Only if the repo is desired to be private, ArgoCD will need a ssh deploy key to access this repo. Follow these steps to enable:
-  - Create a [read-only deploy ssh key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys#deploy-keys) on the fork
-  - Place the corresponding private key named `private_ssh_deploy_key` in the `terraform` directory
-  - Change the `gitops_addons_org` variable to `git@github.com:Azure-Samples` replacing Azure-Samples with your fork org/username versus the existing `https://` format
-  - Uncomment line 218 of the `main.tf` file: `# sshPrivateKey = file(pathexpand(var.git_private_ssh_key))`
+```bash
+./scripts/bootstrap-tfstate.sh
+```
 
-Run Terraform:
+This provisions the state Storage Account in `rg-tfstate-bootstrap` with a `CanNotDelete` management lock (ADR-023-v3 / FR-V3-01). State files use the pattern `tfstate/<env>/<cluster>.tfstate`.
+
+### Provision the control plane
 
 ```bash
 cd terraform
-terraform init -upgrade
-```
+terraform init -backend-config=backends/mgmt-we.tfbackend -upgrade
 
-Choose the `infrastructure_provider` variable to be `capz` (default) or `crossplane`.
+# With CAPZ (default)
+terraform apply -var gitops_addons_org=https://github.com/sccvn-devops --auto-approve
 
-> [!Important]
-> Change `azure-samples` to your fork organization or GitHub user name in the commands below.
-
-Alternatively, consider changing the example `tvars` file to match your desired configuration versus using the `-var` switches below.
-
-```bash
-# For capz control plane
-terraform apply -var gitops_addons_org=https://github.com/azure-samples --auto-approve
-
-# For crossplane control plane
-terraform apply -var gitops_addons_org=https://github.com/azure-samples \
+# With Crossplane
+terraform apply -var gitops_addons_org=https://github.com/sccvn-devops \
                 -var infrastructure_provider=crossplane --auto-approve
 ```
 
-> Note: You can ignore the warnings related to deprecated attributes and invalid kubeconfig path.
+Terraform creates the AKS mgmt cluster, installs ArgoCD via Helm, and applies the App-of-Apps ApplicationSet that targets `gitops/bootstrap/control-plane/addons/`. From that point ArgoCD reconciles every addon, workload cluster, and tenant app.
 
-Terraform completed installing the AKS cluster, installing ArgoCD, and configuring ArgoCD to install applications under the `gitops/bootstrap/control-plane/addons` directory from the git repo.
+### Access the Control Plane
 
-### Accessing the Control Plane Cluster and ArgoCD UI
-
-Getting the credentials for the Control Plane Cluster
-
-```shell
-export KUBECONFIG=<your_path_to_this_repo>/aks-platform-engineering/terraform/kubeconfig
-echo $KUBECONFIG
-```
-
-```shell
-# Get the initial admin password and the IP address of the ArgoCD web interface.
-kubectl get secrets argocd-initial-admin-secret -n argocd --template="{{index .data.password | base64decode}}"
-kubectl get svc -n argocd argo-cd-argocd-server
-```
-
-It may take a few minutes for the LoadBalancer to create a public IP for the ArgoCD UI after the Terraform apply. In case something goes wrong and you don't find a public IP, connect to the ArgoCD server doing a port forward with kubectl and access the UI on https://localhost:8080.
-
-```kubectl
+```bash
+export KUBECONFIG=<repo>/terraform/kubeconfig
+kubectl get secrets argocd-initial-admin-secret -n argocd \
+  --template="{{index .data.password | base64decode}}"
 kubectl port-forward svc/argo-cd-argocd-server -n argocd 8080:443
 ```
 
-The username for the ArgoCD UI login is `admin`.
+Open https://localhost:8080, username `admin`.
 
-### Summary
+### Run the developer-tooling test suites
 
-1. Terraform created an AKS control plane / management cluster and downloaded the kubeconfig file in the `terraform` directory.
-1. Terraform installed ArgoCD via the Terraform Kubernetes provider to that cluster
-1. Terraform did a `kubectl apply` an ArgoCD ApplicationSet to the cluster which syncs the bootstrap folder [gitops/bootstrap/control-plane/addons](https://github.com/Azure-Samples/aks-platform-engineering/tree/main/gitops/bootstrap/control-plane/addons). That ApplicationSet utilizes the [ArgoCD App of Apps pattern](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/#app-of-apps-pattern) and ArgoCD applies all of the applications under that folder in git which match the [labels specified in Terraform](https://github.com/Azure-Samples/aks-platform-engineering/blob/main/terraform/main.tf#L20-L38).
+```bash
+# Go
+cd tools/mgmt-plane-lock && go test -race ./...
 
-## Next Steps
+# Python service-seed
+cd tools/service_seed && pytest --cov
 
-Learn how to define your own cluster, infrastructure, and hand off to the development team the access to the AKS cluster and ArgoCD deployment UI in [this article](./docs/Onboard-New-Dev-Team.md).
+# Terraform module tests
+cd terraform/modules/workload_identity && terraform test
+```
+
+## Onboarding a new development team
+
+See [`docs/Onboard-New-Dev-Team.md`](docs/Onboard-New-Dev-Team.md) — covers cluster handoff + ArgoCD access for tenant developers.
+
+## DR runbooks
+
+- [`docs/management-plane-failover-runbook.md`](docs/management-plane-failover-runbook.md) — `mgmt-we` → `mgmt-ne` failover
+- [`docs/seed-cluster-dr-runbook.md`](docs/seed-cluster-dr-runbook.md) — catastrophic recovery from `seed-wus`
+
+## What's in flight
+
+| PRD | Status | Theme |
+|---|---|---|
+| [PRD-v4](_docs/IDP-GitOps-Blueprint-PRD-v4.md) | Approved 2026-05-26 | Architecture deepening + hardening (11 user stories) |
+| [PRD-v3.1](_docs/IDP-GitOps-Blueprint-PRD-v3.1.md) | Draft — pre-v4 gate | AKV-native rotation + TLS history purge (must merge before v4 P0) |
+| [PRD-v3](_docs/IDP-GitOps-Blueprint-PRD-v3.md) | Accepted 2026-05-26 | Terraform code-quality + supply-chain hardening |
+
+ADR-031-v4 (cluster topology registry) was Accepted 2026-05-26 alongside PRD-v4.
+
+## Choosing the infrastructure provider
+
+Set `var.infrastructure_provider` to `capz` (default) or `crossplane`. See [`docs/capz-or-crossplane.md`](docs/capz-or-crossplane.md) for the trade-off comparison. The Azure Service Operator (ASO) install bundled with CAPZ can be customised by editing [`gitops/environments/default/addons/cluster-api-provider-azure/values.yaml`](gitops/environments/default/addons/cluster-api-provider-azure/values.yaml).
 
 ## Trademarks
 
-Trademarks This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow Microsoft’s Trademark & Brand Guidelines. Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party’s policies.
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow Microsoft's Trademark & Brand Guidelines. Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those third-party's policies.
