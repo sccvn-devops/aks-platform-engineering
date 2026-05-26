@@ -96,11 +96,13 @@ func main() {
 		log.Fatalf("unknown token type: %s", *tokenType)
 	}
 
-	// Write new token to both regional vaults.
-	if err := weClient.SetSecret(ctx, secretName, newToken); err != nil {
+	// Write new token to both regional vaults. RecoverIfSoftDeleted lets the
+	// rotator complete even if a prior aborted run left the secret in the
+	// soft-deleted state (e.g., manual operator delete during an incident).
+	if err := weClient.Put(ctx, secretName, newToken, akvwriter.RecoverIfSoftDeleted); err != nil {
 		log.Fatalf("write WE vault secret %s: %v", secretName, err)
 	}
-	if err := neClient.SetSecret(ctx, secretName, newToken); err != nil {
+	if err := neClient.Put(ctx, secretName, newToken, akvwriter.RecoverIfSoftDeleted); err != nil {
 		log.Fatalf("write NE vault secret %s: %v", secretName, err)
 	}
 	log.Printf("wrote rotated %s token to both regional vaults as %s", *tokenType, secretName)
