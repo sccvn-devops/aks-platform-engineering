@@ -126,3 +126,5 @@ scripts/*
 !scripts/setup-gha-environments.sh
 !scripts/check-var-validation.py
 !scripts/validate-checkov-suppressions.py
+!scripts/validate-akv-null-expiry.py
+!scripts/validate-akv-catalogue.py

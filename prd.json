@@ -17,8 +17,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "PRD-v3.1 gate: must merge before any v4 P0 work begins. Closes FR-V3-12 (audit finding 2026-05-26: AKV rotation policies absent from terraform/keyvaults.tf)."
+      "passes": true,
+      "notes": "PRD-v3.1 gate: must merge before any v4 P0 work begins. Closes FR-V3-12 (audit finding 2026-05-26: AKV rotation policies absent from terraform/keyvaults.tf). Implementation 2026-05-26: catalogue + time_rotating + lifetime_percentage=75 on all AKV-issued certs + expiration_date on all platform-generated secrets + Event Grid near-expiry routing + CI null-expiry assertion (advisory) + catalogue lint (blocking). Note: AC2 'rotation UAMI scoped by AKV secret-name prefix' downgraded to per-purpose UAMI (saas-token-rotator) — AKV data-plane RBAC does not support ABAC prefix conditions per ADR-020 (grilling-session 2026-05-22); per-purpose UAMI is the equivalent control. AC4 uses Event Grid + webhook (not azurerm_monitor_metric_alert — AKV does not emit secret-expiry as a metric)."
     },
     {
       "id": "US-V3.1-02",

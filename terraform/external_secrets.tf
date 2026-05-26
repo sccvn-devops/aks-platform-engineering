@@ -60,9 +60,10 @@ resource "azurerm_role_assignment" "external_secrets_key_vault_reader" {
 resource "azurerm_key_vault_secret" "external_secrets_smoke_test" {
   for_each = local.workload_key_vaults
 
-  name         = "eso-smoke-test"
-  value        = "synced-from-${each.value.cluster}"
-  key_vault_id = azurerm_key_vault.platform[each.key].id
+  name            = "eso-smoke-test"
+  value           = "synced-from-${each.value.cluster}"
+  key_vault_id    = azurerm_key_vault.platform[each.key].id
+  expiration_date = local.platform_secret_expiry_rfc3339
 
   depends_on = [
     azurerm_role_assignment.platform_key_vault_admin,
@@ -89,7 +90,12 @@ resource "azurerm_key_vault_secret" "cosign_public_key" {
 # Secret in every workload namespace via the addons-akv-tls-cert-sync ApplicationSet.
 # content_type = application/x-pem-file ensures the backing secret is PEM-encoded
 # so the ESO v2 template regexFind can extract tls.crt and tls.key correctly.
-# AKV auto-renews 30 days before expiry; ESO re-syncs within 60 s of the new version.
+#
+# US-V3.1-01 (FR-V3.1-01): AutoRenew triggers at lifetime_percentage = 75 (i.e. ~22
+# days before expiry for the 3-month validity), which guarantees a quarterly
+# rotation cadence enforced by AKV itself — independent of saas-token-rotator
+# runtime availability. ESO refreshInterval = 60s re-syncs the new PEM bundle
+# well within the overlap window.
 resource "azurerm_key_vault_certificate" "platform_tls" {
   for_each = local.workload_key_vaults
 
@@ -106,15 +112,12 @@ resource "azurerm_key_vault_certificate" "platform_tls" {
       key_type   = "RSA"
       reuse_key  = false
     }
-    # AKV-native quarterly rotation: cert valid for 3 months, auto-renewed 14 days
-    # before expiry so there is always an overlap window for ESO to re-sync the
-    # new PEM bundle before the old cert expires (ESO refreshInterval = 60s).
     lifetime_action {
       action {
         action_type = "AutoRenew"
       }
       trigger {
-        days_before_expiry = 14
+        lifetime_percentage = 75
       }
     }
     secret_properties {

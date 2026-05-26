@@ -163,9 +163,10 @@ resource "azurerm_key_vault_secret" "jenkins_admin_username" {
 }
 
 resource "azurerm_key_vault_secret" "jenkins_admin_password" {
-  name         = "jenkins-admin-password"
-  value        = var.jenkins_admin_password
-  key_vault_id = azurerm_key_vault.management_ci.id
+  name            = "jenkins-admin-password"
+  value           = var.jenkins_admin_password
+  key_vault_id    = azurerm_key_vault.management_ci.id
+  expiration_date = local.platform_secret_expiry_rfc3339
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
@@ -174,9 +175,10 @@ resource "azurerm_key_vault_secret" "jenkins_admin_password" {
 }
 
 resource "azurerm_key_vault_secret" "jenkins_bitbucket_workspace_token" {
-  name         = "bitbucket-workspace-token"
-  value        = var.jenkins_bitbucket_workspace_token
-  key_vault_id = azurerm_key_vault.management_ci.id
+  name            = "bitbucket-workspace-token"
+  value           = var.jenkins_bitbucket_workspace_token
+  key_vault_id    = azurerm_key_vault.management_ci.id
+  expiration_date = local.platform_secret_expiry_rfc3339
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
@@ -185,9 +187,10 @@ resource "azurerm_key_vault_secret" "jenkins_bitbucket_workspace_token" {
 }
 
 resource "azurerm_key_vault_secret" "jenkins_jira_service_account_token" {
-  name         = "jira-service-account-token"
-  value        = var.jenkins_jira_service_account_token
-  key_vault_id = azurerm_key_vault.management_ci.id
+  name            = "jira-service-account-token"
+  value           = var.jenkins_jira_service_account_token
+  key_vault_id    = azurerm_key_vault.management_ci.id
+  expiration_date = local.platform_secret_expiry_rfc3339
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
@@ -196,9 +199,10 @@ resource "azurerm_key_vault_secret" "jenkins_jira_service_account_token" {
 }
 
 resource "azurerm_key_vault_secret" "jenkins_webhook_https_keystore" {
-  name         = "jenkins-webhook-https-keystore"
-  value        = var.jenkins_webhook_https_keystore_base64
-  key_vault_id = azurerm_key_vault.management_ci.id
+  name            = "jenkins-webhook-https-keystore"
+  value           = var.jenkins_webhook_https_keystore_base64
+  key_vault_id    = azurerm_key_vault.management_ci.id
+  expiration_date = local.platform_secret_expiry_rfc3339
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
@@ -207,9 +211,10 @@ resource "azurerm_key_vault_secret" "jenkins_webhook_https_keystore" {
 }
 
 resource "azurerm_key_vault_secret" "jenkins_webhook_https_keystore_password" {
-  name         = "jenkins-webhook-https-keystore-password"
-  value        = var.jenkins_webhook_https_keystore_password
-  key_vault_id = azurerm_key_vault.management_ci.id
+  name            = "jenkins-webhook-https-keystore-password"
+  value           = var.jenkins_webhook_https_keystore_password
+  key_vault_id    = azurerm_key_vault.management_ci.id
+  expiration_date = local.platform_secret_expiry_rfc3339
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
@@ -218,9 +223,10 @@ resource "azurerm_key_vault_secret" "jenkins_webhook_https_keystore_password" {
 }
 
 resource "azurerm_key_vault_secret" "backstage_postgres_password" {
-  name         = "backstage-postgres-password"
-  value        = var.postgres_password
-  key_vault_id = azurerm_key_vault.management_ci.id
+  name            = "backstage-postgres-password"
+  value           = var.postgres_password
+  key_vault_id    = azurerm_key_vault.management_ci.id
+  expiration_date = local.platform_secret_expiry_rfc3339
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
@@ -229,10 +235,11 @@ resource "azurerm_key_vault_secret" "backstage_postgres_password" {
 }
 
 resource "azurerm_key_vault_secret" "backstage_tls_crt" {
-  name         = "backstage-tls-crt"
-  value        = var.backstage_tls_crt
-  key_vault_id = azurerm_key_vault.management_ci.id
-  content_type = "application/x-pem-file"
+  name            = "backstage-tls-crt"
+  value           = var.backstage_tls_crt
+  key_vault_id    = azurerm_key_vault.management_ci.id
+  content_type    = "application/x-pem-file"
+  expiration_date = local.platform_secret_expiry_rfc3339
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,
@@ -241,10 +248,103 @@ resource "azurerm_key_vault_secret" "backstage_tls_crt" {
 }
 
 resource "azurerm_key_vault_secret" "backstage_tls_key" {
-  name         = "backstage-tls-key"
-  value        = var.backstage_tls_key
+  name            = "backstage-tls-key"
+  value           = var.backstage_tls_key
+  key_vault_id    = azurerm_key_vault.management_ci.id
+  content_type    = "application/x-pem-file"
+  expiration_date = local.platform_secret_expiry_rfc3339
+
+  depends_on = [
+    azurerm_role_assignment.management_ci_key_vault_admin,
+    azurerm_role_assignment.management_ci_current_operator_admin,
+  ]
+}
+
+# US-V3.1-01 (FR-V3.1-01): AKV-issued Backstage TLS certificate with quarterly
+# AutoRenew at lifetime_percentage = 75. Coexists with the operator-supplied
+# backstage-tls-crt / backstage-tls-key secrets above; consumers should migrate
+# to read backstage-internal-tls (PEM bundle) once the cutover ADR lands.
+resource "azurerm_key_vault_certificate" "backstage_internal_tls" {
+  name         = "backstage-internal-tls"
   key_vault_id = azurerm_key_vault.management_ci.id
-  content_type = "application/x-pem-file"
+
+  certificate_policy {
+    issuer_parameters {
+      name = "Self"
+    }
+    key_properties {
+      exportable = true
+      key_size   = 2048
+      key_type   = "RSA"
+      reuse_key  = false
+    }
+    lifetime_action {
+      action {
+        action_type = "AutoRenew"
+      }
+      trigger {
+        lifetime_percentage = 75
+      }
+    }
+    secret_properties {
+      content_type = "application/x-pem-file"
+    }
+    x509_certificate_properties {
+      extended_key_usage = ["1.3.6.1.5.5.7.3.1"]
+      key_usage          = ["digitalSignature", "keyEncipherment"]
+      subject            = "CN=backstage.internal"
+      validity_in_months = 3
+      subject_alternative_names {
+        dns_names = ["backstage.internal", "*.backstage.internal"]
+      }
+    }
+  }
+
+  depends_on = [
+    azurerm_role_assignment.management_ci_key_vault_admin,
+    azurerm_role_assignment.management_ci_current_operator_admin,
+  ]
+}
+
+# US-V3.1-01 (FR-V3.1-01): AKV-issued Jenkins webhook TLS certificate with
+# quarterly AutoRenew at lifetime_percentage = 75. Jenkins reads the PEM bundle
+# (or PKCS12 derivative) from this cert via the operator-supplied
+# jenkins-webhook-https-keystore* secrets once those are deprecated.
+resource "azurerm_key_vault_certificate" "jenkins_webhook_tls" {
+  name         = "jenkins-webhook-tls"
+  key_vault_id = azurerm_key_vault.management_ci.id
+
+  certificate_policy {
+    issuer_parameters {
+      name = "Self"
+    }
+    key_properties {
+      exportable = true
+      key_size   = 2048
+      key_type   = "RSA"
+      reuse_key  = false
+    }
+    lifetime_action {
+      action {
+        action_type = "AutoRenew"
+      }
+      trigger {
+        lifetime_percentage = 75
+      }
+    }
+    secret_properties {
+      content_type = "application/x-pem-file"
+    }
+    x509_certificate_properties {
+      extended_key_usage = ["1.3.6.1.5.5.7.3.1"]
+      key_usage          = ["digitalSignature", "keyEncipherment"]
+      subject            = "CN=jenkins-webhook.internal"
+      validity_in_months = 3
+      subject_alternative_names {
+        dns_names = ["jenkins-webhook.internal"]
+      }
+    }
+  }
 
   depends_on = [
     azurerm_role_assignment.management_ci_key_vault_admin,

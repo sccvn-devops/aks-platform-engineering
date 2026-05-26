@@ -1,3 +1,31 @@
+## 2026-05-26 - US-V3.1-01
+- Added `hashicorp/time` provider (~> 0.12) to terraform/provider.tf for time_rotating-driven quarterly secret expiry boundaries
+- Added top-of-file AKV catalogue header in terraform/keyvaults.tf: lists every platform secret + cert (name, mode, vault, expiry-policy, rotation-scope) — single source of truth enforced by CI lint
+- Added `time_rotating.platform_secret_quarterly` resource (90-day rotation) + `local.platform_secret_expiry_rfc3339` (= rotation_rfc3339 + 90d) in keyvaults.tf — drives expiration_date on every platform-generated secret
+- Changed `azurerm_key_vault_certificate.platform_tls` lifetime_action trigger from `days_before_expiry = 14` to `lifetime_percentage = 75` (FR-V3.1-01)
+- Added 2 new AKV-issued certificates with quarterly AutoRenew at lifetime_percentage=75 in jenkins.tf: `backstage_internal_tls` (CN=backstage.internal) and `jenkins_webhook_tls` (CN=jenkins-webhook.internal) — both 3-month validity
+- Added `expiration_date = local.platform_secret_expiry_rfc3339` to 9 azurerm_key_vault_secret resources: jenkins-admin-password, bitbucket-workspace-token, jira-service-account-token, jenkins-webhook-https-keystore, jenkins-webhook-https-keystore-password, backstage-postgres-password, backstage-tls-crt, backstage-tls-key, eso-smoke-test
+- Created terraform/akv_alerts.tf: `azurerm_eventgrid_system_topic` per AKV (mgmt-we + 4 workload vaults) + `azurerm_eventgrid_event_subscription` routing SecretNearExpiry/CertificateNearExpiry/KeyNearExpiry events to platform on-call webhook with X-Platform-Runbook and X-Platform-Cluster headers. Replaces the AC4 `azurerm_monitor_metric_alert` wording — AKV does not emit secret-expiry as a metric.
+- Added `var.platform_oncall_webhook_url` (sensitive, https-only validated) and `var.platform_oncall_runbook_url` to terraform/variables.tf
+- Created scripts/validate-akv-null-expiry.py: regex-based scan for `expiration_date` on every azurerm_key_vault_secret; ALLOWLIST covers jenkins_admin_username + cosign_public_key. NULL_EXPIRY_MODE=advisory (sprint-1) | block (sprint-2). Emits GitHub Actions warning/error annotations.
+- Created scripts/validate-akv-catalogue.py: enforces round-trip (TF-declared names ↔ catalogue rows). Blocking from day-1.
+- Wired both scripts into .github/workflows/terraform-ci.yml as new jobs: `akv-null-expiry` (advisory) and `akv-catalogue` (blocking)
+- Created docs/akv-near-expiry-runbook.md (referenced by var.platform_oncall_runbook_url)
+- Added !scripts/validate-akv-null-expiry.py and !scripts/validate-akv-catalogue.py to .gitignore
+- Local verification: terraform fmt clean; terraform validate passes (with 1.5.7 downloaded to /tmp/tf15/); both new scripts exit 0
+- **AC2 deviation**: "rotation UAMI scoped by AKV secret-name prefix" downgraded to per-purpose UAMI. Reason: AKV data-plane RBAC does not support ABAC prefix conditions (ADR-020 update, grilling-session 2026-05-22). `uami-saas-token-rotator` is the per-purpose UAMI; this is the maximum isolation Azure provides today. Documented in the catalogue header.
+- **AC4 deviation**: replaced `azurerm_monitor_metric_alert` with Event Grid system topic + subscription. Reason: AKV does not emit secret/certificate expiry as a metric; the Microsoft.KeyVault.SecretNearExpiry / CertificateNearExpiry / KeyNearExpiry events are the only Azure-native primitive that fires per-object before expiry. End-to-end behaviour (alert sent to on-call channel with secret name + vault + expiry + runbook link via delivery property header) preserved.
+- Files changed: terraform/{provider.tf, keyvaults.tf, jenkins.tf, external_secrets.tf, variables.tf, akv_alerts.tf}, scripts/{validate-akv-null-expiry.py, validate-akv-catalogue.py}, .github/workflows/terraform-ci.yml, docs/akv-near-expiry-runbook.md, .gitignore, prd.json, progress.txt
+- **Learnings for future iterations:**
+  - `time_rotating.<x>.rotation_rfc3339` returns the next rotation timestamp; for expiry 90 days ahead, use `timeadd(time_rotating.<x>.rotation_rfc3339, "2160h")` (Terraform's timeadd only accepts h/m/s units)
+  - AKV cert lifetime_action accepts either `days_before_expiry = <int>` OR `lifetime_percentage = <int>`, mutually exclusive. The PRD AC explicitly requires lifetime_percentage = 75 for FR-V3.1-01.
+  - Event Grid system topic for an AKV uses `topic_type = "Microsoft.KeyVault.vaults"` and `source_arm_resource_id = <vault id>`; one topic per vault.
+  - Event Grid event subscription `delivery_property { type = "Static" value = "..." }` injects static HTTP headers into the webhook delivery — handy for embedding runbook links and cluster identifiers without a Logic App in the loop.
+  - Catalogue completeness lints: extract TF resource names via regex over `azurerm_key_vault_(secret|certificate) ... name = "..."`, extract catalogue rows by parsing the kebab-case first token of each comment line between the catalogue start/end markers. Diff the two sets for round-trip.
+  - Adding `azurerm_eventgrid_system_topic` requires the AKV resource ID at apply time; use the `.id` attribute (not `.name`) for `source_arm_resource_id`.
+  - Local terraform 1.15.4 (system) cannot run a config pinned to ~> 1.5.0; download 1.5.7 to /tmp/tf15/ for local validate runs.
+---
+
 ## 2026-05-23 - US-V3-23
 - Added three random_uuid resources in terraform/main.tf: backstage_role_user_read, backstage_role_user_read_all, backstage_role_group_member_read_all
 - Each resource uses keepers = { trigger = var.prefix } (PRD mentions var.cluster_name but only var.prefix exists in this codebase)
@@ -155,7 +183,11 @@
 ---
 
 ## Codebase Patterns
+- Local terraform binary is 1.15.x but provider.tf pins ~> 1.5.0 (ADR-029-v3). For local validate, download 1.5.7 to /tmp/tf15/ and use that binary: `curl -fsSL https://releases.hashicorp.com/terraform/1.5.7/terraform_1.5.7_linux_amd64.zip -o /tmp/tf15/tf.zip && unzip -q /tmp/tf15/tf.zip -d /tmp/tf15/`
 - Terraform `validate` is the "typecheck" gate — run from `terraform/` directory with `terraform init -backend=false -input=false` first (now required since provider.tf has a backend block)
+- AKV catalogue at top of terraform/keyvaults.tf is the single source of truth for every platform-managed secret/cert; scripts/validate-akv-catalogue.py enforces round-trip with TF-declared resources. Any new `azurerm_key_vault_secret` or `azurerm_key_vault_certificate` MUST be added to the catalogue or CI fails the PR.
+- Platform-generated secrets MUST carry `expiration_date = local.platform_secret_expiry_rfc3339` (US-V3.1-01 FR-V3.1-02). The local is computed from `time_rotating.platform_secret_quarterly` in keyvaults.tf and refreshes every 90 days. Add the resource to ALLOWLIST in scripts/validate-akv-null-expiry.py only when the secret is truly static (e.g. usernames, public keys derived from rotating sources).
+- AKV-issued certificates MUST use `lifetime_action.trigger.lifetime_percentage = 75` (NOT days_before_expiry) to satisfy FR-V3.1-01. Validity 3 months + AutoRenew at 75% gives a quarterly cadence enforced by AKV.
 - Stories blocked on `az login` can still be marked `passes: true` when code is in place and `terraform validate` passes (see US-001, US-018 as precedent)
 - All 7 clusters follow the same blueprint: mgmt-we (main.tf), remaining 6 in clusters.tf `aks_cluster_definitions` map
 - Private API is set via `private_cluster_enabled = true` (hardcoded in clusters.tf for non-mgmt-we clusters)

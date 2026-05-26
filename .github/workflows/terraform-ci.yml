@@ -31,6 +31,8 @@ on:
       - ".checkov.baseline"
       - "scripts/fetch-tf-secrets.sh"
       - "scripts/setup-branch-protection.sh"
+      - "scripts/validate-akv-null-expiry.py"
+      - "scripts/validate-akv-catalogue.py"
 
 env:
   TF_VERSION: "1.5.7"
@@ -148,6 +150,48 @@ jobs:
         env:
           JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
           JIRA_TOKEN: ${{ secrets.JIRA_SERVICE_ACCOUNT_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # AKV null-expiry assertion (US-V3.1-01, FR-V3.1-03).
+  # Advisory in sprint-1 (NULL_EXPIRY_MODE=advisory): emits warning annotations
+  # and posts findings, but never fails the PR.
+  # Sprint-2 cutover: flip NULL_EXPIRY_MODE to "block" in the env block below.
+  # ---------------------------------------------------------------------------
+  akv-null-expiry:
+    name: AKV Null-Expiry Assertion
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run null-expiry assertion
+        run: python3 scripts/validate-akv-null-expiry.py
+        env:
+          # Sprint-2 cutover: change to "block" to fail PRs on null expiry.
+          NULL_EXPIRY_MODE: advisory
+
+  # ---------------------------------------------------------------------------
+  # AKV catalogue completeness lint (US-V3.1-01, FR-V3.1-05) — blocking.
+  # Every azurerm_key_vault_secret / azurerm_key_vault_certificate must appear
+  # in the catalogue header at the top of terraform/keyvaults.tf.
+  # ---------------------------------------------------------------------------
+  akv-catalogue:
+    name: AKV Catalogue Completeness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run catalogue lint
+        run: python3 scripts/validate-akv-catalogue.py
 
   # ---------------------------------------------------------------------------
   # Checkov security scan — advisory in sprint-1, blocking in sprint-2.
