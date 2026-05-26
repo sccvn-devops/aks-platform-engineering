@@ -1,0 +1,28 @@
+{%- if not slo.has_analysis_template %}
+# Bronze services use direct cutover and do not reference an AnalysisTemplate.
+# This file is intentionally left out of the overlay resource graph.
+{%- else %}
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ service }}-analysis
+  namespace: placeholder-workload
+spec:
+  metrics:
+    - name: success-rate
+      interval: {{ slo.analysis_interval }}
+      successCondition: "result[0] >= {{ slo.success_rate_threshold }}"
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: sum(rate(http_requests_total{namespace="{{ service }}-prod",status=~"2.."}[5m])) / sum(rate(http_requests_total{namespace="{{ service }}-prod"}[5m]))
+{%- if slo.include_p99_metric %}
+    - name: p99-latency-ms
+      interval: {{ slo.analysis_interval }}
+      successCondition: "result[0] <= {{ slo.p99_latency_ms_threshold }}"
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: histogram_quantile(0.99, sum(rate(http_request_duration_milliseconds_bucket{namespace="{{ service }}-prod"}[5m])) by (le)) * 1000
+{%- endif %}
+{%- endif %}

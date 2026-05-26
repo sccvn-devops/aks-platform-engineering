@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+{%- for p in patch_targets %}
+  - target:
+      kind: {{ p.kind }}
+      name: {{ p.name }}
+    patch: |-
+      - op: replace
+        path: /metadata/{{ p.field }}
+        value: {{ p.value }}
+{%- if p.add_env_label %}
+      - op: add
+        path: /metadata/labels/environment
+        value: {{ env }}
+{%- endif %}
+{%- endfor %}
+  - target:
+      kind: NamespaceRolloutPolicy
+      name: {{ service }}-rollout-policy
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: {{ service }}-infra-{{ env }}
+      - op: replace
+        path: /spec/parameters/namespace
+        value: {{ service }}-{{ env }}

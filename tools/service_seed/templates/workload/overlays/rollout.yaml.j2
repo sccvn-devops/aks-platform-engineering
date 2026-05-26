@@ -1,0 +1,77 @@
+{%- if env in nonprod_envs %}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ service }}
+  namespace: {{ namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ service }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ service }}
+    spec:
+      serviceAccountName: azure-keyvault-reader
+      containers:
+        - name: {{ service }}
+          image: {{ image }}
+          ports:
+            - name: http
+              containerPort: 8080
+{%- else %}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ service }}
+  namespace: {{ namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ service }}
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ service }}-template
+  strategy:
+    canary:
+{%- if slo.has_analysis_template %}
+      analysis:
+        templates:
+          - templateName: {{ service }}-analysis
+{%- endif %}
+      steps:
+{%- for step in rollout.steps %}
+        - {{ step }}
+{%- endfor %}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ service }}-template
+  namespace: {{ namespace }}
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ service }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ service }}
+    spec:
+      serviceAccountName: azure-keyvault-reader
+      containers:
+        - name: {{ service }}
+          image: {{ image }}
+          ports:
+            - name: http
+              containerPort: 8080
+{%- endif %}

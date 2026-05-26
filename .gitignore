@@ -137,6 +137,7 @@ scripts/*
 !scripts/truncate-plan-output.py
 !scripts/validate-workflow-call-contract.py
 !scripts/validate-mgmt-plane-lock-runners.sh
+!scripts/validate-rendered-manifests.sh
 !scripts/tests/
 !scripts/tests/__init__.py
 !scripts/tests/test_truncate_plan_output.py

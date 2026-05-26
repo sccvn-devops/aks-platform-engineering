@@ -1,0 +1,17 @@
+apiVersion: platform.cityos.io/v1alpha1
+kind: CosmosAccount
+metadata:
+  name: {{ service }}-cosmos
+  namespace: placeholder-infra
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  parameters:
+    region: {{ primary_region }}
+    resourceGroupName: {{ primary_resource_group }}
+    primaryLocation: {{ primary_region }}
+    secondaryLocation: {{ secondary_region }}
+    sloClass: {{ slo_class }}
+    secretName: {{ service }}-cosmos-conn
+    keyVaultWeId: {{ key_vault_we_id }}
+    keyVaultNeId: {{ key_vault_ne_id }}

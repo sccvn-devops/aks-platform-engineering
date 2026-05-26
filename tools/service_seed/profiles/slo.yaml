@@ -1,0 +1,25 @@
+# profiles/slo.yaml — SLO-class thresholds for Argo Rollouts AnalysisTemplate emission.
+# US-V4-08 (FR-V4-32..35): every SLO numeric (success-rate threshold, p99 latency
+# bound, analysis interval) lives here and is consumed by
+# templates/workload/base/analysis-template.yaml.j2.  No SLO numeric may appear
+# as a Python literal in service_template.py.
+#
+# Schema (per class):
+#   has_analysis_template : bool  — does this class emit an AnalysisTemplate?
+#   include_p99_metric    : bool  — does this class measure p99 latency?
+#   analysis_interval     : str   — Prometheus query interval (e.g., "60s")
+#   success_rate_threshold: float — minimum 2xx success rate (0..1)
+#   p99_latency_ms_threshold: int — maximum p99 latency in ms (only used when include_p99_metric)
+gold:
+  has_analysis_template: true
+  include_p99_metric: true
+  analysis_interval: "60s"
+  success_rate_threshold: 0.99
+  p99_latency_ms_threshold: 500
+silver:
+  has_analysis_template: true
+  include_p99_metric: false
+  analysis_interval: "60s"
+  success_rate_threshold: 0.99
+bronze:
+  has_analysis_template: false

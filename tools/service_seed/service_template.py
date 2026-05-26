@@ -1,16 +1,23 @@
-"""Service template rendering for service_seed (US-V4-07, FR-V4-27..31).
+"""Service template rendering for service_seed (US-V4-07, US-V4-08).
 
-Single owner of the *render* concern: cookiecutter scaffold rendering for the
-service repository plus the GitOps manifest emitters used by the seed pipeline.
-Replaces the render-related slice of the legacy ``seed_job.py`` module.
+Single owner of the *render* concern.  Drives Jinja2 templates under
+``tools/service_seed/templates/`` plus the SLO/rollout profile data under
+``tools/service_seed/profiles/`` to materialise the GitOps manifest set for a
+new service request, and shells out to ``cookiecutter`` (with a pure-Python
+fallback) for the per-service repository scaffold.
 
-Public surface:
-    TemplatePathTraversalError      Raised by the fallback renderer on path-traversal.
-    render_cookiecutter_template    Drive the ``cookiecutter`` CLI, fall back on missing binary.
-    render_cookiecutter_fallback    Pure-Python fallback renderer (used by tests).
-    build_gitops_files              Compose infra + workload file dictionaries.
-    build_infra_files               Per-service infra manifests (Crossplane claims, etc.).
-    build_workload_files            Per-service workload manifests (Argo Rollouts, ESO).
+US-V4-08 (FR-V4-32..35) constraints:
+    * Every output file is template-driven — zero YAML literals live in this
+      module.  The templates mirror the rendered output directory structure
+      under ``templates/`` (e.g., ``templates/workload/overlays/rollout.yaml.j2``
+      renders to ``apps/<service>/workload/overlays/<env>/rollout.yaml``).
+    * Jinja2 runs with ``StrictUndefined`` so a missing render-context key
+      fails loudly at render time rather than producing a silently-empty
+      manifest.
+    * SLO thresholds and Argo Rollouts step strategies live in
+      ``profiles/slo.yaml`` and ``profiles/rollout.yaml`` keyed by
+      gold/silver/bronze.  No SLO numeric (success-rate, p99 latency, pause
+      duration) appears as a Python literal here.
 
 FR-V4-43: cookiecutter subprocess is bounded by ``SUBPROCESS_TIMEOUT_S``.
 FR-V4-44: the fallback renderer rejects path-traversal templates *before* any
@@ -22,8 +29,11 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
-from .cli import get_cluster, load_registry, workload_keyvault_id
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+from .cli import _yaml_load, get_cluster, load_registry, workload_keyvault_id
 from .jira_intake import ServiceRequest
 
 # FR-V4-43: cookiecutter rendering is CPU-only on local disk; 300s is the
@@ -38,11 +48,81 @@ PROD_SECONDARY_CLUSTER = "aks-prod-ne"
 PROD_WORKLOAD_KEYVAULT_WE = "kv-platform-prod-we"
 PROD_WORKLOAD_KEYVAULT_NE = "kv-platform-prod-ne"
 
+# Environments rendered into ``apps/<svc>/{infra,workload}/overlays/<env>/``.
+# Order is significant: dev → staging → prod (sync-wave 0 → 1 → 2 in ArgoCD).
+ENVIRONMENTS: tuple[str, ...] = ("dev", "staging", "prod")
+_NONPROD_ENVIRONMENTS: frozenset[str] = frozenset({"dev", "staging"})
+
+# Kinds in the workload base that need a per-overlay namespace patch.  The
+# overlay kustomization template iterates this list once instead of repeating
+# the patch block per kind.
+_WORKLOAD_NAMESPACED_KINDS: tuple[str, ...] = (
+    "ServiceAccount",
+    "Service",
+    "Ingress",
+    "ExternalSecret",
+)
+
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_TEMPLATES_DIR = _PACKAGE_DIR / "templates"
+_PROFILES_DIR = _PACKAGE_DIR / "profiles"
+
 
 class TemplatePathTraversalError(RuntimeError):
     """Raised by the cookiecutter fallback renderer when a rendered template
     path escapes the destination directory (FR-V4-44).
     """
+
+
+class ServiceTemplateError(RuntimeError):
+    """Raised when a profile is missing a required SLO class or key."""
+
+
+def _load_profile(name: str) -> dict[str, dict[str, Any]]:
+    path = _PROFILES_DIR / name
+    if not path.exists():
+        raise ServiceTemplateError(f"profile not found: {path}")
+    parsed = _yaml_load(path.read_text())
+    if not isinstance(parsed, dict):
+        raise ServiceTemplateError(f"profile root must be a mapping: {path}")
+    return parsed
+
+
+# Profiles loaded once at module import so render() does not pay disk cost per
+# call.  Both files MUST declare the same three SLO classes (gold/silver/bronze);
+# the check below catches drift between them at import time rather than at the
+# first miss.
+_SLO_PROFILE: dict[str, dict[str, Any]] = _load_profile("slo.yaml")
+_ROLLOUT_PROFILE: dict[str, dict[str, Any]] = _load_profile("rollout.yaml")
+
+_EXPECTED_SLO_CLASSES: frozenset[str] = frozenset({"gold", "silver", "bronze"})
+_missing_slo = _EXPECTED_SLO_CLASSES - _SLO_PROFILE.keys()
+_missing_rollout = _EXPECTED_SLO_CLASSES - _ROLLOUT_PROFILE.keys()
+if _missing_slo:
+    raise ServiceTemplateError(f"profiles/slo.yaml missing classes: {sorted(_missing_slo)}")
+if _missing_rollout:
+    raise ServiceTemplateError(f"profiles/rollout.yaml missing classes: {sorted(_missing_rollout)}")
+
+
+# Jinja2 environment shared across renders.  StrictUndefined ensures a missing
+# render-context key raises ``jinja2.UndefinedError`` instead of silently
+# substituting an empty string into a CRD field (FR-V4-33).
+_env: Environment = Environment(
+    loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+    undefined=StrictUndefined,
+    keep_trailing_newline=False,
+    autoescape=False,
+    trim_blocks=False,
+    lstrip_blocks=False,
+)
+
+
+def _render_template(template_path: str, context: dict[str, Any]) -> str:
+    template = _env.get_template(template_path)
+    # Strip leading/trailing whitespace introduced by Jinja2 control tags so
+    # the rendered output is byte-stable across template edits.  ``write_files``
+    # adds a single trailing newline at write time.
+    return template.render(**context).strip()
 
 
 def render_cookiecutter_template(template_dir: Path, destination: Path, context: dict[str, str]) -> Path:
@@ -132,543 +212,196 @@ def write_files(base_dir: Path, files: dict[str, str]) -> None:
         target.write_text(content.rstrip() + "\n")
 
 
-def build_gitops_files(req: ServiceRequest) -> dict[str, str]:
-    return {
-        **build_infra_files(req),
-        **build_workload_files(req),
+def _slo_data(slo_class: str) -> dict[str, Any]:
+    try:
+        return _SLO_PROFILE[slo_class]
+    except KeyError as exc:
+        raise ServiceTemplateError(f"unknown slo_class: {slo_class!r}") from exc
+
+
+def _rollout_data(slo_class: str) -> dict[str, Any]:
+    try:
+        return _ROLLOUT_PROFILE[slo_class]
+    except KeyError as exc:
+        raise ServiceTemplateError(f"unknown slo_class: {slo_class!r}") from exc
+
+
+def _infra_patch_targets(service: str, env: str) -> list[dict[str, Any]]:
+    """Patch entries consumed by templates/infra/overlays/kustomization.yaml.j2.
+
+    Each entry is a dict (instead of a tuple) so the template can reference
+    fields by name and StrictUndefined catches mis-spelled keys.
+    """
+    target = f"{service}-infra-{env}"
+    return [
+        {"kind": "Namespace", "name": "placeholder-infra", "value": target, "field": "name", "add_env_label": True},
+        {"kind": "SQLDatabase", "name": f"{service}-sql", "value": target, "field": "namespace", "add_env_label": False},
+        {"kind": "CosmosAccount", "name": f"{service}-cosmos", "value": target, "field": "namespace", "add_env_label": False},
+        {"kind": "ServiceBus", "name": f"{service}-sb", "value": target, "field": "namespace", "add_env_label": False},
+        {
+            "kind": "ConfigMap",
+            "name": f"{service}-namespace-vault-binding-reference",
+            "value": target,
+            "field": "namespace",
+            "add_env_label": False,
+        },
+    ]
+
+
+def render(
+    req: ServiceRequest,
+    *,
+    slo_class: str | None = None,
+    registry: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Render the full GitOps manifest set for *req* (FR-V4-32, FR-V4-34).
+
+    ``slo_class`` defaults to ``req.slo_class``; callers can override it to
+    re-render the same request under a different SLO class (kubeconform
+    fixture generation depends on this).  ``registry`` defaults to the
+    canonical cluster registry loaded by :func:`tools.service_seed.cli.load_registry`.
+    """
+    effective_slo = slo_class or req.slo_class
+    slo = _slo_data(effective_slo)
+    rollout = _rollout_data(effective_slo)
+    if registry is None:
+        registry = load_registry()
+
+    prod_primary = get_cluster(PROD_PRIMARY_CLUSTER, registry=registry)
+    prod_secondary = get_cluster(PROD_SECONDARY_CLUSTER, registry=registry)
+    common_ctx: dict[str, Any] = {
+        "service": req.service_slug,
+        "slo_class": effective_slo,
+        "slo": slo,
+        "rollout": rollout,
+        "primary_region": prod_primary.region,
+        "primary_resource_group": prod_primary.resource_group,
+        "secondary_region": prod_secondary.region,
+        "key_vault_we_id": workload_keyvault_id(
+            PROD_PRIMARY_CLUSTER, PROD_WORKLOAD_KEYVAULT_WE, registry=registry
+        ),
+        "key_vault_ne_id": workload_keyvault_id(
+            PROD_SECONDARY_CLUSTER, PROD_WORKLOAD_KEYVAULT_NE, registry=registry
+        ),
+        "nonprod_envs": _NONPROD_ENVIRONMENTS,
+        "workload_namespaced_kinds": _WORKLOAD_NAMESPACED_KINDS,
     }
+    service = req.service_slug
+    files: dict[str, str] = {}
+
+    # ---- Infra base -------------------------------------------------------
+    infra_base = [
+        ("kustomization.yaml", "infra/base/kustomization.yaml.j2"),
+        ("namespace.yaml", "infra/base/namespace.yaml.j2"),
+        ("xrc-sql.yaml", "infra/base/xrc-sql.yaml.j2"),
+        ("xrc-cosmos.yaml", "infra/base/xrc-cosmos.yaml.j2"),
+        ("xrc-sb.yaml", "infra/base/xrc-sb.yaml.j2"),
+        ("xrc-namespace-binding.yaml", "infra/base/xrc-namespace-binding.yaml.j2"),
+        ("namespace-rollout-policy.yaml", "infra/base/namespace-rollout-policy.yaml.j2"),
+    ]
+    for out_name, tpl in infra_base:
+        files[f"apps/{service}/infra/base/{out_name}"] = _render_template(tpl, common_ctx)
+
+    # ---- Infra overlays ---------------------------------------------------
+    for env in ENVIRONMENTS:
+        ctx = {**common_ctx, "env": env, "patch_targets": _infra_patch_targets(service, env)}
+        files[f"apps/{service}/infra/overlays/{env}/kustomization.yaml"] = _render_template(
+            "infra/overlays/kustomization.yaml.j2", ctx
+        )
+
+    # ---- Workload base ----------------------------------------------------
+    workload_base = [
+        ("kustomization.yaml", "workload/base/kustomization.yaml.j2"),
+        ("namespace.yaml", "workload/base/namespace.yaml.j2"),
+        ("serviceaccount.yaml", "workload/base/serviceaccount.yaml.j2"),
+        ("service.yaml", "workload/base/service.yaml.j2"),
+        ("ingress.yaml", "workload/base/ingress.yaml.j2"),
+        ("external-secrets.yaml", "workload/base/external-secrets.yaml.j2"),
+        ("analysis-template.yaml", "workload/base/analysis-template.yaml.j2"),
+    ]
+    for out_name, tpl in workload_base:
+        files[f"apps/{service}/workload/base/{out_name}"] = _render_template(tpl, common_ctx)
+
+    # ---- Workload overlays ------------------------------------------------
+    for env in ENVIRONMENTS:
+        namespace = f"{service}-{env}"
+        ctx = {**common_ctx, "env": env, "namespace": namespace, "image": f"acrplatformprod.azurecr.io/{service}:latest"}
+        files[f"apps/{service}/workload/overlays/{env}/kustomization.yaml"] = _render_template(
+            "workload/overlays/kustomization.yaml.j2", ctx
+        )
+        files[f"apps/{service}/workload/overlays/{env}/rollout.yaml"] = _render_template(
+            "workload/overlays/rollout.yaml.j2", ctx
+        )
+
+    return files
+
+
+# ---------------------------------------------------------------------------
+# Legacy entry points — preserved as thin wrappers around :func:`render` so the
+# v3-era callers and existing test suite continue to work without changes.
+# New code SHOULD call :func:`render` directly.
+# ---------------------------------------------------------------------------
+
+
+def build_gitops_files(req: ServiceRequest) -> dict[str, str]:
+    return render(req)
 
 
 def build_infra_files(req: ServiceRequest) -> dict[str, str]:
-    service = req.service_slug
-    slo = req.slo_class
-    namespace_rollout_composition = f"namespacerolloutpolicy-{slo}.platform.cityos.io"
-
-    # FR-V4-03: source per-cluster identity from the committed registry, never
-    # from hardcoded literals.  Adding a region = single PR to
-    # gitops/clusters/registry.yaml.
-    registry = load_registry()
-    prod_primary = get_cluster(PROD_PRIMARY_CLUSTER, registry=registry)
-    prod_secondary = get_cluster(PROD_SECONDARY_CLUSTER, registry=registry)
-    primary_region = prod_primary.region
-    primary_rg = prod_primary.resource_group
-    secondary_region = prod_secondary.region
-    kv_we_id = workload_keyvault_id(PROD_PRIMARY_CLUSTER, PROD_WORKLOAD_KEYVAULT_WE, registry=registry)
-    kv_ne_id = workload_keyvault_id(PROD_SECONDARY_CLUSTER, PROD_WORKLOAD_KEYVAULT_NE, registry=registry)
-
-    files = {
-        f"apps/{service}/infra/base/kustomization.yaml": "\n".join(
-            [
-                "apiVersion: kustomize.config.k8s.io/v1beta1",
-                "kind: Kustomization",
-                "resources:",
-                "  - namespace.yaml",
-                "  - xrc-sql.yaml",
-                "  - xrc-cosmos.yaml",
-                "  - xrc-sb.yaml",
-                "  - namespace-rollout-policy.yaml",
-            ]
-        ),
-        f"apps/{service}/infra/base/namespace.yaml": "\n".join(
-            [
-                "apiVersion: v1",
-                "kind: Namespace",
-                "metadata:",
-                "  name: placeholder-infra",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "0"',
-                "  labels:",
-                f"    app.kubernetes.io/part-of: {service}",
-                "    platform.ste.io/tier: infra",
-            ]
-        ),
-        f"apps/{service}/infra/base/xrc-sql.yaml": "\n".join(
-            [
-                "apiVersion: platform.cityos.io/v1alpha1",
-                "kind: SQLDatabase",
-                "metadata:",
-                f"  name: {service}-sql",
-                "  namespace: placeholder-infra",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "1"',
-                "spec:",
-                "  parameters:",
-                f"    region: {primary_region}",
-                f"    resourceGroupName: {primary_rg}",
-                f"    serverName: sql-{service}-prod",
-                f"    sloClass: {slo}",
-                f"    secretName: {service}-sql-conn",
-                f"    keyVaultWeId: {kv_we_id}",
-                f"    keyVaultNeId: {kv_ne_id}",
-            ]
-        ),
-        f"apps/{service}/infra/base/xrc-cosmos.yaml": "\n".join(
-            [
-                "apiVersion: platform.cityos.io/v1alpha1",
-                "kind: CosmosAccount",
-                "metadata:",
-                f"  name: {service}-cosmos",
-                "  namespace: placeholder-infra",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "1"',
-                "spec:",
-                "  parameters:",
-                f"    region: {primary_region}",
-                f"    resourceGroupName: {primary_rg}",
-                f"    primaryLocation: {primary_region}",
-                f"    secondaryLocation: {secondary_region}",
-                f"    sloClass: {slo}",
-                f"    secretName: {service}-cosmos-conn",
-                f"    keyVaultWeId: {kv_we_id}",
-                f"    keyVaultNeId: {kv_ne_id}",
-            ]
-        ),
-        f"apps/{service}/infra/base/xrc-sb.yaml": "\n".join(
-            [
-                "apiVersion: platform.cityos.io/v1alpha1",
-                "kind: ServiceBus",
-                "metadata:",
-                f"  name: {service}-sb",
-                "  namespace: placeholder-infra",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "1"',
-                "spec:",
-                "  parameters:",
-                f"    region: {primary_region}",
-                f"    location: {primary_region}",
-                f"    resourceGroupName: {primary_rg}",
-                f"    sloClass: {slo}",
-                f"    secretName: {service}-sb-conn",
-                f"    keyVaultWeId: {kv_we_id}",
-                f"    keyVaultNeId: {kv_ne_id}",
-            ]
-        ),
-        f"apps/{service}/infra/base/xrc-namespace-binding.yaml": "\n".join(
-            [
-                "# NamespaceVaultBinding claims are rendered automatically by namespace-vault-bindings-set",
-                "# from workload overlays. This stub keeps the expected scaffold file in the service repo",
-                "# without creating duplicate Crossplane claims after the GitOps PR is merged.",
-                "apiVersion: v1",
-                "kind: ConfigMap",
-                "metadata:",
-                f"  name: {service}-namespace-vault-binding-reference",
-                "  namespace: placeholder-infra",
-                "data:",
-                f"  serviceName: {service}",
-                f"  namespacePrefix: {service}",
-            ]
-        ),
-        f"apps/{service}/infra/base/namespace-rollout-policy.yaml": "\n".join(
-            [
-                "apiVersion: platform.cityos.io/v1alpha1",
-                "kind: NamespaceRolloutPolicy",
-                "metadata:",
-                f"  name: {service}-rollout-policy",
-                f"  namespace: {service}",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "5"',
-                "spec:",
-                "  compositionRef:",
-                f"    name: {namespace_rollout_composition}",
-                "  parameters:",
-                f"    namespace: {service}-prod",
-                f"    sloClass: {slo}",
-                "    prometheusAddress: http://prometheus-operated.monitoring.svc.cluster.local:9090",
-            ]
-        ),
-    }
-
-    for env in ("dev", "staging", "prod"):
-        files[f"apps/{service}/infra/overlays/{env}/kustomization.yaml"] = infra_overlay_kustomization(service, env)
-    return files
-
-
-def infra_overlay_kustomization(service: str, env: str) -> str:
-    patch_targets = [
-        ("Namespace", "placeholder-infra", f"{service}-infra-{env}", None),
-        ("SQLDatabase", f"{service}-sql", f"{service}-infra-{env}", "namespace"),
-        ("CosmosAccount", f"{service}-cosmos", f"{service}-infra-{env}", "namespace"),
-        ("ServiceBus", f"{service}-sb", f"{service}-infra-{env}", "namespace"),
-        ("ConfigMap", f"{service}-namespace-vault-binding-reference", f"{service}-infra-{env}", "namespace"),
-    ]
-    patches = [
-        "apiVersion: kustomize.config.k8s.io/v1beta1",
-        "kind: Kustomization",
-        "resources:",
-        "  - ../../base",
-        "patches:",
-    ]
-    patches.extend(
-        [
-            "  - target:",
-            f"      kind: {kind}",
-            f"      name: {name}",
-            "    patch: |-",
-            "      - op: replace",
-            f"        path: /metadata/{'name' if namespace_field is None else 'namespace'}",
-            f"        value: {target}",
-        ]
-        + (
-            []
-            if namespace_field is not None or kind != "Namespace"
-            else [
-                "      - op: add",
-                "        path: /metadata/labels/environment",
-                f"        value: {env}",
-            ]
-        )
-        for kind, name, target, namespace_field in patch_targets
-    )
-    flat = [patches[0], patches[1], patches[2], patches[3], patches[4]]
-    for block in patches[5:]:
-        if isinstance(block, list):
-            flat.extend(block)
-        else:
-            flat.append(block)
-    flat.extend(
-        [
-            "  - target:",
-            "      kind: NamespaceRolloutPolicy",
-            f"      name: {service}-rollout-policy",
-            "    patch: |-",
-            "      - op: replace",
-            f"        path: /metadata/namespace",
-            f"        value: {service}-infra-{env}",
-            "      - op: replace",
-            "        path: /spec/parameters/namespace",
-            f"        value: {service}-{env}",
-        ]
-    )
-    return "\n".join(flat)
+    files = render(req)
+    return {path: content for path, content in files.items() if "/infra/" in path}
 
 
 def build_workload_files(req: ServiceRequest) -> dict[str, str]:
-    service = req.service_slug
-    files = {
-        f"apps/{service}/workload/base/kustomization.yaml": workload_base_kustomization(req.slo_class),
-        f"apps/{service}/workload/base/namespace.yaml": "\n".join(
-            [
-                "apiVersion: v1",
-                "kind: Namespace",
-                "metadata:",
-                "  name: placeholder-workload",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "-1"',
-                "  labels:",
-                f"    app.kubernetes.io/part-of: {service}",
-                "    platform.ste.io/tier: workload",
-            ]
-        ),
-        f"apps/{service}/workload/base/serviceaccount.yaml": "\n".join(
-            [
-                "apiVersion: v1",
-                "kind: ServiceAccount",
-                "metadata:",
-                f"  name: {service}",
-                "  namespace: placeholder-workload",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "0"',
-                "  labels:",
-                f"    app.kubernetes.io/part-of: {service}",
-            ]
-        ),
-        f"apps/{service}/workload/base/service.yaml": "\n".join(
-            [
-                "apiVersion: v1",
-                "kind: Service",
-                "metadata:",
-                f"  name: {service}",
-                "  namespace: placeholder-workload",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "2"',
-                "spec:",
-                "  selector:",
-                f"    app.kubernetes.io/name: {service}",
-                "  ports:",
-                "    - name: http",
-                "      port: 80",
-                "      targetPort: http",
-            ]
-        ),
-        f"apps/{service}/workload/base/ingress.yaml": "\n".join(
-            [
-                "apiVersion: networking.k8s.io/v1",
-                "kind: Ingress",
-                "metadata:",
-                f"  name: {service}",
-                "  namespace: placeholder-workload",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "3"',
-                "spec:",
-                "  ingressClassName: nginx",
-                "  rules:",
-                "    - host: placeholder.example.internal",
-                "      http:",
-                "        paths:",
-                "          - path: /",
-                "            pathType: Prefix",
-                "            backend:",
-                "              service:",
-                f"                name: {service}",
-                "                port:",
-                "                  number: 80",
-            ]
-        ),
-        f"apps/{service}/workload/base/external-secrets.yaml": "\n".join(
-            [
-                "apiVersion: external-secrets.io/v1beta1",
-                "kind: ExternalSecret",
-                "metadata:",
-                f"  name: {service}-app-secrets",
-                "  namespace: placeholder-workload",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "1"',
-                "spec:",
-                "  refreshInterval: 1h",
-                "  secretStoreRef:",
-                "    kind: SecretStore",
-                "    name: azure-keyvault",
-                "  target:",
-                f"    name: {service}-app-secrets",
-                "  data:",
-                "    - secretKey: DATABASE_URL",
-                "      remoteRef:",
-                f"        key: {service}-sql-conn",
-                "    - secretKey: COSMOS_CONNECTION_STRING",
-                "      remoteRef:",
-                f"        key: {service}-cosmos-conn",
-                "    - secretKey: SERVICEBUS_CONNECTION_STRING",
-                "      remoteRef:",
-                f"        key: {service}-sb-conn",
-            ]
-        ),
-        f"apps/{service}/workload/base/analysis-template.yaml": analysis_template_yaml(req),
-    }
+    files = render(req)
+    return {path: content for path, content in files.items() if "/workload/" in path}
 
-    for env in ("dev", "staging", "prod"):
-        files[f"apps/{service}/workload/overlays/{env}/kustomization.yaml"] = workload_overlay_kustomization(service, req.slo_class, env)
-        files[f"apps/{service}/workload/overlays/{env}/rollout.yaml"] = rollout_yaml(req, env)
-    return files
+
+def infra_overlay_kustomization(service: str, env: str) -> str:
+    """Legacy helper — returns the rendered overlay kustomization for *service*
+    in environment *env*.  Used by callers that drove the v3-era YAML emitters
+    directly.  Routes through :func:`render` to keep the template the single
+    source of truth.
+    """
+    ctx = {
+        "service": service,
+        "env": env,
+        "patch_targets": _infra_patch_targets(service, env),
+    }
+    return _render_template("infra/overlays/kustomization.yaml.j2", ctx)
 
 
 def workload_base_kustomization(slo_class: str) -> str:
-    resources = [
-        "apiVersion: kustomize.config.k8s.io/v1beta1",
-        "kind: Kustomization",
-        "resources:",
-        "  - namespace.yaml",
-        "  - serviceaccount.yaml",
-        "  - service.yaml",
-        "  - ingress.yaml",
-        "  - external-secrets.yaml",
-    ]
-    if slo_class in {"gold", "silver"}:
-        resources.append("  - analysis-template.yaml")
-    return "\n".join(resources)
-
-
-def analysis_template_yaml(req: ServiceRequest) -> str:
-    service = req.service_slug
-    if req.slo_class == "gold":
-        metrics = [
-            "  metrics:",
-            "    - name: success-rate",
-            "      interval: 60s",
-            '      successCondition: "result[0] >= 0.99"',
-            "      provider:",
-            "        prometheus:",
-            "          address: http://prometheus-operated.monitoring.svc.cluster.local:9090",
-            f'          query: sum(rate(http_requests_total{{namespace="{service}-prod",status=~"2.."}}[5m])) / sum(rate(http_requests_total{{namespace="{service}-prod"}}[5m]))',
-            "    - name: p99-latency-ms",
-            "      interval: 60s",
-            '      successCondition: "result[0] <= 500"',
-            "      provider:",
-            "        prometheus:",
-            "          address: http://prometheus-operated.monitoring.svc.cluster.local:9090",
-            f'          query: histogram_quantile(0.99, sum(rate(http_request_duration_milliseconds_bucket{{namespace="{service}-prod"}}[5m])) by (le)) * 1000',
-        ]
-    elif req.slo_class == "silver":
-        metrics = [
-            "  metrics:",
-            "    - name: success-rate",
-            "      interval: 60s",
-            '      successCondition: "result[0] >= 0.99"',
-            "      provider:",
-            "        prometheus:",
-            "          address: http://prometheus-operated.monitoring.svc.cluster.local:9090",
-            f'          query: sum(rate(http_requests_total{{namespace="{service}-prod",status=~"2.."}}[5m])) / sum(rate(http_requests_total{{namespace="{service}-prod"}}[5m]))',
-        ]
-    else:
-        return "\n".join(
-            [
-                "# Bronze services use direct cutover and do not reference an AnalysisTemplate.",
-                "# This file is intentionally left out of the overlay resource graph.",
-            ]
-        )
-
-    return "\n".join(
-        [
-            "apiVersion: argoproj.io/v1alpha1",
-            "kind: AnalysisTemplate",
-            "metadata:",
-            f"  name: {service}-analysis",
-            "  namespace: placeholder-workload",
-            "spec:",
-            *metrics,
-        ]
-    )
+    ctx = {"slo": _slo_data(slo_class)}
+    return _render_template("workload/base/kustomization.yaml.j2", ctx)
 
 
 def workload_overlay_kustomization(service: str, slo_class: str, env: str) -> str:
     namespace = f"{service}-{env}"
-    lines = [
-        "apiVersion: kustomize.config.k8s.io/v1beta1",
-        "kind: Kustomization",
-        "resources:",
-        "  - ../../base",
-        "  - rollout.yaml",
-        "patches:",
-        "  - target:",
-        "      kind: Namespace",
-        "      name: placeholder-workload",
-        "    patch: |-",
-        "      - op: replace",
-        "        path: /metadata/name",
-        f"        value: {namespace}",
-        "      - op: add",
-        "        path: /metadata/labels/environment",
-        f"        value: {env}",
-    ]
-    for kind in ("ServiceAccount", "Service", "Ingress", "ExternalSecret"):
-        lines.extend(
-            [
-                "  - target:",
-                f"      kind: {kind}",
-                "    patch: |-",
-                "      - op: replace",
-                "        path: /metadata/namespace",
-                f"        value: {namespace}",
-            ]
-        )
-    if slo_class in {"gold", "silver"}:
-        lines.extend(
-            [
-                "  - target:",
-                "      kind: AnalysisTemplate",
-                "    patch: |-",
-                "      - op: replace",
-                "        path: /metadata/namespace",
-                f"        value: {namespace}",
-            ]
-        )
-    lines.extend(
-        [
-            "  - target:",
-            "      kind: Ingress",
-            "    patch: |-",
-            "      - op: replace",
-            "        path: /spec/rules/0/host",
-            f"        value: {namespace}.apps.internal",
-        ]
-    )
-    return "\n".join(lines)
+    ctx = {
+        "service": service,
+        "env": env,
+        "namespace": namespace,
+        "slo": _slo_data(slo_class),
+        "workload_namespaced_kinds": _WORKLOAD_NAMESPACED_KINDS,
+    }
+    return _render_template("workload/overlays/kustomization.yaml.j2", ctx)
+
+
+def analysis_template_yaml(req: ServiceRequest) -> str:
+    ctx = {"service": req.service_slug, "slo": _slo_data(req.slo_class)}
+    return _render_template("workload/base/analysis-template.yaml.j2", ctx)
 
 
 def rollout_yaml(req: ServiceRequest, env: str) -> str:
-    service = req.service_slug
-    namespace = f"{service}-{env}"
-    image = f"acrplatformprod.azurecr.io/{service}:latest"
-    if env in {"dev", "staging"}:
-        return "\n".join(
-            [
-                "apiVersion: apps/v1",
-                "kind: Deployment",
-                "metadata:",
-                f"  name: {service}",
-                f"  namespace: {namespace}",
-                "  annotations:",
-                '    argocd.argoproj.io/sync-wave: "4"',
-                "spec:",
-                "  replicas: 2",
-                "  selector:",
-                "    matchLabels:",
-                f"      app.kubernetes.io/name: {service}",
-                "  template:",
-                "    metadata:",
-                "      labels:",
-                f"        app.kubernetes.io/name: {service}",
-                "    spec:",
-                "      serviceAccountName: azure-keyvault-reader",
-                "      containers:",
-                f"        - name: {service}",
-                f"          image: {image}",
-                "          ports:",
-                "            - name: http",
-                "              containerPort: 8080",
-            ]
-        )
-
-    steps = {
-        "gold": ["setWeight: 5", "pause: {duration: 5m}", "setWeight: 25", "pause: {duration: 5m}", "setWeight: 50", "pause: {duration: 5m}", "setWeight: 100"],
-        "silver": ["setWeight: 25", "pause: {duration: 5m}", "setWeight: 100"],
-        "bronze": ["setWeight: 100"],
-    }[req.slo_class]
-    lines = [
-        "apiVersion: argoproj.io/v1alpha1",
-        "kind: Rollout",
-        "metadata:",
-        f"  name: {service}",
-        f"  namespace: {namespace}",
-        "  annotations:",
-        '    argocd.argoproj.io/sync-wave: "4"',
-        "spec:",
-        "  replicas: 3",
-        "  selector:",
-        "    matchLabels:",
-        f"      app.kubernetes.io/name: {service}",
-        "  workloadRef:",
-        "    apiVersion: apps/v1",
-        "    kind: Deployment",
-        f"    name: {service}-template",
-        "  strategy:",
-        "    canary:",
-    ]
-    if req.slo_class in {"gold", "silver"}:
-        lines.extend(
-            [
-                "      analysis:",
-                "        templates:",
-                f"          - templateName: {service}-analysis",
-            ]
-        )
-    lines.append("      steps:")
-    for step in steps:
-        lines.append(f"        - {step}")
-    lines.extend(
-        [
-            "---",
-            "apiVersion: apps/v1",
-            "kind: Deployment",
-            "metadata:",
-            f"  name: {service}-template",
-            f"  namespace: {namespace}",
-            "spec:",
-            "  replicas: 3",
-            "  selector:",
-            "    matchLabels:",
-            f"      app.kubernetes.io/name: {service}",
-            "  template:",
-            "    metadata:",
-            "      labels:",
-            f"        app.kubernetes.io/name: {service}",
-            "    spec:",
-            "      serviceAccountName: azure-keyvault-reader",
-            "      containers:",
-            f"        - name: {service}",
-            f"          image: {image}",
-            "          ports:",
-            "            - name: http",
-            "              containerPort: 8080",
-        ]
-    )
-    return "\n".join(lines)
+    namespace = f"{req.service_slug}-{env}"
+    ctx = {
+        "service": req.service_slug,
+        "env": env,
+        "namespace": namespace,
+        "image": f"acrplatformprod.azurecr.io/{req.service_slug}:latest",
+        "slo": _slo_data(req.slo_class),
+        "rollout": _rollout_data(req.slo_class),
+        "nonprod_envs": _NONPROD_ENVIRONMENTS,
+    }
+    return _render_template("workload/overlays/rollout.yaml.j2", ctx)

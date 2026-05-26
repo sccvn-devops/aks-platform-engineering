@@ -132,3 +132,17 @@ repos:
         language: system
         files: ^tools/service_seed/.*\.py$
         pass_filenames: false
+
+      # Jinja2 templates + SLO/rollout profile contract (US-V4-08, FR-V4-32..35).
+      # Asserts every emitted file is template-driven, StrictUndefined catches
+      # missing context keys, profile thresholds drive rendered output, and no
+      # SLO numeric literal lives in service_template.py.  Kubeconform schema
+      # validation runs as a separate CI step that downloads the kubeconform
+      # binary; the pre-commit form here is the contract suite only so local
+      # commits don't require the binary.
+      - id: validate-service-seed-templates
+        name: validate service_seed templates + SLO/rollout profiles
+        entry: python3 -m unittest tools.service_seed.tests.test_template_profiles tools.service_seed.tests.test_service_template
+        language: system
+        files: ^tools/service_seed/(templates/|profiles/|service_template\.py|tests/test_(template_profiles|service_template)\.py)
+        pass_filenames: false

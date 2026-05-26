@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - rollout.yaml
+patches:
+  - target:
+      kind: Namespace
+      name: placeholder-workload
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: {{ namespace }}
+      - op: add
+        path: /metadata/labels/environment
+        value: {{ env }}
+{%- for kind in workload_namespaced_kinds %}
+  - target:
+      kind: {{ kind }}
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: {{ namespace }}
+{%- endfor %}
+{%- if slo.has_analysis_template %}
+  - target:
+      kind: AnalysisTemplate
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: {{ namespace }}
+{%- endif %}
+  - target:
+      kind: Ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: {{ namespace }}.apps.internal

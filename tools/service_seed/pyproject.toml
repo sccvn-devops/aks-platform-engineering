@@ -21,6 +21,11 @@ dependencies = [
     # subset parser when it's absent.  Pin to a known-good major to avoid
     # silent breakage if the parser API shifts upstream.
     "PyYAML>=6.0,<7",
+    # Jinja2 is required at runtime (US-V4-08, FR-V4-32..35) for the
+    # template-driven YAML emitters in service_template.  StrictUndefined
+    # behavior + ``trim_blocks``/``lstrip_blocks`` semantics are stable across
+    # the 3.x line so the bound is pinned to the current major.
+    "Jinja2>=3.1,<4",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +60,11 @@ include = ["tests*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"tools.service_seed" = ["cookiecutter-service/**"]
+"tools.service_seed" = [
+    "cookiecutter-service/**",
+    "templates/**/*.j2",
+    "profiles/*.yaml",
+]
 
 [tool.mypy]
 strict = true
