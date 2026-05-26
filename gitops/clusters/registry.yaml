@@ -1,0 +1,146 @@
+# Cluster Topology Registry — single committed source of truth (FR-V4-01..04, ADR-031-v4)
+#
+# Consumed by:
+#   - Terraform: yamldecode(file("${path.module}/../gitops/clusters/registry.yaml")) in terraform/registry.tf
+#   - ArgoCD ApplicationSet locals: derived from this file (gitops/clusters/capz/aks-appset.yaml)
+#   - tools/service_seed/: tools/service_seed/cli.py registry loader (FR-V4-03)
+#
+# Validation:
+#   - Schema: gitops/clusters/registry.schema.json (JSON Schema draft-07)
+#   - Validator: scripts/validate-cluster-registry.py (pre-commit + CI; FR-V4-04)
+#
+# Adding a new cluster is one PR: add a top-level key here, run pre-commit, open PR.
+# Removing a cluster requires the catalogued teardown runbook; see ADR-031-v4 §Rollback.
+#
+# Field reference (every entry MUST carry all fields below):
+#   subscription_id  — Azure subscription ID (UUID). Per FR-V3-19, prod and non-prod live in separate subscriptions.
+#   region           — Azure region slug (lowercase, no spaces). Authoritative cluster region.
+#   region_abbrev    — Short region code used in DNS, ACR hostname, resource group naming (we | ne | wus).
+#   resource_group   — Azure Resource Group name owning the AKS cluster + its workload resources.
+#   acr_hostname     — Fully-qualified ACR login server (e.g., acrcityossharedwe.azurecr.io).
+#   aks_name         — Logical cluster key; matches the top-level YAML key by convention.
+#   mgmt_role        — Cluster's management plane role: active | standby | workload | seed (see ADR-004-v2, ADR-022).
+#   azs              — Availability zones for the default nodepool (list of strings; null/empty = single-AZ).
+#   sku_tier         — AKS SKU tier (Free | Standard | Premium). Production uses Premium per ADR-019.
+#   gitops_addons    — Enable_* flags consumed by the GitOps Bridge (drives ApplicationSet selector matching).
+#
+# IMPORTANT: subscription_id values are placeholders for the v4 catalogue. The live values are
+# injected at apply time from the terraform.tfvars + secret store (see ADR-030-v3). When the
+# placeholder differs from the live subscription, terraform plan reports a drift — that drift
+# is acceptable for the registry-driven catalogue check; treat the registry as the
+# *catalogue*, not the secret store. Live values still flow through OIDC + AKV at TF-time.
+
+mgmt-we:
+  subscription_id: "00000000-0000-0000-0000-000000000000"
+  region: westeurope
+  region_abbrev: we
+  resource_group: rg-platform-mgmt
+  acr_hostname: acrcityossharedwe.azurecr.io
+  aks_name: mgmt-we
+  mgmt_role: active
+  azs: []
+  sku_tier: Standard
+  gitops_addons:
+    enable_argocd: "true"
+    enable_kyverno: "true"
+    enable_external_secrets: "true"
+
+mgmt-ne:
+  subscription_id: "00000000-0000-0000-0000-000000000000"
+  region: northeurope
+  region_abbrev: ne
+  resource_group: rg-platform-mgmt
+  acr_hostname: acrcityossharedwe.azurecr.io
+  aks_name: mgmt-ne
+  mgmt_role: standby
+  azs: []
+  sku_tier: Standard
+  gitops_addons:
+    enable_argocd: "false"
+    enable_kyverno: "true"
+    enable_external_secrets: "true"
+
+aks-dev-we:
+  subscription_id: "00000000-0000-0000-0000-000000000000"
+  region: westeurope
+  region_abbrev: we
+  resource_group: rg-platform-mgmt
+  acr_hostname: acrcityossharedwe.azurecr.io
+  aks_name: aks-dev-we
+  mgmt_role: workload
+  azs:
+    - "1"
+  sku_tier: Standard
+  gitops_addons:
+    enable_argocd: "false"
+    enable_kyverno: "true"
+    enable_external_secrets: "true"
+
+aks-staging-we:
+  subscription_id: "00000000-0000-0000-0000-000000000000"
+  region: westeurope
+  region_abbrev: we
+  resource_group: rg-platform-mgmt
+  acr_hostname: acrcityossharedwe.azurecr.io
+  aks_name: aks-staging-we
+  mgmt_role: workload
+  azs:
+    - "1"
+    - "2"
+    - "3"
+  sku_tier: Standard
+  gitops_addons:
+    enable_argocd: "false"
+    enable_kyverno: "true"
+    enable_external_secrets: "true"
+
+aks-prod-we:
+  subscription_id: "00000000-0000-0000-0000-000000000000"
+  region: westeurope
+  region_abbrev: we
+  resource_group: rg-platform-prod
+  acr_hostname: acrcityossharedwe.azurecr.io
+  aks_name: aks-prod-we
+  mgmt_role: workload
+  azs:
+    - "1"
+    - "2"
+    - "3"
+  sku_tier: Premium
+  gitops_addons:
+    enable_argocd: "false"
+    enable_kyverno: "true"
+    enable_external_secrets: "true"
+
+aks-prod-ne:
+  subscription_id: "00000000-0000-0000-0000-000000000000"
+  region: northeurope
+  region_abbrev: ne
+  resource_group: rg-platform-prod
+  acr_hostname: acrcityossharedwe.azurecr.io
+  aks_name: aks-prod-ne
+  mgmt_role: workload
+  azs:
+    - "1"
+    - "2"
+    - "3"
+  sku_tier: Premium
+  gitops_addons:
+    enable_argocd: "false"
+    enable_kyverno: "true"
+    enable_external_secrets: "true"
+
+seed-wus:
+  subscription_id: "00000000-0000-0000-0000-000000000000"
+  region: westus2
+  region_abbrev: wus
+  resource_group: rg-platform-mgmt
+  acr_hostname: acrcityossharedwe.azurecr.io
+  aks_name: seed-wus
+  mgmt_role: seed
+  azs: []
+  sku_tier: Standard
+  gitops_addons:
+    enable_argocd: "false"
+    enable_kyverno: "true"
+    enable_external_secrets: "false"

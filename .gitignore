@@ -103,6 +103,14 @@ _docs/
 .serena
 .github/skills
 .github/agents
+.agents/
+.antigravitycli/
+.claude/
+.codegraph/
+.cursor/
+.mcp.json
+skills-lock.json
+
 # private scripts
 scripts/*
 !scripts/bootstrap-tfstate.sh
@@ -118,3 +126,26 @@ scripts/*
 !scripts/setup-gha-environments.sh
 !scripts/check-var-validation.py
 !scripts/validate-checkov-suppressions.py
+!scripts/validate-akv-null-expiry.py
+!scripts/validate-akv-catalogue.py
+!scripts/tls-history-purge-mirror.sh
+!scripts/verify-tls-history-clean.sh
+!scripts/validate-action-pins.py
+!scripts/validate-checkov-baseline.py
+!scripts/validate-tool-version-singleton.py
+!scripts/validate-cluster-registry.py
+!scripts/truncate-plan-output.py
+!scripts/validate-workflow-call-contract.py
+!scripts/validate-mgmt-plane-lock-runners.sh
+!scripts/validate-rendered-manifests.sh
+!scripts/validate-helm-release-secrets.py
+!scripts/tests/
+!scripts/tests/__init__.py
+!scripts/tests/test_truncate_plan_output.py
+!scripts/tests/test_validate_helm_release_secrets.py
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

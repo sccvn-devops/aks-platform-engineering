@@ -1,11 +1,17 @@
-# .pre-commit-config.yaml — canonical local hook runner (US-V3-10, US-V3-11, US-V3-18)
+# .pre-commit-config.yaml — canonical local hook runner (US-V3-10, US-V3-11, US-V3-18, US-V4-11)
 #
 # Hook set at v3 GA (ADR-025-v3, ADR-027-v3, FR-V3-14):
 #   terraform_fmt, terraform_validate, tflint, detect-private-key,
 #   end-of-file-fixer, trailing-whitespace, terraform_checkov
 #
-# Checkov is added here (US-V3-18) so local and CI runs produce identical
-# results from the same .checkov.yaml config (ADR-027-v3 decision #1).
+# Tool versions (FR-V4-45): terraform / tflint / checkov binaries are resolved
+# from .tool-versions via mise (https://mise.jdx.dev).  The pre-commit-terraform
+# `rev:` pins the *hook source repo* commit, not the underlying tool — bumping
+# pre-commit-terraform is independent of bumping terraform itself.
+# The tflint hook is a `local` hook (not the pre-commit hook from
+# terraform-linters/tflint) so that the tflint binary version stays declared
+# only in .tool-versions (validated by scripts/validate-tool-version-singleton.py).
+#
 # Additional hooks require an ADR per ADR-025-v3.
 #
 # Install: pre-commit install
@@ -22,8 +28,6 @@ repos:
       - id: terraform_validate
         args:
           - --args=-no-color
-        additional_dependencies:
-          - terraform>=1.5.0,<2.0.0
       # Checkov via pre-commit-terraform — reads .checkov.yaml so the same
       # config drives both local commits and CI (US-V3-18, ADR-027-v3).
       # Scope is terraform/ only; Dockerfile coverage is CI-only (no Dockerfile pre-commit hook).
@@ -31,13 +35,6 @@ repos:
         args:
           - --args=--config-file ../.checkov.yaml
         files: ^terraform/
-
-  - repo: https://github.com/terraform-linters/tflint
-    rev: v0.55.0
-    hooks:
-      - id: tflint
-        args:
-          - --config=.tflint.hcl
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -47,3 +44,118 @@ repos:
         exclude: '^(backstage/)'
       - id: trailing-whitespace
         exclude: '^(backstage/)'
+
+  - repo: local
+    hooks:
+      # tflint local hook — uses mise-resolved tflint binary so the version
+      # stays single-sourced in .tool-versions (FR-V4-45).  Install mise locally
+      # via `curl https://mise.run | sh && mise install`.
+      - id: tflint-local
+        name: tflint (from .tool-versions)
+        entry: bash -c 'cd terraform && tflint --init --config=../.tflint.hcl && tflint --config=../.tflint.hcl --format=compact --recursive'
+        language: system
+        files: ^terraform/.*\.tf$
+        pass_filenames: false
+
+      # Action-pin validator (FR-V4-46) — runs locally before push so SHA-pin
+      # drift never lands in a PR.
+      - id: validate-action-pins
+        name: validate GitHub Actions are SHA-pinned with tag comments
+        entry: python3 scripts/validate-action-pins.py
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: false
+
+      # Checkov baseline metadata validator (FR-V4-47).
+      - id: validate-checkov-baseline
+        name: validate .checkov.baseline metadata (rationale + owner + expiry)
+        entry: python3 scripts/validate-checkov-baseline.py
+        language: system
+        files: ^\.checkov\.baseline$
+        pass_filenames: false
+
+      # Tool-version singleton lint (FR-V4-45).
+      - id: validate-tool-version-singleton
+        name: validate .tool-versions is the single source of truth
+        entry: python3 scripts/validate-tool-version-singleton.py
+        language: system
+        files: ^(\.tool-versions|\.github/workflows/.*\.ya?ml|.*Dockerfile.*)$
+        pass_filenames: false
+
+      # Cluster topology registry schema validator (FR-V4-04, ADR-031-v4).
+      - id: validate-cluster-registry
+        name: validate gitops/clusters/registry.yaml against registry.schema.json
+        entry: python3 scripts/validate-cluster-registry.py
+        language: system
+        files: ^gitops/clusters/registry\.(yaml|schema\.json)$
+        pass_filenames: false
+
+      # Reusable workflow_call contract validator (FR-V4-10..14).
+      # Asserts every `uses: ./.github/workflows/...` jobcall passes only
+      # declared inputs/secrets and that required inputs are present.
+      - id: validate-workflow-call-contract
+        name: validate workflow_call inputs/secrets between top-level and reusable workflows
+        entry: python3 scripts/validate-workflow-call-contract.py
+        language: system
+        files: ^\.github/(workflows|actions)/.*\.(ya?ml)$
+        pass_filenames: false
+
+      # Workload-identity module contract validator (FR-V4-05..09).
+      # Asserts the workload_identity module enforces its invariants and that
+      # the 5 in-tree call sites consume the module.
+      - id: validate-workload-identity-module
+        name: validate workload_identity module contract + call sites
+        entry: python3 -m unittest tools.workload_identity_tests.test_module_contract
+        language: system
+        files: ^(terraform/modules/workload_identity/|terraform/(saas_token_rotator|velero|akv_sync_exporter|external_secrets|jenkins|acr)\.tf|tools/workload_identity_tests/.*\.py)$
+        pass_filenames: false
+
+      # Go binary lifecycle + per-binary runners (US-V4-06, FR-V4-23..26).
+      # Asserts each cmd/*/main.go in tools/mgmt-plane-lock is ≤40 lines,
+      # no signal.Notify / os/signal import remains in cmd/* (signal
+      # handling lives in internal/bootstrap.SignalContext), and the
+      # full go build/vet/test pipeline is clean.
+      - id: validate-mgmt-plane-lock-runners
+        name: validate mgmt-plane-lock per-binary runners + signal seam
+        entry: bash scripts/validate-mgmt-plane-lock-runners.sh
+        language: system
+        files: ^tools/mgmt-plane-lock/.*\.go$
+        pass_filenames: false
+
+      # Service-seed robustness validator (US-V4-10, FR-V4-43..44).
+      # Asserts every external call in seed_job.py declares an explicit
+      # timeout and that the cookiecutter fallback renderer rejects
+      # path-traversal templates before writing any file.
+      - id: validate-service-seed-robustness
+        name: validate service_seed timeouts + path-traversal guards
+        entry: python3 -m unittest tools.service_seed.tests.test_robustness tools.service_seed.tests.test_seed_job
+        language: system
+        files: ^tools/service_seed/.*\.py$
+        pass_filenames: false
+
+      # Helm-release secret-leak validator (US-V4-09, FR-V4-36..40).
+      # Asserts no helm_release.set { value = sensitive } shortcut exists in
+      # terraform/*.tf — the FR-V4-37 round-trip lint that keeps the in-tree
+      # call-site count at zero. Implemented as a Python validator (matches
+      # the in-tree convention; tflint plugins require Go build steps that
+      # the platform CI does not currently provision).
+      - id: validate-helm-release-secrets
+        name: validate helm_release does not pass sensitive values inline
+        entry: python3 scripts/validate-helm-release-secrets.py
+        language: system
+        files: ^terraform/.*\.tf$
+        pass_filenames: false
+
+      # Jinja2 templates + SLO/rollout profile contract (US-V4-08, FR-V4-32..35).
+      # Asserts every emitted file is template-driven, StrictUndefined catches
+      # missing context keys, profile thresholds drive rendered output, and no
+      # SLO numeric literal lives in service_template.py.  Kubeconform schema
+      # validation runs as a separate CI step that downloads the kubeconform
+      # binary; the pre-commit form here is the contract suite only so local
+      # commits don't require the binary.
+      - id: validate-service-seed-templates
+        name: validate service_seed templates + SLO/rollout profiles
+        entry: python3 -m unittest tools.service_seed.tests.test_template_profiles tools.service_seed.tests.test_service_template
+        language: system
+        files: ^tools/service_seed/(templates/|profiles/|service_template\.py|tests/test_(template_profiles|service_template)\.py)
+        pass_filenames: false

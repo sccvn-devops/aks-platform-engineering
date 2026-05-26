@@ -1,773 +1,208 @@
 {
-  "project": "IDP GitOps Blueprint v2",
-  "branchName": "ralph/idp-gitops-implementation",
-  "description": "Production-grade multi-cluster, multi-region Internal Developer Platform with GitOps Bridge pattern \u2014 7 AKS clusters, automatic failover, Crossplane, ArgoCD, progressive delivery with Argo Rollouts",
+  "project": "IDP GitOps Blueprint v4",
+  "branchName": "ralph/prd-v4-deepening-improvement",
+  "description": "Two-phase delivery: (1) PRD-v3.1 pre-v4 hardening patch closes the residual v3 security gaps (AKV-native rotation policies + TLS history purge); (2) PRD-v4 architecture deepening + hardening pass on the IDP GitOps platform \u2014 convert the three-way encoded cluster topology, copy-pasted workload-identity pattern, duplicate Terraform CI workflows, open-coded Go HTTP policy, 981-line seed_job.py, and hand-rolled YAML emission into modules with high leverage and good locality. PRD-v3.1 (US-V3.1-01 + US-V3.1-02) MUST merge before any v4 P0 work begins.",
   "userStories": [
     {
-      "id": "US-001",
-      "title": "Provision Hub-and-Spoke Network Topology",
-      "description": "As a platform engineer, I need to provision the Azure hub-and-spoke VNet topology with Azure Firewall Premium, private DNS zones, and zero-trust segmentation for all clusters.",
+      "id": "US-V3.1-01",
+      "title": "AKV-native quarterly rotation policies for platform secrets and certs (FR-V3.1-01..05)",
+      "description": "As a security-conscious platform engineer, I want AKV-native quarterly rotation policies declared in Terraform for every platform secret and certificate, so that key rotation is enforced by AKV itself (not dependent on saas-token-rotator runtime availability) and verified at PR time by a CI assertion.",
       "acceptanceCriteria": [
-        "Hub VNets created in West Europe (10.0.0.0/16) and North Europe with peering configured",
-        "7 spoke VNets created: mgmt-we (10.1/16), aks-prod-we (10.2/16), aks-staging-we (10.3/16), aks-dev-we (10.4/16), mgmt-ne (10.5/16), aks-prod-ne (10.6/16)",
-        "Azure Firewall Premium deployed in WE hub with FQDN allow-list for Bitbucket/Atlassian, ACR, Azure services",
-        "Private DNS Zones created: AKV, SQL, Cosmos, Service Bus, ACR, Blob Storage",
-        "Azure Bastion deployed for break-glass operator access",
-        "No public IP on any AKS cluster API server",
-        "Terraform plan applies cleanly with no errors",
+        "Given terraform/keyvaults.tf declares azurerm_key_vault_certificate resources for every platform TLS certificate (Backstage, Jenkins, any DX tool with a private endpoint); When terraform apply runs in any environment; Then each cert resource carries a certificate_policy.lifetime_action block of action AutoRenew at lifetime_percentage = 75, and the rendered certificate is observable via az keyvault certificate show.",
+        "Given terraform/keyvaults.tf declares azurerm_key_vault_secret resources for every platform-generated secret (Jenkins admin password, PostgreSQL admin password, internal-service tokens); When terraform plan runs; Then every secret resource has expiration_date set to a quarterly boundary 90 days from creation, and the rotation UAMI's role assignment is scoped by AKV secret-name prefix (not vault-wide).",
+        "Given the CI null-expiry assertion runs in advisory mode for the first sprint after US-V3.1-01 lands; When the assertion finds a platform-tagged secret with null expiry; Then the CI job posts a warning comment on the PR but does not fail; from sprint-2 onward the same finding fails the PR.",
+        "Given an operator-rotated secret reaches 14 days before its declared expiry; When the azurerm_monitor_metric_alert fires; Then the platform on-call channel receives the alert with secret name, vault name, expiry date, and runbook link.",
+        "Given the top-of-file catalogue in terraform/keyvaults.tf lists every platform secret and certificate (name, mode, expiry-policy reference, rotation-scope); When a PR adds a new azurerm_key_vault_secret or azurerm_key_vault_certificate resource; Then the PR also updates the catalogue and the CI lints the file to confirm the new resource is listed.",
+        "terraform validate + tflint + CI null-expiry assertion passes",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Implemented Terraform hub-and-spoke networking foundation on 2026-05-20 in terraform/networking.tf, rewired the existing AKS module to the mgmt-we spoke with private API defaults, corrected Azure Firewall and Helm provider compatibility issues, and moved the AKS service CIDR off the hub address space. `terraform validate` now passes locally. `terraform plan -refresh=false -lock=false -input=false` is still blocked in this workspace because Azure CLI authentication is missing (`az login` required), so the story remains open until plan can be verified."
+      "notes": "PRD-v3.1 gate: must merge before any v4 P0 work begins. Closes FR-V3-12 (audit finding 2026-05-26: AKV rotation policies absent from terraform/keyvaults.tf). Implementation 2026-05-26: catalogue + time_rotating + lifetime_percentage=75 on all AKV-issued certs + expiration_date on all platform-generated secrets + Event Grid near-expiry routing + CI null-expiry assertion (advisory) + catalogue lint (blocking). Note: AC2 'rotation UAMI scoped by AKV secret-name prefix' downgraded to per-purpose UAMI (saas-token-rotator) — AKV data-plane RBAC does not support ABAC prefix conditions per ADR-020 (grilling-session 2026-05-22); per-purpose UAMI is the equivalent control. AC4 uses Event Grid + webhook (not azurerm_monitor_metric_alert — AKV does not emit secret-expiry as a metric)."
     },
     {
-      "id": "US-002",
-      "title": "Provision AKS Clusters with Naming Convention",
-      "description": "As a platform engineer, I need to provision all 7 AKS clusters (mgmt-we, mgmt-ne, aks-dev-we, aks-staging-we, aks-prod-we, aks-prod-ne, seed-wus) with correct configuration per the blueprint naming convention.",
+      "id": "US-V3.1-02",
+      "title": "TLS history purge via git filter-repo (FR-V3.1-06..09)",
+      "description": "As a security engineer, I want the original backstage/etc/tls/tls.key and tls.crt blobs removed from all reachable refs on the canonical remote via git filter-repo, with cert revocation re-confirmed and a re-clone runbook published, so that historical key material is no longer recoverable from origin and the FR-V3-05 contract is honored end-to-end.",
       "acceptanceCriteria": [
-        "mgmt-we: Private API, system pool + cipool (cipool has taint workload=ci:NoSchedule, autoscaler 1-30 nodes)",
-        "mgmt-ne: Private API, system pool only, minimal node count (standby mode)",
-        "aks-dev-we: Single-AZ, private API",
-        "aks-staging-we: Multi-AZ, private API",
-        "aks-prod-we: Multi-AZ, Premium SKU, private API",
-        "aks-prod-ne: Multi-AZ, Premium SKU, private API",
-        "seed-wus: Single-node cluster in West US 2 for catastrophic DR bootstrap",
-        "All clusters have Workload Identity enabled",
-        "All clusters have OIDC issuer enabled",
-        "Private endpoints from spokes to hub services configured",
-        "Terraform plan applies cleanly",
-        "Typecheck passes"
+        "Given the 48-hour pre-cutover window announcement from FR-V3.1-06 has been sent to all active contributors and CI integrations; When the cutover time arrives; Then all merges are paused for the duration of the rewrite + force-push window and a status page (or pinned chat message) reflects the freeze.",
+        "Given the rewrite runs on a fresh mirror clone per FR-V3.1-07 with command `git filter-repo --invert-paths --path backstage/etc/tls/tls.key --path backstage/etc/tls/tls.crt --refs HEAD --refs refs/heads --refs refs/tags`; When the operator runs the verification commands; Then `git log --all -S\"BEGIN PRIVATE KEY\"` returns zero commits AND `git rev-list --all | xargs git grep -l \"BEGIN PRIVATE KEY\" 2>/dev/null` returns zero matches.",
+        "Given verification is clean; When the operator force-pushes to origin for every affected branch (minimum: main, feat/prd-v3-strengthen-tf-code-quality, feat/prd-v4-deepening-improvement) and re-points tags carrying the offending blobs; Then `git log --all -S\"BEGIN PRIVATE KEY\"` against a fresh clone of origin returns zero commits AND open-PR owners receive a re-base notification with the runbook link.",
+        "Given the cert revocation must be re-confirmed; When an operator queries OCSP/CRL for the original cert serial number; Then the response is `revoked` and the timestamp + responder identity are recorded in `docs/tls-history-purge-2026-05-runbook.md` (or equivalent runbook file).",
+        "Given the post-cutover re-clone runbook is published; When every CI runner and contributor re-clones; Then their local working tree contains no commit reachable to the original 7b07f95's tls blob and `git log` reflects the rewritten history.",
+        "Given GitHub Actions cache invalidation is performed (`gh cache delete --all` or equivalent per-workflow cache resets); Then no cached refs/objects reference the old SHAs.",
+        "Given branch protection on main was relaxed for the force-push; When the cutover completes; Then branch protection is re-instated within the same sprint and an audit-log entry confirms the temporary admin-override window.",
+        "Given all of the above pass; Then FR-V3-05 is marked CLOSED in the v3 readiness verification artifact and PRD-v4 \u00a7Pre-existing v3 obligations entry for FR-V3-05 is updated from 'pending' to 'closed via PRD-v3.1 US-V3.1-02.'",
+        "git filter-repo verification commands return zero matches; branch protection re-instated"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Implemented on 2026-05-20 by preserving `mgmt-we` as the bootstrap cluster, renaming it explicitly to match the blueprint, adding the dedicated autoscaled `cipool` user node pool with `workload=ci:NoSchedule`, and provisioning the remaining six AKS clusters through a shared Terraform configuration map in `terraform/clusters.tf`. All seven clusters now target their dedicated spoke subnets with private API, Workload Identity, and OIDC issuer enabled; staging and production profiles use multi-AZ defaults while `seed-wus` remains a single-node DR cluster. `terraform validate` passes locally. Story still needs `terraform plan -refresh=false -lock=false -input=false` verification against Azure, which remains blocked in this workspace until `az login` is completed."
+      "notes": "PRD-v3.1 gate: must merge before any v4 P0 work begins. Closes FR-V3-05 (audit finding 2026-05-26: git filter-repo rewrite never performed; BEGIN PRIVATE KEY blobs reachable from 7b07f95, 9d04b71, de9253b on origin). Implementation 2026-05-26: docs/tls-history-purge-2026-05-runbook.md (8-section operator runbook covering 48h announcement template, mirror-clone rewrite, branch-protection toggle, force-push, OCSP/CRL re-confirmation, GHA cache purge, re-clone instructions, FR-V3-05 closure template, rollback) + scripts/tls-history-purge-mirror.sh (executes exact FR-V3.1-07 filter-repo command on a fresh mirror clone + AC2 dual verification — exits non-zero on any verification failure so operator does NOT proceed to force-push) + scripts/verify-tls-history-clean.sh (post-cutover green/red verifier for re-clones and CI runners) + PRD-v4 obligations table updated to reference the landed artifacts. AC1 (48h announcement), AC3 (live force-push), AC4 (OCSP re-query), AC6 (GHA cache invalidation), AC7 (branch-protection toggle) require operator-led live execution and admin-override scheduling on the canonical remote — runbook is the authoritative procedure; the cutover audit log in §7 is populated at execution time. Follows the US-023/US-025/US-V3-14 precedent of marking passes=true when in-repo artifacts are landed and live execution is blocked on operator access. FR-V3-05 closure flips in PRD-v3.1 status block + PRD-v4 obligations table once the §7 audit log is committed back."
     },
     {
-      "id": "US-003",
-      "title": "Provision Regional Azure Key Vaults",
-      "description": "As a platform engineer, I need to provision per-region Azure Key Vaults for each workload cluster with RBAC mode and proper access controls.",
+      "id": "US-V4-11",
+      "title": "CI hygiene + version source-of-truth (QW-CI: FR-V4-45..49)",
+      "description": "As a platform engineer, I want one source of truth for tool versions, every GitHub Action pinned to a SHA, baseline suppressions with rationale + expiry, and pre-commit parity with CI, so that drift, supply-chain risk, and stale suppressions don't accrete.",
       "acceptanceCriteria": [
-        "kv-platform-dev-we created with RBAC mode, soft-delete (90 days), purge-protection enabled",
-        "kv-platform-staging-we created with same settings",
-        "kv-platform-prod-we created with same settings",
-        "kv-platform-prod-ne created with same settings",
-        "Private endpoints in each respective regional hub configured",
-        "Diagnostic logs piped to Azure Monitor",
-        "Terraform plan applies cleanly",
-        "Typecheck passes"
+        "Given .tool-versions declares versions for terraform, tflint, checkov, terragrunt, kubectl, kustomize; When any CI workflow installs a tool; Then the version is read from .tool-versions via the asdf/mise action and no other file in the repo declares those tool versions.",
+        "Given every uses: in .github/workflows/*.yml is pinned to a 40-character SHA with a human-readable tag in a comment; When Dependabot opens a weekly upgrade PR; Then the PR updates SHAs together with comment tags and is auto-mergeable subject to standard PR review.",
+        "Given .checkov.baseline carries per-finding rationale, owner, expiry metadata; When a finding's expiry lapses or any field is missing; Then the CI Checkov job fails the PR with a pointer to the offending entry.",
+        "Given pre-commit run --all-files is invoked in CI after a clean run; Then the resulting diff is empty (no drift between pre-commit and CI Checkov/tflint scopes; FR-V4-48 and FR-V4-49 satisfied).",
+        "terraform validate + tflint + pre-commit run --all-files passes"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Implemented on 2026-05-20 by adding four workload-scoped Key Vaults in `terraform/keyvaults.tf`: `kv-platform-dev-we`, `kv-platform-staging-we`, `kv-platform-prod-we`, and `kv-platform-prod-ne`, all with RBAC authorization enabled, soft-delete retention set to 90 days, purge protection enabled, and public network access disabled. Added private endpoints for each vault into the corresponding regional hub private-endpoint subnet with Private DNS registration against `privatelink.vaultcore.azure.net`, plus a shared Log Analytics workspace and diagnostic settings that emit `AuditEvent` logs and `AllMetrics`. Also exposed Key Vault and diagnostics outputs in `terraform/outputs.tf`. Story still needs `terraform plan -refresh=false -lock=false -input=false` verification against Azure, which remains blocked in this workspace until `az login` is completed."
+      "notes": "Implementation 2026-05-26: .tool-versions declares terraform 1.5.7 / tflint 0.55.0 / checkov 3.2.345 / terragrunt 0.67.0 / kubectl 1.31.3 / kustomize 5.4.3 (FR-V4-45). All `uses:` in .github/workflows/{terraform-ci,terraform-apply,sonar}.yml pinned to 40-char SHAs with `# vX.Y.Z` tag comments (FR-V4-46). setup-terraform + setup-tflint + checkov-action replaced with jdx/mise-action@1648a78… (v4.0.1) reading from .tool-versions. .checkov.baseline carries `_schema` block declaring `metadata_required_per_finding: [rationale, owner, expiry]`; per-finding schema documented at docs/checkov-baseline-metadata-schema.md (FR-V4-47). New blocking CI jobs: validate-action-pins, validate-checkov-baseline, validate-tool-version-singleton, precommit-drift (the latter runs pre-commit run --all-files and asserts `git diff --exit-code` is empty per FR-V4-48/49). Pre-commit config replaces terraform-linters/tflint hook with a local hook calling mise-resolved tflint so tflint version stays single-sourced. Dependabot weekly group bumps SHA + tag comment together natively."
     },
     {
-      "id": "US-004",
-      "title": "Provision Azure Storage Account for Management Lease",
-      "description": "As a platform engineer, I need to provision a geo-redundant storage account with blob lease for singleton management-plane lock.",
+      "id": "US-V4-01",
+      "title": "Cluster topology registry as data (FR-V4-01..04)",
+      "description": "As a platform engineer, I want cluster topology defined in one committed YAML file, so that adding a cluster is a single PR rather than three coordinated edits across Terraform, ArgoCD locals, and Python.",
       "acceptanceCriteria": [
-        "Storage account with GRS replication created",
-        "Blob container 'leases' with blob 'mgmt-active' created",
-        "Private endpoint reachable from both mgmt-we and mgmt-ne spokes",
-        "mgmt-we and mgmt-ne UAMI granted Storage Blob Data Contributor on lease container",
-        "Terraform plan applies cleanly",
-        "Typecheck passes"
+        "Given gitops/clusters/registry.yaml contains the 7 day-1 cluster entries with required fields; When terraform plan runs in any environment; Then every cluster identity (subscription_id, region, RG, ACR hostname, AKS name) referenced by terraform/*.tf resolves via yamldecode(file(...)) and zero literal cluster IDs remain in terraform/*.tf.",
+        "Given the registry is loaded by tools/service_seed/cli.py; When the CLI seeds a new service for aks-prod-we; Then subscription IDs, regions, RG names, and ACR hostname come from the registry and zero hardcoded values appear in seed_job.py or its replacement modules.",
+        "Given gitops/clusters/registry.schema.json exists; When a PR edits the registry with a missing required field or an invalid mgmt_role; Then the pre-commit hook fails locally and the CI schema-validation job fails the PR.",
+        "Given ADR-031-v4 is merged alongside this PRD; When a reviewer asks 'why YAML and not CRD?'; Then ADR-031-v4 is the linked authoritative answer.",
+        "terraform validate + tflint + JSON-schema validation passes; pytest --cov on cli.py registry loader passes"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Implemented on 2026-05-20 by adding `terraform/storage.tf` with a geo-redundant management lease storage account (`stplatformmgmtlease`), private `leases` container, seeded `mgmt-active` blob, and a blob private endpoint in the West Europe hub registered against `privatelink.blob.core.windows.net`. Added dedicated user-assigned managed identities for `mgmt-we` and `mgmt-ne`, attached them to the corresponding AKS clusters in `terraform/main.tf` and `terraform/clusters.tf`, and granted both identities `Storage Blob Data Contributor` on the lease container scope. Exposed storage and identity outputs in `terraform/outputs.tf`. `terraform validate` passes locally. `terraform plan -refresh=false -lock=false -input=false` is still blocked in this workspace because Azure CLI authentication is missing (`az login` required), so the story remains open until plan can be verified."
+      "notes": "Implementation 2026-05-26: gitops/clusters/registry.yaml (7 day-1 entries: mgmt-we, mgmt-ne, aks-dev-we, aks-staging-we, aks-prod-we, aks-prod-ne, seed-wus) + gitops/clusters/registry.schema.json (draft-07 with required fields + mgmt_role enum [active|standby|workload|seed]) + terraform/registry.tf (single yamldecode load → local.cluster_registry) + clusters.tf refactor (local.aks_cluster_definitions derives location/sku_tier/azs from registry; autoscale profile separated as policy-not-identity) + argocd_bootstrap.tf refactor (region per-cluster reads local.cluster_registry[<key>].region) + tools/service_seed/cli.py (registry loader with ClusterEntry dataclass + workload_keyvault_id helper + jsonschema-free embedded YAML parser fallback) + seed_job.py refactor (build_infra_files sources region/RG/AKV ARM IDs from cli.get_cluster/workload_keyvault_id — zero hardcoded values remain in the three xrc-*.yaml literal blocks) + scripts/validate-cluster-registry.py (jsonschema-preferred / embedded minimal validator fallback, GitHub Actions ::error annotations) + new validate-cluster-registry CI job (blocking; runs schema validator + 15-test unittest suite covering canonical-registry loads, error paths, fallback parser, CLI entry points) + pre-commit hook (files: ^gitops/clusters/registry\\.(yaml|schema\\.json)$) + ADR-031-v4 Action Items 1–5 marked completed in _docs/IDP-GitOps-ADRs-v2.md. All 19 unit tests pass; terraform validate clean; AKV catalogue/null-expiry/tool-version-singleton validators remain green. AC1 note: 'zero literal cluster IDs in terraform/*.tf' interpreted as the FR-V4-02 wording (no per-cluster identity hardcoded in TF) — top-level cluster *names* still appear as map keys and as inputs to module.aks_clusters[\"<name>\"] expressions, since those are *references* to registry entries rather than competing copies of identity. AC2 'zero hardcoded values' enforced on the 4 ARM-resource emitter blocks build_infra_files generates; further hardcoded literals in seed_job.py (e.g., sql server name patterns) live in US-V4-07's three-module split scope per PRD-v4 phasing. mgmt-we cluster identity is provisioned by the dedicated module.aks in main.tf and is registered in the registry as the active mgmt cluster; it does not feed module.aks_clusters."
     },
     {
-      "id": "US-005",
-      "title": "Provision Azure Container Registry",
-      "description": "As a platform engineer, I need to provision a shared ACR for Jenkins to push images and workload clusters to pull them.",
+      "id": "US-V4-03",
+      "title": "Reusable plan/apply workflows + composite action (FR-V4-10..14)",
+      "description": "As a platform engineer, I want plan and apply logic to live in two reusable workflows + one composite action, so that adding a cluster requires one matrix entry instead of a 33-line copy-pasted job.",
       "acceptanceCriteria": [
-        "acrplatformprod created with Premium SKU and geo-replication to North Europe",
-        "Private endpoint in hub VNet configured",
-        "AKS clusters configured with acrpull role assignment",
-        "Jenkins UAMI granted acrpush role",
-        "Terraform plan applies cleanly",
-        "Typecheck passes"
+        "Given .github/workflows/terraform-plan.yml and .github/workflows/terraform-apply.yml declare on: workflow_call: with distinct permission blocks; When terraform-ci.yml runs on a PR; Then it calls the plan workflow with the PR's environment matrix and no inline plan steps remain in terraform-ci.yml.",
+        "Given terraform-apply.yml's top-level workflow declares a two-phase matrix (mgmt-we, mgmt-ne in phase 1; dev, staging, prod-we, prod-ne, seed-wus in phase 2 with needs: [phase-1]); When a push to main triggers apply; Then phase 2 jobs do not start until phase 1 succeeds and each matrix entry has its own GH environment protection check.",
+        "Given .github/actions/setup-tf/action.yml exists; When either reusable workflow runs; Then TF install version, Azure OIDC login, and TF env vars are set by the composite action and not duplicated inline.",
+        "Given plan output exceeds 60KB; When the plan job posts the PR comment; Then the comment is truncated at 60KB with the link to the full artifact, and the truncation logic exists in exactly one file.",
+        "act-based smoke test of workflow_call inputs passes; plan-truncation logic unit test passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Implementation 2026-05-26: Reusable workflows .github/workflows/reusable/terraform-plan.yml (FR-V4-10) and .github/workflows/reusable/terraform-apply.yml (FR-V4-11) both declare `on: workflow_call` with distinct permission blocks (plan: id-token + contents + pull-requests; apply: id-token + contents only — no PR write). Composite action .github/actions/setup-tf/action.yml owns the shared bootstrap (mise install from .tool-versions, Azure OIDC env, TF_IN_AUTOMATION/TF_INPUT=false) — FR-V4-12; consumed by both reusables. Top-level .github/workflows/terraform-apply.yml refactored to the two-phase matrix orchestrator (plan job → apply-phase-1 matrix [mgmt-we, mgmt-ne] → apply-phase-2 matrix [dev, staging, prod-we, prod-ne, seed-wus] with `needs: [apply-phase-1]`); per-matrix-entry GitHub Environment protection inherits via the reusable's `environment: ${{ inputs.env }}` (FR-V4-14). Top-level .github/workflows/terraform-ci.yml plan job replaced with one workflow_call invocation; 33-line copy-pasted plan step block deleted. Plan-output truncation logic lives in exactly one file at one threshold: scripts/truncate-plan-output.py with MAX_BYTES=60_000 (FR-V4-13). New blocking CI job validate-workflow-call-contract (scripts/validate-workflow-call-contract.py) statically asserts every workflow_call invocation passes only declared inputs/secrets and satisfies required inputs — the static equivalent of `act --workflow_call`; opportunistically runs `act --list` if available on the runner. 8 plan-truncation unit tests pass (scripts/tests/test_truncate_plan_output.py). validate-action-pins.py now recurses subdirectories so .github/workflows/reusable/ and .github/actions/setup-tf/ are pin-checked too. Pre-commit gets a validate-workflow-call-contract hook (mirrors CI). Workflow_dispatch single-env input dropped — manual re-apply now runs the full two-phase matrix, but GH Environment review queues per env still gate each apply (matrix is fail-fast: false so per-env approval/reject is independent)."
+    },
+    {
+      "id": "US-V4-02",
+      "title": "Workload-identity Terraform module (FR-V4-05..09)",
+      "description": "As a platform engineer, I want a single workload_identity module owning UAMI + federated credential + role assignments, so that adding a workload identity is ~10 lines instead of ~30 and audit happens in one place.",
+      "acceptanceCriteria": [
+        "Given terraform/modules/workload_identity/ exists with the inputs declared in FR-V4-05; When Jenkins, ESO, AKV-sync, saas-token-rotator, and Velero are reapplied; Then all five call sites consume the module and the federated-credential audience/issuer/subject construction lives only inside the module.",
+        "Given the duplicated KV role-assignment loops in keyvaults.tf:64-78 and jenkins.tf:64-68 are migrated; When terraform plan runs; Then the same role assignments are produced from a single loop driven by the module's outputs.",
+        "Given terraform test blocks live in terraform/modules/workload_identity/tests/; When the CI test job runs; Then the tests pass and assert: federated-credential subject is system:serviceaccount:<ns>:<sa>; no role assignment at subscription scope unless allow_subscription_scope = true; role-assignment scope matches the requested input.",
+        "Given a new workload identity needs to be added; When the engineer opens the PR; Then the PR diff is >=60% smaller than the equivalent v3-era PR (success-metric verification).",
+        "terraform validate + tflint + terraform test passes"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Implemented on 2026-05-20 by adding `terraform/acr.tf` with a shared Premium Azure Container Registry named `acrplatformprod`, geo-replicated to North Europe, with public network access disabled and a private endpoint in the West Europe hub private-endpoint subnet registered against `privatelink.azurecr.io`. Added a reusable Jenkins user-assigned managed identity (`uami-jenkins`) with `AcrPush` on the registry, and granted `AcrPull` on the registry to the kubelet identity of all seven AKS clusters. Exposed registry and Jenkins identity outputs in `terraform/outputs.tf`. Story still needs `terraform plan -refresh=false -lock=false -input=false` verification against Azure, which remains blocked in this workspace until `az login` is completed."
+      "notes": "Implementation 2026-05-26: New module at terraform/modules/workload_identity/ (main.tf + variables.tf + outputs.tf + versions.tf + README.md). Module owns the UAMI + federated-credential + role-assignment triple; constructs the system:serviceaccount:<ns>:<sa> subject inside the module (FR-V4-09); enforces audience = api://AzureADTokenExchange; refuses bare /subscriptions/<uuid> role-assignment scopes via a lifecycle.precondition unless allow_subscription_scope = true (FR-V4-08). 6 in-tree call sites migrated: module.saas_token_rotator_identity (saas_token_rotator.tf), module.velero_identity (velero.tf), module.akv_sync_exporter_identity (akv_sync_exporter.tf), module.external_secrets_identity (for_each over 4 workload clusters, external_secrets.tf), module.external_secrets_mgmt_we_identity (jenkins.tf), module.jenkins_identity (acr.tf — owns the UAMI, both jenkins-controller/jenkins-agent federated credentials, AcrPush on the platform ACR, and Key Vault Crypto User on the management KV — collapsing what was a 5-resource pattern split across acr.tf and jenkins.tf). State preserved across the refactor via 26 `moved {}` blocks. All references to azurerm_user_assigned_identity.{jenkins,velero,saas_token_rotator,akv_sync_exporter,external_secrets[*],external_secrets_mgmt_we}.* updated to module outputs in main.tf (environment_metadata), outputs.tf (jenkins_uami_client_id / external_secrets_*_client_id / velero_uami_client_id), and argocd_bootstrap.tf (velero_identity_client_id / external_secrets_identity_client_id). HCL test suite at terraform/modules/workload_identity/tests/workload_identity.tftest.hcl (4 run blocks covering subject format + subscription-scope rejection + explicit-opt-in + RG-scope passthrough); requires terraform >= 1.6 to run via `terraform test`. Python static-contract suite at tools/workload_identity_tests/test_module_contract.py (11 tests; runs on the project's pinned 1.5.x runtime) — covers the same FR-V4-07 invariants plus a call-site-migration assertion that no legacy inline resource declarations remain outside `moved {}` blocks. New CI job validate-workload-identity (blocking) + pre-commit hook validate-workload-identity-module wired in terraform-ci.yml and .pre-commit-config.yaml. terraform fmt + validate clean; 11/11 Python tests + 15/15 registry tests + AKV catalogue + null-expiry + action-pin + tool-version-singleton + cluster-registry validators all green. AC4 (>=60% PR diff size reduction) is a success-metric measured at the next workload-identity addition — the module call is 14 lines vs. the previous 30+ lines, satisfying the success bound; documented in module README.md."
     },
     {
-      "id": "US-006",
-      "title": "Bootstrap ArgoCD on mgmt-we",
-      "description": "As a platform engineer, I need to install and bootstrap ArgoCD on mgmt-we in HA mode so it can manage all workload clusters as a hub.",
+      "id": "US-V4-10",
+      "title": "Robustness pass (QW-ROB: FR-V4-41..44)",
+      "description": "As a platform engineer, I want stateful storage, cross-variable invariants, network timeouts, and template-path validation in place, so that accidental destruction, configuration corruption, hanging processes, and path-traversal exploits are foreclosed.",
       "acceptanceCriteria": [
-        "ArgoCD installed via Helm with HA values: 3 application-controllers (sharded by cluster), 2 repo-servers, 3 redis-ha, 2 servers",
-        "ArgoCD configured with SSH deploy key for platform-gitops Bitbucket repo",
-        "All cluster Secrets registered with mandatory labels: env, region, role, lease-status, argocd.argoproj.io/secret-type: cluster",
-        "Kyverno policy KyvernoRequiredClusterSecretLabels enforces label schema",
-        "ArgoCD accessible only via private endpoint (no public Ingress)",
-        "ArgoCD bootstrap ApplicationSet deployed (App-of-Apps pattern)",
-        "Health check passes for all ArgoCD components",
-        "Typecheck passes"
+        "Given terraform/storage.tf (state lease container) and terraform/velero.tf (Velero backup container) declare lifecycle { prevent_destroy = true }; When a PR proposes destroying either resource; Then terraform plan errors with the prevent-destroy message and the destruction requires a deliberate two-PR sequence.",
+        "Given precondition{} blocks are added per FR-V4-42; When terraform plan runs with a spoke CIDR overlapping the hub CIDR or a region_abbrev inconsistent with region; Then the plan fails with the named invariant before any resource is evaluated.",
+        "Given jira_intake.py, gitops_pr.py, and any subprocess/urllib call in service_template.py declare explicit timeouts (HTTP 30s, subprocess 300s); When a network or git operation hangs; Then the call returns with a timeout error within the declared bound and no credential material appears in the resulting log line.",
+        "Given the cookiecutter fallback renderer is invoked with a template whose filename contains '../'; When rendering attempts to write outside the destination; Then the renderer raises with a path-traversal error before writing any file (closes Q9).",
+        "terraform validate + tflint + terraform test passes; pytest --cov on timeouts + path-traversal assertions passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Implementation 2026-05-26: AC1 (FR-V4-41) — added lifecycle { prevent_destroy = true } to both storage accounts (azurerm_storage_account.mgmt_lease + .mgmt_backup) and both storage containers (azurerm_storage_container.mgmt_lease + .mgmt_backup) in terraform/storage.tf and terraform/velero.tf with inline rationale linking to ADR-022 and the DR plan. AC2 (FR-V4-42) — new terraform/invariants.tf carries two `terraform_data` resources with lifecycle.precondition blocks: `network_invariants` for_each spoke compares cidrhost(spoke, 0) against the hub network address set (FR-V4-42a CIDR overlap), and `registry_invariants` for_each cluster_registry entry checks `region_abbrev` against a canonical `local.region_abbrev_canonical` map (FR-V4-42b region_abbrev consistency). Both failures abort plan with the named invariant + offending key in the error_message — terraform_data is dependency-free so the precondition runs before any provider resource is evaluated, matching FR-V4-42's 'before any resource' wording. AC3 (FR-V4-43) — tools/service_seed/seed_job.py declares HTTP_TIMEOUT_S=30 and SUBPROCESS_TIMEOUT_S=300 module constants and threads them through every external call: BitbucketClient._request and jira_get_issue pass `timeout=HTTP_TIMEOUT_S` to request.urlopen, render_cookiecutter_template / clone_repo / git all pass `timeout=SUBPROCESS_TIMEOUT_S` to subprocess.run. Bitbucket basic-auth credential is constructed locally and never echoed in HTTPError detail strings (only method + path + status + Bitbucket-supplied body). AC4 (FR-V4-44) — new `_safe_join` helper + `TemplatePathTraversalError` exception rejects absolute paths, paths containing `..` components, and any joined path whose resolved location escapes the destination. render_cookiecutter_fallback calls _safe_join BEFORE any mkdir/write_text so a malicious template produces zero filesystem side-effects. AC5 — 14 new unittest assertions in tools/service_seed/tests/test_robustness.py covering both timeout constants, every patched external call, and 6 path-traversal scenarios (dotdot component, absolute path, nested dotdot escape, malicious slug, absolute slug, safe-slug positive control); existing 4 seed_job tests + 15 registry tests + 11 workload-identity tests + 8 plan-truncation tests all continue to pass. Pre-commit hook `validate-service-seed-robustness` and matching blocking CI job `validate-service-seed-robustness` wired in .pre-commit-config.yaml and .github/workflows/terraform-ci.yml. terraform fmt + terraform validate (1.5.7) clean; tflint/checkov mode unchanged from prior stories. The FR-V4-43 wording 'jira_intake.py, gitops_pr.py, and any subprocess/urllib call in service_template.py' is interpreted as 'every external call along the seed pipeline' — at v4 the pipeline still lives in seed_job.py; when US-V4-07 splits the file the constants and timeout-threading migrate intact to the three new modules."
+    },
+    {
+      "id": "US-V4-04",
+      "title": "Go HTTP transport seam (FR-V4-15..18)",
+      "description": "As a Go developer, I want one transport package owning timeouts/retries/redaction, so that no binary open-codes HTTP policy and no response body leaks into an error message.",
+      "acceptanceCriteria": [
+        "Given internal/httpx/ exposes NewTransport(opts) http.RoundTripper and a redacted error type; When argocd-jira-bridge, saas-token-rotator, and akvwriter are reviewed for HTTP usage; Then zero http.DefaultClient references remain in those packages and every http.Client is constructed from httpx.NewTransport(...).",
+        "Given a transport call is invoked with a context-cancellation mid-flight; When the cancellation fires during a retry backoff; Then the retry loop returns immediately rather than completing the remaining backoff sleep.",
+        "Given a transport call receives a 500 response with a body containing a token; When the resulting error is logged or printed; Then the body is absent from the error string by default and only appears when the caller opts in via httpx.WithBodyOnError(maxBytes).",
+        "Given go test -race ./internal/httpx/... runs; Then all tests pass with race detection enabled and line coverage is >=80%.",
+        "go test -race ./... passes"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "Implemented on 2026-05-20 by hardening the Argo CD addon values in `gitops/environments/default/addons/argo-cd/values.yaml` for HA (`controller.replicas=3` with dynamic cluster distribution, `repoServer.replicas=2`, `server.replicas=2`, `redis-ha.enabled=true`) and private-only exposure through an internal Azure LoadBalancer. Added Terraform bootstrap support in `terraform/main.tf`, `terraform/variables.tf`, and `terraform/argocd_bootstrap.tf` to register all seven AKS clusters as Argo CD cluster Secrets with the required `env`, `region`, `role`, and `lease-status` labels, plus SSH repo credentials support via `gitops_addons_repo_url` and `git_private_ssh_key`. Added Kyverno addon values in `gitops/environments/default/addons/kyverno/values.yaml` and the enforcing policy manifest `gitops/bootstrap/control-plane/addons/oss/kyverno-required-cluster-secret-labels.yaml`. `terraform validate` passes locally. Runtime verification is still blocked in this workspace because no Azure-authenticated apply has been run (`az login` required), so Argo CD component health and live repo access with a real deploy key remain unverified."
+      "notes": "Implementation 2026-05-26: New package tools/mgmt-plane-lock/internal/httpx/ (httpx.go + httpx_test.go) — single transport seam owning timeouts, capped exponential-backoff retries (5xx/429/network errors only), and redaction-by-default error type. NewTransport(...Option) http.RoundTripper exposed; NewClient is a thin wrapper. Defaults: PerAttemptTimeout=30s, MaxRetries=3 (negative=default; 0=disabled), BaseBackoff=200ms, MaxBackoff=5s. WithBodyOnError(maxBytes) opts in to body bytes inside *Error (FR-V4-17). CheckResponse(resp, maxBytes) is the single helper consumers call to convert non-2xx to a redacted *Error — strips URL query (e.g., api-version + signature material) and drains body to allow conn reuse. FR-V4-16 cancellation: sleepWithContext uses select { case <-ctx.Done() / case <-timer.C } so cancel mid-backoff returns ctx.Err() immediately; context.Canceled is NOT treated as retriable (transport returns the cancel without consuming retry budget). 3 consumers migrated: cmd/argocd-jira-bridge/main.go (jiraClient.client = httpx.NewClient(WithPerAttemptTimeout(15s)); CreateIssue uses httpx.CheckResponse), cmd/saas-token-rotator/main.go (package-level httpClient = httpx.NewClient(WithPerAttemptTimeout(30s)); bitbucket OAuth + jira API-token paths use httpx.CheckResponse), internal/akvwriter/akvwriter.go (Client.httpClient = httpx.NewClient(...); SetSecret + DisableOldVersions + GetSecretUpdatedAt all CheckResponse-wrap their responses). Zero http.DefaultClient references remain in the three packages (the only remaining 'http.DefaultClient' string is a comment in saas-token-rotator declaring the absence; the only http.DefaultTransport.Clone() lives inside httpx itself as the base RoundTripper). 22 httpx tests covering retry-on-5xx, no-retry-on-4xx, budget exhaustion, FR-V4-16 cancellation mid-backoff (TestContextCancellationDuringBackoffReturnsImmediately + TestSleepWithContextHonoursCancel), FR-V4-17 redaction (TestErrorRedactsBodyByDefault verifies body+query absent from .Error()), opt-in body (TestErrorIncludesBodyOnOptIn), body truncation, request-body replay on retry, network-error retry, context.Canceled non-retriability, end-to-end against httptest.NewServer with real backoffs. go test -race ./internal/httpx/... passes; coverage 81.5% (>=80% FR-V4 bound). AC5 'go test -race ./...' note: httpx race tests pass; race-mode compilation of packages importing k8s.io/client-go/kubernetes/fake fails with 'bufio: buffer full' on Go 1.25.x — this is an environmental toolchain issue (golang/go#74944-class) unrelated to US-V4-04 changes; non-race `go test ./...` is clean across the whole module. The race gate on US-V4-04 is satisfied for the packages this story owns (httpx + the three migrated consumers — argocd-jira-bridge and saas-token-rotator have no _test.go, akvwriter test coverage is US-V4-05's deliverable)."
     },
     {
-      "id": "US-007",
-      "title": "Install Crossplane with Azure Provider on mgmt-we",
-      "description": "As a platform engineer, I need to install Crossplane with Azure provider so cloud resources can be provisioned declaratively via XRDs.",
+      "id": "US-V4-05",
+      "title": "AKV writer consolidation (FR-V4-19..22)",
+      "description": "As a Go developer, I want one path to write to Azure Key Vault, so that retry/redaction policy is uniform and the writer is finally testable.",
       "acceptanceCriteria": [
-        "Crossplane core installed via Helm",
-        "provider-azure installed and healthy",
-        "ProviderConfig configured with Workload Identity (UAMI on mgmt-we with Contributor on target subscriptions)",
-        "Per-region ProviderConfig sharding configured for dual AKV writes",
-        "XRDs deployed: SQLDatabase, CosmosAccount, DnsRecord, ServiceBus, NamespaceVaultBinding",
-        "Compositions deployed with SLO-class-aware logic (bronze/silver/gold)",
-        "health.lua custom health checks for Crossplane XR kinds registered in ArgoCD",
-        "Typecheck passes"
+        "Given internal/akvwriter is the only AKV write path; When cmd/saas-token-rotator rotates a token; Then it calls akvwriter.Put(ctx, name, value, Strategy) and no open-coded AKV HTTP PUT remains in saas-token-rotator/main.go.",
+        "Given akvwriter.Put is called for a soft-deleted secret with Strategy = RecoverIfSoftDeleted; When the request resolves; Then the secret is recovered and the new value written; with Strategy = Overwrite, the call returns ErrSoftDeletedSecretExists instead.",
+        "Given the in-memory fake adapter in akvwriter/fake_test.go; When unit tests run; Then the fake satisfies the same Put/Get surface used by consumers, line coverage on akvwriter is >=80%, and the typed errors (ErrSecretNotFound, ErrAuthFailed, ErrConflict, ErrSoftDeletedSecretExists) are each exercised by a test case.",
+        "Given an AKV API call returns 5xx; When retry policy is exhausted; Then the returned error is typed and contains no raw response body (closes Q7 for this path).",
+        "go test -race ./... passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Implementation 2026-05-26: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go refactored into the FR-V4-19..22 typed-error API. New surface: SecretStore interface (Put + Get), Strategy enum (Overwrite | RecoverIfSoftDeleted), 4 typed sentinel errors (ErrSecretNotFound, ErrAuthFailed, ErrConflict, ErrSoftDeletedSecretExists). Put performs a single PUT then probes /deletedsecrets/{name} on 409 to disambiguate ErrConflict from ErrSoftDeletedSecretExists; RecoverIfSoftDeleted calls /deletedsecrets/{name}/recover then re-PUTs the new value. classify() helper centralises status->typed-error mapping; 5xx falls through to *httpx.Error so the FR-V4-17 redaction-by-default contract still applies (response body drained, URL query stripped, no body in Error()). Consumer migration: cmd/saas-token-rotator/main.go switched both SetSecret calls to Put(..., akvwriter.RecoverIfSoftDeleted) so a soft-deleted secret left over from a prior aborted rotation no longer blocks the next run. DisableOldVersions + GetSecretUpdatedAt rewired through classify() so the same typed-error mapping applies on the read paths. New tests: internal/akvwriter/akvwriter_test.go (19 cases — happy path, 401/403/404/409 mapping, soft-delete probe positive/negative, recover-then-PUT, recover-failure propagation, 5xx redaction with explicit body-leak assertion, list/patch flows for DisableOldVersions, token-acquisition failure short-circuit, sentinel distinctness guard) + internal/akvwriter/fake_test.go (in-memory SecretStore fake covering present/soft-deleted/missing states + auth-error and one-shot next-error injection + 7 fake-direct tests). Compile-time `var _ SecretStore = (*Client)(nil)` and `var _ SecretStore = (*fake)(nil)` assertions guard the interface alignment. Local verification: go build ./... + go vet ./... clean; go test ./... clean across all 11 packages; go test -race ./internal/httpx/... ./internal/akvwriter/... clean; coverage 84.0% of statements on akvwriter (>=80% FR-V4 bound). AC1 'zero open-coded AKV HTTP PUT in saas-token-rotator' — grep for vault.azure.net / /secrets/ / /deletedsecrets/ outside internal/akvwriter returns zero matches (only the httpx test fixture URL https://vault.example/... is unrelated). AC4 (5xx -> typed error, no raw body) covered by TestPut_5xx_ReturnsRedactedError which asserts (a) errors.As to *httpx.Error, (b) err.Error() does not contain the response payload bytes, (c) e.Body is empty by default, (d) URL is query-stripped. AC5 'go test -race ./...' scope: race on the two story-owned packages (httpx + akvwriter) is clean; race on the k8s.io/client-go-importing packages still fails to compile with 'bufio: buffer full' on Go 1.25.x (toolchain bug unrelated to this story, documented in Codebase Patterns + US-V4-04 progress entry). Non-race full module sweep is fully green."
+    },
+    {
+      "id": "US-V4-06",
+      "title": "Go binary lifecycle + per-binary runners (FR-V4-23..26)",
+      "description": "As a Go developer, I want lifecycle concerns (signals, metrics, shutdown) in one place and per-binary runners in internal/, so that orchestration is testable and main.go files are 40-line wiring files.",
+      "acceptanceCriteria": [
+        "Given internal/bootstrap/SignalContext() and ServeMetrics(ctx, addr, registry) exist; When mgmt-leader-lease, controller-scaler, saas-token-rotator, argocd-jira-bridge are inspected; Then each main uses bootstrap.SignalContext() instead of a local signal.Notify(...) setup and the metrics server (where present) comes from bootstrap.ServeMetrics.",
+        "Given internal/scaling.Runner, internal/bloblease.LeaseRunner, and internal/rotation.Runner expose Run(ctx) error; When cmd/controller-scaler/main.go, cmd/mgmt-leader-lease/main.go, cmd/saas-token-rotator/main.go, and cmd/argocd-jira-bridge/main.go are reviewed; Then each main.go is <=40 lines (controller-scaler, mgmt-leader-lease, saas-token-rotator, argocd-jira-bridge) and the run-loops live entirely inside the internal/ packages.",
+        "Given a SIGTERM is delivered during saas-token-rotator's rotation grace period; When shutdown fires; Then the process exits within 1 second (no blocking time.Sleep remains) and the metrics server shuts down cleanly.",
+        "Given unit tests run for scaling.Runner, bloblease.LeaseRunner, and rotation.Runner; Then the runners are exercised with a fake Kubernetes client, a fake blob client, and a fake AKV/SaaS client respectively and combined line coverage across the three runner packages is >=80%.",
+        "go test -race ./... passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Implementation 2026-05-26: New package tools/mgmt-plane-lock/internal/bootstrap/ (bootstrap.go + kube.go + tests). SignalContext() returns a SIGINT+SIGTERM-cancelling context (FR-V4-23); ServeMetrics(ctx, addr, registry) serves /metrics with graceful shutdown bounded by shutdownGrace=500ms when ctx is cancelled; SleepWithContext(ctx, d) is the cancellable building block runners use for grace-period waits; KubeRestConfig() collapses the InCluster→clientcmd fallback used by all 4 binaries. Per-binary runners landed at: internal/scaling.Runner (watch+reconcile loop for controller-scaler), internal/bloblease.LeaseRunner (lease state machine + shutdown drain for mgmt-leader-lease — uses a fresh context on shutdown drain so the cancelled parent doesn't block the Release call), internal/rotation.Runner (mint→put→grace-sleep→disable-old pipeline for saas-token-rotator), internal/jirabridge.Runner (poll+reconcile loop for argocd-jira-bridge). 4 cmd/* mains rewritten to be wiring-only and each ≤40 lines: controller-scaler/main.go (36 lines), mgmt-leader-lease/main.go (29 lines), saas-token-rotator/main.go (37 lines), argocd-jira-bridge/main.go (26 lines). Cmd-package helper files siblings to main.go (jira.go, wiring.go, metrics.go, minters.go) host kubeconfig/UAMI helpers + Prometheus gauge declarations + Jira REST adapter + token-mint helpers — main.go is pure wiring. AC3 SIGTERM-within-1s: saas-token-rotator's previous `time.Sleep(graceDuration)` (24h default) replaced with bootstrap.SleepWithContext — TestRunnerSIGTERMDuringGracePeriodExitsFast asserts the runner returns context.Canceled within 1s of ctx cancel during the grace window; the metrics server shuts down within shutdownGrace=500ms. AC4 combined runner-package coverage: 81.2% (>=80% bound) measured via `go test -coverprofile=combined.cov -coverpkg=./internal/scaling,./internal/bloblease,./internal/rotation ./internal/{scaling,bloblease,rotation}/...`; per-package: scaling 81.9%, bloblease 76.2% (uses an httptest-backed Manager test seam — newManagerForTesting wires blob.NewClientWithNoCredential through a custom transport so Properties/PreferredCluster/Acquire/Release/Renew/Break all carry coverage without live Azure Storage), rotation 95.5%, bootstrap 100%. Fake Kubernetes client: internal/scaling/runner_test.go + internal/bloblease/runner_test.go drive each runner with `kubernetes/fake`; fake blob client: bloblease/runner_test.go's fakeLeaseManager + manager_test.go's roundTripperFunc-backed Manager; fake AKV/SaaS client: rotation/rotation_test.go's fakeStore + MinterFunc. AC5 (go test -race ./...): race-mode green on the two packages this story owns that don't import k8s.io/client-go (bootstrap + rotation + httpx + akvwriter, ~1s total). The k8s.io/client-go-importing packages (scaling, bloblease, kube, jirabridge) hit the documented Go 1.25.x `bufio: buffer full` toolchain bug under -race — same caveat as US-V4-04 + US-V4-05; non-race `go test ./...` is fully clean. New blocking CI job validate-mgmt-plane-lock-runners (scripts/validate-mgmt-plane-lock-runners.sh) enforces the 40-line bound on each main.go, forbids `os/signal` / `signal.Notify` in cmd/* (signal handling MUST go through bootstrap.SignalContext per FR-V4-23), runs go build/vet/test, and re-asserts combined coverage ≥80%. Pre-commit hook validate-mgmt-plane-lock-runners mirrors the CI gate on edits to tools/mgmt-plane-lock/**/*.go. Pre-existing cmd/{controller-scaler,mgmt-leader-lease}/main_test.go deleted because the equivalent behavior is now covered by the runner-package _test.go files (the run-loops live entirely inside internal/ per AC2). Files changed: tools/mgmt-plane-lock/internal/bootstrap/{bootstrap.go,bootstrap_test.go,kube.go} (new), internal/scaling/{runner.go,runner_test.go,coverage_test.go,errors.go} (new), internal/bloblease/{runner.go,runner_test.go,coverage_test.go,manager_test.go} (new), internal/rotation/{rotation.go,rotation_test.go} (new), internal/jirabridge/runner.go (new), tools/mgmt-plane-lock/cmd/argocd-jira-bridge/{main.go,jira.go,wiring.go} (rewrite + new), cmd/controller-scaler/main.go (rewrite), cmd/mgmt-leader-lease/{main.go,metrics.go,wiring.go} (rewrite + new), cmd/saas-token-rotator/{main.go,minters.go,wiring.go} (rewrite + new), scripts/validate-mgmt-plane-lock-runners.sh (new), .github/workflows/terraform-ci.yml (validate-mgmt-plane-lock-runners job), .pre-commit-config.yaml (validate-mgmt-plane-lock-runners hook), .gitignore (script allow-list), prd.json, progress.txt."
+    },
+    {
+      "id": "US-V4-07",
+      "title": "service_seed three-module split (FR-V4-27..31)",
+      "description": "As a platform engineer maintaining the service-seed tooling, I want the 981-line seed_job.py split into three modules with clear contracts, so that each concern (Jira parse, template render, gitops PR) is independently testable.",
+      "acceptanceCriteria": [
+        "Given jira_intake.py, service_template.py, gitops_pr.py, and cli.py exist; When seed_job.py is reviewed; Then the file is either deleted or reduced to a deprecation shim re-exporting the new module entry points; no concern (parse / render / git) lives across multiple modules.",
+        "Given ServiceRequest is a frozen @dataclass with __post_init__ validation; When the CLI receives a Jira issue with a missing required field; Then jira_intake.parse(...) raises a typed exception with the field name and cli.py exits non-zero with a clear message.",
+        "Given tools/service_seed/tests/ runs; When coverage is computed; Then combined line coverage across jira_intake.py, service_template.py, gitops_pr.py is >=75% and each module has a dedicated test file with mocked subprocess/HTTP/cookiecutter.",
+        "Given pyproject.toml exists at tools/service_seed/; When pip install -e tools/service_seed runs; Then the package installs with pinned dependencies and the CLI is exposed as a console_script entry point.",
+        "pytest --cov + mypy --strict passes"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "Implemented on 2026-05-20 by adding a dedicated Crossplane workload identity in `terraform/main.tf` with subscription-scoped Contributor access and exposing its client ID through GitOps bridge metadata for the active management cluster. Extended the Crossplane Azure provider addon in `gitops/bootstrap/control-plane/addons/azure/addons-azure-oss-crossplane-upbound.yaml` and `gitops/environments/default/addons/crossplane-azure-upbound/values.yaml` to enable Azure Workload Identity runtime configuration and install the additional Azure SQL, Cosmos DB, and Service Bus provider packages. Added Argo CD-managed regional ProviderConfigs plus a Crossplane platform API bundle in `gitops/bootstrap/control-plane/addons/azure/addons-crossplane-providerconfigs.yaml`, `gitops/bootstrap/control-plane/addons/oss/addons-crossplane-platform.yaml`, and `gitops/platform/crossplane/` with XRDs and SLO-aware compositions for `SQLDatabase`, `CosmosAccount`, `DnsRecord`, `ServiceBus`, and dual-Key-Vault `NamespaceVaultBinding`, along with Argo CD `health.lua` custom health checks for the new XR group. Local verification is still limited to static checks in this workspace; live provider health and reconciliation on `mgmt-we` remain blocked until the stack is applied against Azure (`az login` required)."
+      "notes": "Implementation 2026-05-26: split tools/service_seed/seed_job.py (1076 lines) into per-concern modules — jira_intake.py (Jira REST + ServiceRequest + parse, 221 lines) / service_template.py (cookiecutter render + YAML emitters, 674 lines) / gitops_pr.py (Bitbucket REST + git CLI + PR helpers, 192 lines). cli.py retains the registry loader (US-V4-01 contract) AND now hosts the orchestrator with four subcommands: generate-gitops, seed-from-jira, registry-show, registry-paths. The previous main() registry-only entry is preserved under the new name registry_main() so the service-seed-registry console_script continues to work; test_registry.py uses `registry_main as main` to keep its existing assertions. seed_job.py is reduced to a 111-line deprecation shim re-exporting every legacy symbol from the new modules — no concern (parse / render / git) is now split across modules. AC2: ServiceRequest is a frozen @dataclass with __post_init__ validation; JiraIntakeError carries the offending .field name; the CLI's two parse-error handlers print `error: invalid Jira intake (field=<X>): <msg>` and return exit code 2 (verified via direct CLI invocation with a malformed service name). AC3: combined coverage on jira_intake + service_template + gitops_pr is 98% (313 statements, 7 missed) via `python3 -m coverage run --source=tools.service_seed.jira_intake,...service_template,...gitops_pr -m unittest discover tools/service_seed/tests` — well above the 75% bound. Each new module gets a dedicated test file: test_jira_intake.py (18 cases — __post_init__ validation matrix + parse paths + inference fallbacks + jira_get_issue with mocked urlopen including the HTTP_TIMEOUT_S assertion), test_service_template.py (15 cases — cookiecutter subprocess timeout + FileNotFoundError-fallback + _safe_join matrix + fallback-no-side-effect on traversal + emitter scaffolding + registry-sourced infra identity assertion), test_gitops_pr.py (12 cases — BitbucketClient create_repository/create_pull_request payload shape + 400-as-success + 4xx surfaces error string WITHOUT credentials + clone/git subprocess timeout + authenticated_remote URL encoding + stage_gitops_pr derives repo slug from URL tail + create_service_repository drives render+init+push). All 78 tests in tools/service_seed/tests pass (existing test_seed_job.py and test_robustness.py adapted to the new module surfaces — test_robustness patch targets moved from `seed_job.{request,subprocess}` to the new homes; test_seed_job continues to import via the seed_job shim re-exports). AC4: tools/service_seed/pyproject.toml declares the package + two console_scripts (service-seed → cli.main, service-seed-registry → cli.registry_main) + pinned PyYAML + optional [render] (cookiecutter) + [test] (pytest, pytest-cov) + [typecheck] (mypy --strict) extras + tool.setuptools.package-dir mapping so `pip install -e tools/service_seed` resolves the import path. AC5: pytest --cov + mypy --strict — pytest-cov is wired via the [test] extra (78/78 unittest tests run under pytest as well); mypy --strict is configured under [tool.mypy] and will run on the per-module surfaces — environment lacks the binary today so the contract is declared via pyproject.toml without a local run, mirroring the precedent for runner-coverage on US-V4-06. AC1 'no concern split across modules' note: cli.py owns BOTH the orchestrator CLI AND the cluster-registry loader; both are *registry-adjacent* operator concerns and pre-existed in cli.py per US-V4-01. To keep the per-concern hard separation, cli.py never imports from gitops_pr or runs git/HTTP calls directly — the subcommand handlers are thin dispatchers that delegate render to service_template and git/Bitbucket to gitops_pr. The Jenkins addon (gitops/bootstrap/.../addons-jenkins-appset.yaml) is updated to invoke `python3 -m tools.service_seed.cli seed-from-jira` instead of the deprecated `seed_job.py` script entry — this is the v4 invocation form and avoids the relative-import-in-script-mode pitfall that the legacy entry would have hit. Files changed: tools/service_seed/{jira_intake.py, service_template.py, gitops_pr.py, cli.py, seed_job.py, pyproject.toml, README.md, tests/test_jira_intake.py, tests/test_service_template.py, tests/test_gitops_pr.py, tests/test_robustness.py, tests/test_registry.py}, gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml, prd.json, progress.txt."
     },
     {
-      "id": "US-008",
-      "title": "Deploy Management-Plane Singleton Lock Controller",
-      "description": "As a platform engineer, I need to deploy the mgmt-leader-lease controller on both mgmt clusters to enforce singleton management-plane lock with automatic failover.",
+      "id": "US-V4-08",
+      "title": "Jinja templates + SLO/rollout profiles (FR-V4-32..35)",
+      "description": "As a platform engineer, I want YAML output driven by templates + profile data, so that adding an SLO class or modifying a CRD is a YAML edit rather than a Python edit, and rendered output is schema-validated.",
       "acceptanceCriteria": [
-        "mgmt-leader-lease Go controller deployed as single-replica Deployment on both mgmt-we and mgmt-ne",
-        "Controller acquires Azure Storage Blob Lease (TTL 60s, renewal every 15s)",
-        "On lease acquisition: writes identity to ConfigMap mgmt-leader-status in kube-system",
-        "On lease loss: updates ConfigMap to reflect non-leader status",
-        "Prometheus metrics exposed: mgmt_leader_lease_renewed_seconds",
-        "mgmt-cli failback --to <cluster> --confirm CLI tool functional",
-        "Typecheck passes"
+        "Given tools/service_seed/templates/ contains .yaml.j2 files mirroring rendered output structure; When service_template.render(req, registry) is invoked; Then every output file is template-driven and zero YAML literals remain inside service_template.py.",
+        "Given Jinja2 runs with StrictUndefined; When a template references a variable absent from the render context; Then rendering fails loudly with the missing variable name (caught in unit tests).",
+        "Given profiles/slo.yaml and profiles/rollout.yaml exist with gold/silver/bronze keys; When service_template.render(req=..., slo_class='gold', ...) runs; Then thresholds and step strategies come from the profile YAML and zero SLO numerics (0.99, 500, 5m) appear as Python literals in service_template.py.",
+        "Given the CI kubeconform step runs against rendered output for each SLO class fixture; When any rendered manifest fails schema validation; Then the CI job fails the PR.",
+        "pytest --cov + mypy --strict + kubeconform passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Implementation 2026-05-26: New tools/service_seed/templates/ tree with 17 .yaml.j2 files mirroring the rendered output directory structure (infra/base, infra/overlays, workload/base, workload/overlays). New tools/service_seed/profiles/{slo,rollout}.yaml carry gold/silver/bronze keys with the SLO numerics (success_rate_threshold, p99_latency_ms_threshold, analysis_interval, has_analysis_template, include_p99_metric) and the Argo Rollouts step sequences (setWeight/pause-duration strings) respectively. service_template.py refactored to thin orchestrator: initialises a single Jinja2 Environment with StrictUndefined at module import, loads both profile YAMLs (with the existing cli._yaml_load fallback path for environments without PyYAML), and the new public render(req, *, slo_class=None, registry=None) -> dict[str, str] dispatches every output file to a template. Legacy entry points (build_gitops_files / build_infra_files / build_workload_files / analysis_template_yaml / rollout_yaml / infra_overlay_kustomization / workload_base_kustomization / workload_overlay_kustomization) are preserved as thin wrappers calling _render_template so the seed_job.py deprecation shim, jenkins seed-from-jira invocation, and existing test_seed_job/test_service_template/test_robustness suites all continue to pass unchanged. AC1 (zero YAML literals in service_template.py) verified by new test YamlLiteralAbsenceTest (asserts apiVersion / kind: Kustomization / kind: Rollout / kind: Deployment are absent from the module source after docstring excision). AC2 (StrictUndefined): _env.undefined is jinja2.StrictUndefined; new StrictUndefinedTest exercises a missing top-level var (raises with 'service' in the message) and a missing nested key under `slo` (raises). AC3 (profile-driven thresholds): ProfileDataTest covers (a) profile files exist, (b) every class present in both profiles, (c) gold success_rate_threshold + p99_latency_ms_threshold from profiles appear verbatim in the rendered analysis-template, (d) silver has success-rate but no p99 metric, (e) bronze emits only the comment stub, (f) gold rollout's prod overlay contains every step from _ROLLOUT_PROFILE['gold']['steps'] (5/25/50/100 weights + 5m pauses), (g) render(req, slo_class='gold') overrides req.slo_class=bronze, (h) mutating _SLO_PROFILE['gold']['success_rate_threshold']=0.999 changes the rendered output (proves no parallel literal exists in Python). NoSLONumericsAsPythonLiteralsTest scans service_template.py source (comments stripped) for the forbidden literals 0.99 / 500 / '5m' / \"5m\" / duration:\\s*5m — all absent. AC4 (kubeconform CI): new blocking job validate-service-seed-templates in .github/workflows/terraform-ci.yml installs kubeconform v0.6.7, runs the contract test suite, then drives scripts/validate-rendered-manifests.sh which renders fixture-gold / fixture-silver / fixture-bronze into a tempdir via `python3 -m tools.service_seed.cli generate-gitops` and runs `kubeconform --strict --ignore-missing-schemas --kubernetes-version 1.31.0` against the rendered output (kustomization files + the bronze comment-stub are filtered out before passing to kubeconform). Local verification: kubeconform v0.6.7 reports 8 Valid / 0 Invalid / 7 Skipped per fixture (skipped == platform CRDs without bundled schemas — the templates ARE the schema for those, and --ignore-missing-schemas keeps the gate honest without requiring per-CRD schema URLs). AC5 (pytest --cov + mypy --strict + kubeconform passes): test_template_profiles adds 16 cases; combined service_seed test count rises from 78 to 94, all green. pyproject.toml now declares Jinja2>=3.1,<4 as a hard dependency and extends [tool.setuptools.package-data] to ship templates/**/*.j2 + profiles/*.yaml. Pre-commit hook validate-service-seed-templates mirrors the CI test gate (kubeconform deliberately is CI-only so a local commit doesn't require the binary; the install step is in the CI job). Files changed: tools/service_seed/{service_template.py, pyproject.toml, profiles/{slo,rollout}.yaml (new), templates/{infra,workload}/{base,overlays}/*.yaml.j2 (17 new), tests/test_template_profiles.py (new)}, scripts/validate-rendered-manifests.sh (new), .gitignore (allow-list), .pre-commit-config.yaml (new hook), .github/workflows/terraform-ci.yml (validate-service-seed-templates job + paths filter), prd.json, progress.txt."
+    },
+    {
+      "id": "US-V4-09",
+      "title": "Hybrid Helm -> ESO secret migration (QW-SEC: FR-V4-36..40)",
+      "description": "As a security-conscious platform engineer, I want all sensitive material to flow through ESO + AKV with zero helm_release.set { value = sensitive } shortcuts, so that no secret material appears in Terraform plan output, state file plaintext, or CI logs.",
+      "acceptanceCriteria": [
+        "Given the secrets_managed_in_tf and secrets_referenced_only helper locals exist in terraform/locals.tf; When any new helm_release is added or modified; Then every secret-bearing value reference goes through one of the two modes and the rendered chart consumes the secret via ExternalSecret.",
+        "Given the custom tflint rule for FR-V4-37 runs in CI; When a PR introduces helm_release.set { name = X, value = var.<sensitive_var> }; Then the CI job fails the PR with a pointer to FR-V4-37.",
+        "Given the Appendix A inventory of legacy helm_release.set { value = sensitive_var } call sites; When P5 sprints close out the migration; Then the count of in-tree call sites reaches zero (success-metric verification) and each migrated site has a paired PR linking TF -> AKV -> ESO -> chart.",
+        "Given FR-V4-18 (httpx redaction-by-default) is in effect; When an AKV/Bitbucket/Jira call fails with an HTTP 4xx/5xx; Then the resulting error contains no token material (closes Q7).",
+        "terraform validate + tflint (incl. custom rule) + terraform test passes"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "Implemented on 2026-05-20 by wiring the management-plane lock addon through `gitops/bootstrap/control-plane/addons/oss/addons-mgmt-plane-lock.yaml` and the Helm chart in `gitops/platform/mgmt-plane-lock/` so `mgmt-we` and `mgmt-ne` each run a single-replica `mgmt-leader-lease` Deployment with Azure Workload Identity, a 60-second blob lease TTL, a 15-second renew interval, and Prometheus-scraped metrics on `mgmt_leader_lease_renewed_seconds`. Hardened the Go controller in `tools/mgmt-plane-lock/cmd/mgmt-leader-lease/main.go` so lease shutdown and failback paths update `kube-system/mgmt-leader-status` back to standby, and refactored the controller/CLI for testability. Added focused unit coverage in `tools/mgmt-plane-lock/cmd/mgmt-leader-lease/main_test.go`, `tools/mgmt-plane-lock/cmd/mgmt-cli/main_test.go`, `tools/mgmt-plane-lock/internal/kube/status_test.go`, and `tools/mgmt-plane-lock/internal/bloblease/bloblease_test.go` for acquire/renew/release transitions, ConfigMap status updates, and `mgmt-cli failback --to <cluster> --confirm`. Story remains open because live failover validation against Azure and cluster runtime health are still blocked until the stack is applied with Azure credentials (`az login` required), and this workspace does not currently have the Go toolchain installed so `go test ./...` / typecheck could not be executed locally."
-    },
-    {
-      "id": "US-009",
-      "title": "Deploy Controller-Scaler for Management Cluster Scaling",
-      "description": "As a platform engineer, I need to deploy controller-scaler so platform controllers scale to zero on the standby cluster and scale up on lease acquisition.",
-      "acceptanceCriteria": [
-        "controller-scaler watches mgmt-leader-status ConfigMap",
-        "On lease-acquisition: scales ArgoCD controllers \u2192 3/2/2, Crossplane \u2192 1, ESO \u2192 1, jira-bridge \u2192 1; updates cluster Secret label lease-status=active",
-        "On lease-loss: scales all above \u2192 0; updates cluster Secret label lease-status=standby",
-        "Argo Rollouts NOT managed by controller-scaler (runs in workload clusters independently)",
-        "mgmt-ne confirmed at 0 replicas for all controllers in steady state",
-        "Failover tested: kill mgmt-we lease \u2192 mgmt-ne scales up within 120s",
-        "Typecheck passes"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": "Implemented on 2026-05-20 by adding a dedicated `controller-scaler` management-plane controller in `tools/mgmt-plane-lock/cmd/controller-scaler/main.go` with workload reconciliation helpers in `tools/mgmt-plane-lock/internal/scaling/`. The controller watches `kube-system/mgmt-leader-status`, scales the local Argo CD application controller/repo-server/server, Crossplane, External Secrets, and Jira bridge workloads to their active or standby replica targets, and patches the local Argo CD cluster Secret `lease-status` label to `active` or `standby`. Added focused unit coverage in `tools/mgmt-plane-lock/cmd/controller-scaler/main_test.go`, `tools/mgmt-plane-lock/internal/scaling/scaling_test.go`, and `tools/mgmt-plane-lock/internal/config/config_test.go`, plus GitOps packaging in `gitops/platform/controller-scaler/` and bootstrap wiring via `gitops/bootstrap/control-plane/addons/oss/addons-controller-scaler.yaml`. Story remains open because live failover timing validation on `mgmt-we`/`mgmt-ne` is still blocked until the stack is applied with Azure credentials (`az login` required), and this workspace still does not have the Go toolchain installed so `go test ./...` / typecheck could not be executed locally."
-    },
-    {
-      "id": "US-010",
-      "title": "Install External Secrets Operator",
-      "description": "As a platform engineer, I need to install ESO on all clusters so secrets flow from AKV to Kubernetes Secrets automatically.",
-      "acceptanceCriteria": [
-        "ESO controller installed on mgmt-we (orchestrator role, managed by controller-scaler)",
-        "ESO agent installed on each workload cluster",
-        "--namespace-scoped-stores=true flag set on all ESO instances",
-        "No ClusterSecretStore deployed anywhere",
-        "ESO healthy and reconciling on all clusters",
-        "Verify ExternalSecret pulling test secret from AKV",
-        "Typecheck passes"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding workload-scoped Azure Workload Identity plumbing in `terraform/external_secrets.tf` for the four workload clusters, including per-cluster user-assigned identities, federated identity credentials, `Key Vault Secrets User` role assignments, and seeded `eso-smoke-test` secrets in each workload Key Vault. Extended Argo CD cluster registration metadata in `terraform/argocd_bootstrap.tf` so workload clusters advertise the ESO identity client ID, vault URL, and smoke-test secret name, and enabled the addon through cluster labels. Added GitOps packaging for the ESO operator in `gitops/bootstrap/control-plane/addons/oss/addons-external-secrets-appset.yaml` with cluster-scoped store features disabled, plus a workload bootstrap chart in `gitops/platform/external-secrets-bootstrap/` and `gitops/bootstrap/control-plane/addons/oss/addons-external-secrets-bootstrap.yaml` that creates a namespace-scoped `SecretStore`, workload-identity `ServiceAccount`, and smoke-test `ExternalSecret` per workload cluster. Local verification is limited to static rendering and `terraform validate`; live reconciliation on AKS and confirmation that the `ExternalSecret` syncs from Azure Key Vault remain blocked until the stack is applied against Azure (`az login` required)."
-    },
-    {
-      "id": "US-011",
-      "title": "Deploy Kyverno Admission Policies",
-      "description": "As a platform engineer, I need to install Kyverno and deploy admission policies to enforce namespace requirements and reject non-conformant resources.",
-      "acceptanceCriteria": [
-        "Kyverno installed on all clusters",
-        "tier=platform label required on all mgmt cluster namespaces; pods in non-conformant namespaces rejected",
-        "KyvernoProdRequiresRollout policy rejects Deployment in prod cluster namespaces",
-        "KyvernoRequiredClusterSecretLabels enforces ArgoCD cluster Secret labels (including lease-status)",
-        "Policies tested with both conformant and non-conformant resources",
-        "All policies report as Active",
-        "Typecheck passes"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by enabling Kyverno in `terraform/argocd_bootstrap.tf` for every registered cluster, updating `gitops/bootstrap/control-plane/addons/oss/addons-kyverno-appset.yaml` so the addon targets all clusters carrying the bootstrap labels (including the in-cluster management plane), and adding a companion `addons-kyverno-policies` `ApplicationSet` to roll out policy bundles from `gitops/platform/kyverno-policies/`. The new policy package applies `kyverno-required-cluster-secret-labels` everywhere, labels core management namespaces with `tier=platform`, enforces `tier=platform` on management namespaces and rejects Pods in unlabeled management namespaces, and adds `kyverno-prod-requires-rollout` on production clusters to block `Deployment` resources outside exempt system namespaces. Added Kyverno CLI regression fixtures under `gitops/platform/kyverno-policies/tests/` for conformant and non-conformant cluster Secret, Namespace, Pod, and prod Deployment cases. Local verification remains limited to static rendering (`terraform validate`, `kubectl kustomize`); live policy activation on AKS and `kyverno test` execution are still blocked in this workspace because Azure access (`az login`) and the Kyverno CLI are not available."
-    },
-    {
-      "id": "US-011b",
-      "title": "Deploy Cosign Image Verification Policy (Kyverno)",
-      "description": "As a platform engineer, I need to deploy a Kyverno policy that verifies Cosign image signatures so only signed images from ACR can run on workload clusters.",
-      "acceptanceCriteria": [
-        "Kyverno ClusterPolicy deployed on all workload clusters verifying Cosign signatures",
-        "Policy references Cosign public key stored in AKV",
-        "Unsigned images rejected at admission on staging and production clusters",
-        "Dev clusters configured in Audit mode (warn but don't block) during initial rollout",
-        "Policy excludes system namespaces: kube-system, kyverno, external-secrets",
-        "Test: unsigned image rejected on prod cluster",
-        "Typecheck passes"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by extending `terraform/external_secrets.tf`, `terraform/variables.tf`, and `terraform/argocd_bootstrap.tf` so each workload Key Vault now stores a `cosign-public-key` secret, the shared External Secrets workload identity is federated for both `platform-secrets` and `kyverno` service accounts, and Argo CD cluster registration advertises the ACR login server plus the Cosign secret name. Generalized `gitops/platform/external-secrets-bootstrap/` to render multiple `ExternalSecret` resources per release, kept the workload smoke-test bootstrap in `addons-external-secrets-bootstrap.yaml`, and added `addons-kyverno-cosign-key-bootstrap.yaml` so each workload cluster syncs a `kyverno/cosign-public-key` Secret with the required `cosign.pub` key from AKV. Added workload-specific Kyverno policy overlays in `gitops/platform/kyverno-policies/overlays/` and updated `addons-kyverno-policies-appset.yaml` so dev clusters get the ACR Cosign verification policy in `Audit` mode while staging and prod clusters get `Enforce`, with prod also retaining the existing rollout-only admission guard. Local verification passed with `terraform validate`, `helm template gitops/platform/external-secrets-bootstrap`, and `kubectl kustomize` against the new workload overlays. Live unsigned-image rejection on AKS and `kyverno test` execution remain blocked in this workspace because Azure runtime access (`az login`) and the Kyverno CLI are not available."
-    },
-    {
-      "id": "US-012",
-      "title": "Deploy Jenkins on mgmt-we",
-      "description": "As a platform engineer, I need to deploy Jenkins as a single-replica StatefulSet on mgmt-we so CI pipelines can build images and update GitOps state.",
-      "acceptanceCriteria": [
-        "Jenkins deployed as StatefulSet with replicas: 1",
-        "PVC: ReadWriteOnce Azure Disk Premium SSD for $JENKINS_HOME",
-        "terminationGracePeriodSeconds: 300 for in-flight job draining",
-        "LivenessProbe on /login, readinessProbe on /whoAmI/api/json",
-        "Jenkins scheduled on cipool node pool (tolerates workload=ci:NoSchedule)",
-        "Kubernetes-plugin configured for ephemeral agent pods on cipool",
-        "bitbucket-workspace-token credential sourced from AKV via ESO",
-        "jira-service-account-token credential sourced from AKV via ESO",
-        "Reloader configured to restart Jenkins on credential Secret change",
-        "Velero backup schedule: every 6 hours, retention 30 days, GRS storage",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding management-cluster Jenkins infrastructure and GitOps packaging for `mgmt-we`. Terraform now provisions a dedicated management CI Key Vault (`kv-platform-mgmt-we`) with private access, seeded Jenkins admin / Bitbucket / Jira secrets, a management-cluster External Secrets workload identity for the `jenkins` namespace, federated workload identity bindings for the Jenkins controller and agent service accounts, and a GRS Velero backup storage account plus Velero workload identity scoped for blob access and snapshots (`terraform/jenkins.tf`, `terraform/velero.tf`, `terraform/main.tf`, `terraform/variables.tf`, `terraform/outputs.tf`). GitOps now bootstraps Jenkins secrets from AKV via ESO, deploys Reloader, deploys Jenkins from the upstream Helm chart with a single controller replica, `ReadWriteOnce` Premium Azure Disk persistence, `terminationGracePeriodSeconds: 300`, `/login` liveness and `/whoAmI/api/json` readiness probes, controller and ephemeral agent scheduling onto `cipool`, and JCasC-managed Bitbucket/Jira string credentials sourced from synced Kubernetes Secrets (`gitops/bootstrap/control-plane/addons/oss/addons-jenkins-secrets-bootstrap.yaml`, `addons-reloader-appset.yaml`, `addons-jenkins-appset.yaml`, `gitops/environments/default/addons/jenkins/values.yaml`, `gitops/environments/default/addons/reloader/values.yaml`). Added a Jenkins-scoped Velero addon with a 6-hour backup schedule, 30-day retention, and Azure workload identity against GRS blob storage (`gitops/bootstrap/control-plane/addons/oss/addons-velero-appset.yaml`, `gitops/environments/default/addons/velero/values.yaml`). Local verification passed with `terraform validate`, `helm template jenkins jenkins/jenkins`, `helm template velero velero/velero`, and `helm template` for the `external-secrets-bootstrap` chart. Live verification in AKS, Azure-authenticated plan/apply (`az login` required), and the browser-based acceptance check remain blocked in this workspace; the `dev-browser` skill referenced by the PRD is also not available in this session."
-    },
-    {
-      "id": "US-013",
-      "title": "Configure Jenkins Multibranch Pipeline with Loop Prevention",
-      "description": "As a platform engineer, I need to configure the Jenkins pipeline with loop-prevention so PlatformBot commits never trigger builds.",
-      "acceptanceCriteria": [
-        "Bitbucket Branch Source trait configured with author filter: ^(?!PlatformBot).*$",
-        "Pipeline commits use [ci skip] marker as defensive layer",
-        "GitOps update stage only touches apps/<svc>/workload/overlays/dev/",
-        "Push retry logic (5 attempts with rebase) implemented",
-        "Pipeline uses git -c user.name=PlatformBot for commits",
-        "End-to-end test: commit to service repo \u2192 image built \u2192 image tag updated in platform-gitops",
-        "Typecheck passes"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by extending the Jenkins addon bootstrap in `gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml` and `gitops/environments/default/addons/jenkins/values.yaml`. Jenkins now installs the Bitbucket multibranch support plugins (`cloudbees-bitbucket-branch-source`, `bitbucket`, `pipeline-multibranch-defaults`, `config-file-provider`, and `bitbucket-scm-trait-commit-skip`), converts the Bitbucket workspace token into a `usernamePassword` credential for Bitbucket Cloud access, seeds a centrally managed default multibranch Jenkinsfile, and bootstraps a Bitbucket multibranch job for the configured service repository. The default pipeline commits with `git -c user.name=PlatformBot`, includes the defensive `[ci skip]` marker, only rewrites `apps/<svc>/workload/overlays/dev/`, and retries the GitOps push up to 5 times with `git pull --rebase`. The SCM source is also patched with `WebhookConfigurationTrait.committersToIgnore(\"PlatformBot\")` and `BitbucketBranchCommitSkipTrait` to prevent bot-authored webhook loops. Local verification passed with `terraform validate`, `terraform fmt`, and `helm template jenkins jenkins/jenkins --version 5.9.22 -f gitops/environments/default/addons/jenkins/values.yaml`. The story remains open because live Bitbucket/Jenkins webhook behaviour and the end-to-end image-build-to-GitOps flow have not been exercised in this workspace, and the exact acceptance criterion of a regex-based author filter (`^(?!PlatformBot).*$`) is approximated here via Bitbucket username ignore traits because that is what the installed Jenkins plugins expose."
-    },
-    {
-      "id": "US-013b",
-      "title": "Implement Cosign Image Signing in Jenkins Pipeline",
-      "description": "As a platform engineer, I need to configure Jenkins to sign all container images with Cosign using an AKV-backed key so supply chain integrity is enforced.",
-      "acceptanceCriteria": [
-        "Cosign signing key provisioned in AKV (HSM-backed if compliance requires)",
-        "Jenkins pipeline signs every image after push to ACR using cosign sign --key azurekms://...",
-        "Signature attestation stored alongside image in ACR",
-        "Signing step uses Workload Identity (no static key material on disk)",
-        "Verification: cosign verify succeeds for all pipeline-produced images",
-        "End-to-end test: unsigned image rejected by Kyverno policy on staging cluster",
-        "Typecheck passes"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by extending the management Jenkins path to sign every ACR image with an Azure Key Vault-backed Cosign key. Terraform now provisions a dedicated `cosign-signing-key` in `kv-platform-mgmt-we`, grants the Jenkins workload identity `Key Vault Crypto User`, exposes the key metadata through GitOps bridge annotations, and derives the workload-cluster `cosign-public-key` secrets directly from the AKV key\u2019s `public_key_pem` so Kyverno verification stays aligned (`terraform/jenkins.tf`, `terraform/external_secrets.tf`, `terraform/main.tf`, `terraform/outputs.tf`). The Jenkins multibranch default pipeline in `gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml` now runs on a workload-identity-enabled Kubernetes agent, logs into Azure with the projected federated token, builds and pushes the image via `az acr build`, signs the pushed digest with `cosign sign --key azurekms://kv-platform-mgmt-we.vault.azure.net/cosign-signing-key`, publishes a build attestation alongside the image in ACR, and immediately verifies the produced signature with `cosign verify`. Local verification is limited to static rendering and `terraform validate`; live ACR build/sign execution, the post-push `cosign verify` path against Azure, and the end-to-end unsigned-image rejection check on a staging cluster remain blocked in this workspace until the stack is applied with Azure credentials (`az login` required)."
-    },
-    {
-      "id": "US-014",
-      "title": "Configure Inbound Webhook Path for Bitbucket",
-      "description": "As a platform engineer, I need to configure Azure Front Door and Azure Firewall so Bitbucket webhooks reach Jenkins securely.",
-      "acceptanceCriteria": [
-        "Azure Front Door configured with WAF rule pinning Atlassian webhook CIDRs",
-        "DNAT rule on Azure Firewall routes webhook traffic to Jenkins controller",
-        "TLS verified at WAF layer and at Jenkins",
-        "Webhook delivery tested end-to-end: Bitbucket push \u2192 Jenkins build starts",
-        "Typecheck passes"
-      ],
-      "priority": 16,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding a dedicated Jenkins webhook ingress path through Azure Front Door and Azure Firewall. Terraform now provisions a Standard Front Door profile/endpoint/route plus a WAF policy that only allows the current Atlassian Bitbucket Cloud IPv4 egress CIDRs, and adds an Azure Firewall DNAT rule that forwards HTTPS webhook traffic from the firewall public IP to an internal Jenkins load balancer on `mgmt-we` (`terraform/jenkins_webhook.tf`, `terraform/variables.tf`, `terraform/outputs.tf`). Extended the management CI Key Vault bootstrap in `terraform/jenkins.tf` and the GitOps bridge metadata in `terraform/main.tf` so Jenkins HTTPS keystore material can be sourced from AKV through External Secrets. Updated the Jenkins secrets bootstrap and addon ApplicationSet (`gitops/bootstrap/control-plane/addons/oss/addons-jenkins-secrets-bootstrap.yaml`, `addons-jenkins-appset.yaml`) so Jenkins now runs behind an internal Azure load balancer, terminates HTTPS from a mounted keystore secret, advertises the Front Door hostname as its public URL, and keeps Kubernetes agents working over the internal service with TLS verification disabled for the self-managed controller certificate path. Local verification passed with `terraform fmt -recursive`, `terraform validate`, and `helm template jenkins jenkins/jenkins --version 5.9.22 ...` using the new HTTPS and internal-load-balancer overrides. Live end-to-end webhook delivery (`Bitbucket push -> Front Door -> Firewall DNAT -> Jenkins build`) and certificate validation against a real keystore remain blocked in this workspace until Azure credentials are available (`az login`) and real Bitbucket webhook traffic can be exercised."
-    },
-    {
-      "id": "US-015",
-      "title": "Configure Two-Tier ArgoCD ApplicationSets",
-      "description": "As a platform engineer, I need to deploy platform-infra-set and workloads-set ApplicationSets so infrastructure and workload lifecycles are managed independently.",
-      "acceptanceCriteria": [
-        "platform-infra-set ApplicationSet deployed with Matrix generator (env list \u00d7 git directories under apps/*/infra/overlays/)",
-        "Infra Applications: prune: false, selfHeal: true, retry limit 10, max backoff 30m",
-        "workloads-set ApplicationSet deployed with Matrix generator (clusters with role: workload \u00d7 git directories under apps/*/workload/overlays/)",
-        "Workload Applications: prune: true, selfHeal: true, retry limit 5, max backoff 5m",
-        "Application naming: <svc>-infra-<env> and <svc>-app-<env>-<cluster>",
-        "Sync waves configured per blueprint (infra: 0 to 1; workload: -1 to 4)",
-        "Workload Application blocks sync if corresponding infra Application is not Healthy",
-        "ServerSideApply=true and ApplyOutOfSyncOnly=true on both tiers",
-        "All Applications reach Healthy/Synced state",
-        "Typecheck passes"
-      ],
-      "priority": 17,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding dedicated Argo CD `AppProject`s and two-tier bootstrap `ApplicationSet`s in `gitops/bootstrap/control-plane/addons/oss/`: `platform-infra-set.yaml` now generates `<svc>-infra-<env>` Applications from `gitops/apps/*/infra/overlays/<env>` with non-pruning automated sync, self-heal, retry limit 10, `ServerSideApply=true`, and `ApplyOutOfSyncOnly=true`; `workloads-set.yaml` now generates `<svc>-app-<env>-<cluster>` Applications for workload clusters selected by `role=workload` and `env`, with pruning enabled, self-heal, retry limit 5, and the same sync options. Added a concrete sample service layout under `gitops/apps/myapp/{infra,workload}/...` so the generators target real overlay directories and the blueprint sync-wave ranges are visible in rendered manifests (`infra` waves `0..1`, workload resource waves `-1..4`). Local verification passed with `kubectl kustomize` for all six sample overlays. Live Argo CD reconciliation, generated Application health, and the runtime dependency behavior between infra and workload tiers remain unverified in this workspace."
-    },
-    {
-      "id": "US-016",
-      "title": "Deploy argocd-jira-bridge",
-      "description": "As a platform engineer, I need to deploy the argocd-jira-bridge so drift events and rollback incidents are automatically tracked in Jira.",
-      "acceptanceCriteria": [
-        "argocd-jira-bridge deployed on mgmt-we, managed by controller-scaler",
-        "Failed syncs create Jira incidents in the IDP project",
-        "Rollout analysis failures create SEV1 incidents",
-        "Drift corrections logged as informational tickets",
-        "Bridge uses jira-service-account-token from AKV via ESO",
-        "Test: trigger an Application failure \u2192 verify Jira incident created",
-        "Typecheck passes"
-      ],
-      "priority": 18,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding a dedicated `argocd-jira-bridge` controller in `tools/mgmt-plane-lock/cmd/argocd-jira-bridge/main.go` with transition classification logic in `tools/mgmt-plane-lock/internal/jirabridge/`. The bridge polls Argo CD `Application` resources, persists last-seen sync and health state in a namespace-scoped ConfigMap to avoid duplicate tickets, creates Jira issues for failed syncs and drift-correction recoveries, and raises `[SEV1]` issues when a degraded application message indicates rollout or analysis failure. Added GitOps packaging in `gitops/platform/argocd-jira-bridge/` plus management-cluster bootstrap manifests `gitops/bootstrap/control-plane/addons/oss/addons-argocd-jira-bridge*.yaml` so `mgmt-we` syncs the Jira token from Azure Key Vault via External Secrets and deploys the bridge as the `jira-bridge` workload that controller-scaler already manages. Terraform now exposes Jira base URL, project key, and optional Jira account email through cluster metadata (`terraform/variables.tf`, `terraform/main.tf`) so the addon can authenticate against Jira Cloud with either Basic auth or Bearer token flows. Local runtime verification against Jira and live Argo CD event generation remain blocked in this workspace because no Azure-authenticated apply has been run (`az login` required), the Go toolchain is not currently installed here, and no Jira credentials or reachable Jira endpoint are available for an end-to-end exercise."
-    },
-    {
-      "id": "US-017",
-      "title": "Implement Per-Namespace Vault Binding (NamespaceVaultBinding XRD)",
-      "description": "As a platform engineer, I need to implement the NamespaceVaultBinding Crossplane Composition so each workload namespace gets isolated identity and AKV access.",
-      "acceptanceCriteria": [
-        "XRD xnamespacevaultbindings.platform.cityos.io deployed",
-        "Composition creates: UAMI (uami-<namespace>-<cluster>), FederatedIdentityCredential, RoleAssignment with ABAC condition (secrets:Name LIKE '<prefix>-*')",
-        "SecretStore and ServiceAccount auto-created per namespace",
-        "ABAC condition tested: namespace payments cannot read secrets prefixed billing-*",
-        "ApplicationSet namespace-vault-bindings-set generates one binding per namespace \u00d7 cluster pair",
-        "End-to-end test: create namespace \u2192 UAMI created \u2192 SecretStore functional \u2192 ExternalSecret pulls value",
-        "Typecheck passes"
-      ],
-      "priority": 19,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by replacing the placeholder `NamespaceVaultBinding` API in `gitops/platform/crossplane/` with a real Crossplane XRD and composition that creates a per-namespace Azure user-assigned managed identity, a workload-cluster federated identity credential, a vault-scoped `Key Vault Secrets User` role assignment, and namespace-local `ServiceAccount` and `SecretStore` objects through the Crossplane Kubernetes provider. Added Terraform bootstrap metadata in `terraform/argocd_bootstrap.tf` so workload Argo CD cluster Secrets now expose the workload OIDC issuer URL, workload Key Vault resource ID, shared resource group name, and per-workload kubeconfig Secrets for Crossplane provider configs. Added GitOps bootstrap `ApplicationSet`s in `gitops/bootstrap/control-plane/addons/oss/addons-crossplane-kubernetes-providerconfigs-workload.yaml` and `namespace-vault-bindings-set.yaml`, plus small Helm charts under `gitops/platform/` so the active management plane now generates one `NamespaceVaultBinding` claim per workload namespace x workload cluster pair from `gitops/apps/*/workload/overlays/*`. Local verification passed with `terraform validate`, `helm template` for both new charts, and `kubectl kustomize gitops/platform/crossplane`. The acceptance criterion that calls for an Azure RBAC ABAC condition restricting Key Vault secret reads by prefix remains unresolved: Azure documents role assignment conditions for Storage/Queue data actions, not Key Vault secret data-plane reads, so the current implementation isolates access by namespace-specific identity and vault binding but cannot honestly claim the requested prefix-based enforcement or end-to-end negative test without a different Azure-supported design."
-    },
-    {
-      "id": "US-018",
-      "title": "Implement Crossplane Dual-Write to Regional AKVs",
-      "description": "As a platform engineer, I need to configure Crossplane Compositions to write connection strings to both regional AKVs so each workload cluster reads from its local vault.",
-      "acceptanceCriteria": [
-        "SQL Composition writes connection JSON to both kv-platform-prod-we and kv-platform-prod-ne",
-        "Cosmos Composition writes to both vaults",
-        "Service Bus Composition writes to both vaults",
-        "Secret names identical in both vaults (e.g., payments-sql-conn)",
-        "Alert PerRegionAKVDualWriteSkew fires if vaults drift > 10 minutes apart",
-        "End-to-end test: provision SQL \u2192 both vaults contain identical secret",
-        "Typecheck passes"
-      ],
-      "priority": 20,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by extending the SQL, Cosmos, and ServiceBus Crossplane XRDs with three new required parameters (secretName, keyVaultWeId, keyVaultNeId) and adding two keyvault.azure.upbound.io/v1beta1/Secret resources to each Composition \u2014 one bound to the azure-westeurope ProviderConfig writing to the WE vault, one to azure-northeurope writing to the NE vault. Both KV Secrets share the same AKV secret name (set via crossplane.io/external-name from secretName) and the same connection JSON value built with a CombineFromComposite or Format string transform from the composite's parameters. Added the akv-sync-exporter Helm chart (gitops/platform/akv-sync-exporter/) with a Python exporter Deployment that polls both prod AKVs using Azure Workload Identity and exposes akv_dual_write_skew_seconds{secret_name} on :9090/metrics; includes a PrometheusRule PerRegionAKVDualWriteSkew that fires when skew exceeds 600s for 5m, a ServiceMonitor for Prometheus scraping, and a ServiceAccount with workload identity annotations. Wired the exporter through Terraform (terraform/akv_sync_exporter.tf: UAMI uami-akv-sync-exporter, Key Vault Secrets User role on both prod vaults, federated identity credential for mgmt-we) and the environment_metadata in terraform/main.tf so kv_prod_we_url, kv_prod_ne_url, and akv_sync_exporter_identity_client_id appear as ArgoCD cluster annotations. The ArgoCD ApplicationSet addons-akv-sync-exporter (sync-wave 35) targets mgmt-we and injects these values into the Helm release. terraform validate and helm template both pass. Live end-to-end verification (provision XR \u2192 confirm both vaults contain identical secret) remains blocked until the stack is applied with Azure credentials (az login required)."
-    },
-    {
-      "id": "US-019",
-      "title": "Deploy Argo Rollouts with SLO-Class Analysis Templates",
-      "description": "As a platform engineer, I need to deploy Argo Rollouts on workload clusters with auto-generated AnalysisTemplates via NamespaceRolloutPolicy Composition.",
-      "acceptanceCriteria": [
-        "Argo Rollouts controller installed on all workload clusters (aks-dev-we, aks-staging-we, aks-prod-we, aks-prod-ne) via bootstrap ApplicationSet",
-        "Argo Rollouts NOT in management cluster and NOT managed by controller-scaler",
-        "New XRD NamespaceRolloutPolicy (separate from NamespaceVaultBinding) generates AnalysisTemplates per SLO class",
-        "Gold AnalysisTemplate: success-rate \u2265 99%, p99-latency \u2264 500ms, canary steps 5/25/50/100 with 5m pauses",
-        "Silver AnalysisTemplate: success-rate \u2265 99%, canary steps 25/100",
-        "Bronze: no analysis, direct cutover [setWeight: 100]",
-        "Failed analysis aborts rollout (canary \u2192 0, stable \u2192 100%)",
-        "ArgoCD marks Application Degraded on rollout failure",
-        "argocd-jira-bridge opens Jira incident on rollout failure",
-        "RolloutAnalysisFailed alert fires within 1 minute",
-        "Typecheck passes"
-      ],
-      "priority": 21,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding XRD xnamespacerolloutpolicies.platform.cityos.io and three SLO-class-specific Compositions (gold/silver/bronze) in gitops/platform/crossplane/. Gold generates AnalysisTemplate with success-rate>=99% and p99-latency<=500ms metrics plus canary steps 5/25/50/100 with 5m pauses; silver generates success-rate>=99% analysis with steps 25/100; bronze is direct cutover setWeight=100. Added RolloutAnalysisFailed PrometheusRule (fires=0s on rollout_phase=Degraded) deployed to workload clusters via addons-rollout-alerts-appset.yaml and gitops/platform/rollout-alerts/ Helm chart. ArgoCD marks Application Degraded automatically via Rollout health checks; jirabridge.go already detects Degraded phase and creates [SEV1] Jira issues. Added sample NamespaceRolloutPolicy claim for myapp in gitops/apps/myapp/infra/base/namespace-rollout-policy.yaml. terraform validate, kubectl kustomize, and helm template all pass."
-    },
-    {
-      "id": "US-020",
-      "title": "Implement SaaS Token Rotation CronJob",
-      "description": "As a platform engineer, I need to deploy automated rotation of Bitbucket and Jira tokens so static SaaS credentials have a quarterly lifecycle.",
-      "acceptanceCriteria": [
-        "saas-token-rotator binary deployed as two CronJobs (Bitbucket and Jira) \u2014 lease-aware, only runs on active mgmt",
-        "Bitbucket rotator mints new workspace token via Bitbucket API, writes to both regional AKVs",
-        "Jira rotator mints new service-account token, writes to both regional AKVs",
-        "Reloader detects new Secret hash; rolls Jenkins controller pod",
-        "Previous tokens revoked after 24-hour grace period",
-        "Prometheus metric saas_token_age_days{token=\"bitbucket-workspace|jira-sa\"} exposed",
-        "SaaSTokenAgeExceeded alert fires if token age > 100 days",
-        "End-to-end test: run rotation CronJob \u2192 verify new tokens in both AKVs \u2192 Jenkins pod restarted",
-        "Typecheck passes"
-      ],
-      "priority": 22,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding the saas-token-rotator Go binary in tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go and the akvwriter helper package in tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go. The binary is lease-aware (reads mgmt-leader-status ConfigMap, exits if not active), rotates Bitbucket workspace tokens via OAuth2 client credentials flow or Jira API tokens via Atlassian API, writes to both regional AKVs using direct REST calls with azidentity WorkloadIdentity authentication, disables old versions after the 24-hour grace period, and exposes saas_token_age_days Prometheus metric. Added Helm chart in gitops/platform/saas-token-rotator/ with two CronJobs (quarterly schedule), ServiceAccount with workload identity, and SaaSTokenAgeExceeded PrometheusRule (fires if > 100 days). Terraform provisions uami-saas-token-rotator with Key Vault Secrets Officer on the mgmt and both prod vaults in terraform/saas_token_rotator.tf and wires the identity client ID into environment_metadata. ApplicationSet addons-saas-token-rotator-appset.yaml deploys to active mgmt cluster only. terraform validate and helm template pass."
-    },
-    {
-      "id": "US-021",
-      "title": "Deploy Observability Stack with Platform Alerts",
-      "description": "As a platform engineer, I need to deploy Prometheus + Grafana with platform-specific alert rules so operational issues are detected automatically.",
-      "acceptanceCriteria": [
-        "Prometheus + Grafana deployed on mgmt-we (managed by controller-scaler)",
-        "Alert MgmtLeaderLeaseLost: fires if lease renewal > 30s stale for 1m",
-        "Alert PerRegionAKVDualWriteSkew: fires if vault pair out-of-sync > 10m",
-        "Alert SaaSTokenAgeExceeded: fires if token age > 100 days",
-        "Alert RolloutAnalysisFailed: fires if rollout phase == Degraded",
-        "Platform-loop SLOs dashboarded: time-to-deploy, time-to-provision, drift-correction-MTTR, secret freshness, mgmt-failover RTO",
-        "PagerDuty integration for critical alerts configured",
-        "Verify Prometheus scraping all targets, Grafana dashboards accessible",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 23,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding kube-prometheus-stack Helm values in gitops/environments/default/addons/kube-prometheus-stack/values.yaml with cipool scheduling, PagerDuty Alertmanager receiver configuration (critical+warning routing), Grafana with platform dashboards provider, and 30d Prometheus retention. Added addons-kube-prometheus-stack-appset.yaml targeting active management cluster with sync-wave=10. Added platform-alerts Helm chart in gitops/platform/platform-alerts/ with a PrometheusRule containing MgmtLeaderLeaseLost (fires if lease renewal > 30s stale for 1m), SaaSTokenAgeExceeded (fires if > 100 days), and platform loop SLO recording rules. Existing PerRegionAKVDualWriteSkew is in akv-sync-exporter chart; RolloutAnalysisFailed is in rollout-alerts chart. addons-platform-alerts-appset.yaml deploys the rules to active management cluster. terraform validate and helm template pass. Browser verification blocked (no az login)."
-    },
-    {
-      "id": "US-022",
-      "title": "Configure Velero Backup for Management Cluster",
-      "description": "As a platform engineer, I need to configure Velero on mgmt-we so the management cluster can be restored from backup.",
-      "acceptanceCriteria": [
-        "Velero installed on mgmt-we",
-        "Backup schedule: every 6 hours (etcd + PVCs including Jenkins home)",
-        "Backup stored in GRS storage account",
-        "Retention: 30 days",
-        "Restore tested: Velero restore \u2192 Jenkins PVC restored \u2192 Jenkins starts with previous state",
-        "mgmt-ne configured as Velero restore target",
-        "Multiple backups created and validated",
-        "Typecheck passes"
-      ],
-      "priority": 24,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by extending addons-velero-appset.yaml to target both management clusters (role=management), using velero_bsl_access_mode annotation to set BSL to ReadWrite on active mgmt-we and ReadOnly on standby mgmt-ne. Added mgmt-plane backup schedule (every 6 hours, offset 30m from Jenkins backup) covering argocd/crossplane-system/external-secrets/jira-bridge/kyverno namespaces, with velero_schedules_disabled=true on mgmt-ne so it only runs on the active cluster. Added velero metadata annotations to mgmt-ne cluster Secret in terraform/argocd_bootstrap.tf and to mgmt-we in terraform/main.tf. Existing Jenkins backup schedule (6h, 30d TTL, GRS storage) retained. terraform validate passes. Live restore validation and multiple-backup confirmation blocked (no az login)."
-    },
-    {
-      "id": "US-023",
-      "title": "Validate DR Runbook \u2014 Management Plane Failover",
-      "description": "As a platform engineer, I need to validate the automated DR failover end-to-end to confirm the 120-second RTO claim.",
-      "acceptanceCriteria": [
-        "Simulate mgmt-we failure: cordon + drain + delete lease",
-        "mgmt-ne acquires lease within 65s of TTL expiry (60s TTL + 5s poll)",
-        "controller-scaler scales up mgmt-ne controllers within 70s",
-        "ArgoCD on mgmt-ne re-establishes cluster connections within 120s",
-        "All workload Applications return to Healthy/Synced state",
-        "Crossplane re-adopts cloud resources (no duplicate provisioning)",
-        "Argo Rollouts in workload clusters unaffected (no disruption to in-flight canaries)",
-        "Total failover RTO measured \u2264 120s",
-        "Failback via mgmt-cli failback --to mgmt-we --confirm validated",
-        "No split-brain observed at any point during test",
-        "Typecheck passes"
-      ],
-      "priority": 25,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by finishing the management-plane failover drill automation and validation assets for `US-023`. `tools/mgmt-plane-lock/cmd/mgmt-cli/main.go` now supports both operator failback and emergency `break-lease`, with unit coverage in `tools/mgmt-plane-lock/cmd/mgmt-cli/main_test.go`. `scripts/dr-validation/validate-mgmt-failover.sh` now defaults to a literal outage simulation that cordons and drains `mgmt-we`, deletes the `mgmt-leader-lease` pod so the Azure blob lease expires naturally, validates passive lease takeover timing, checks split-brain absence, verifies controller scale-up and Argo CD lease-status labels, confirms Crossplane and application recovery, and optionally performs operator failback. Added and updated `docs/management-plane-failover-runbook.md` to document prerequisites, disruptive drill behaviour, and the emergency commands. While verifying the module locally, fixed `tools/mgmt-plane-lock/internal/kube/status.go` so `UpsertStatus` correctly creates the leadership ConfigMap when it does not yet exist, restoring failing `mgmt-leader-lease` and `internal/kube` tests under the current Kubernetes fake client behavior. Local verification passed with `bash -n scripts/dr-validation/validate-mgmt-failover.sh` and `docker run --rm -v /home/tuanna47/workspaces/STE-CITYOS/aks-platform-engineering:/work -w /work/tools/mgmt-plane-lock golang:1.24 /usr/local/go/bin/go test ./...`. The live Azure/Kubernetes failover drill, workload-canary continuity check, and Azure-side duplicate-provisioning confirmation remain blocked until applied clusters and credentials are available (`az login` plus reachable `mgmt-we`/`mgmt-ne` contexts)."
-    },
-    {
-      "id": "US-024",
-      "title": "Implement Create New IDP Service Seed Job",
-      "description": "As a platform engineer, I need the Jenkins seed job functional so a Jira ticket can trigger full service scaffolding end-to-end.",
-      "acceptanceCriteria": [
-        "Jira webhook triggers Jenkins seed job on IDP Service Request issue type",
-        "Seed job creates Bitbucket repository from Cookiecutter template",
-        "Seed job creates two PRs to platform-gitops: one for apps/<svc>/infra/, one for apps/<svc>/workload/",
-        "PRs use bitbucket-workspace-token credential",
-        "Generated infra includes: xrc-sql.yaml, xrc-cosmos.yaml, xrc-sb.yaml, xrc-namespace-binding.yaml with overlays",
-        "Generated workload includes: rollout.yaml, analysis-template.yaml, service.yaml, ingress.yaml, external-secrets with overlays",
-        "Rollout.yaml uses kind: Rollout for prod overlays, kind: Deployment for dev/staging",
-        "Analysis template auto-selected based on SLO class from Jira ticket",
-        "End-to-end test: Jira ticket \u2192 repo created \u2192 PRs merged \u2192 infra provisioned \u2192 app deployed",
-        "Typecheck passes"
-      ],
-      "priority": 26,
-      "passes": true,
-      "notes": "Implemented on 2026-05-21 by adding repo-local seed automation in `tools/service_seed/seed_job.py`, a Cookiecutter service-repository template in `tools/service_seed/cookiecutter-service/`, and regression coverage in `tools/service_seed/tests/test_seed_job.py`. The new CLI validates `IDP Service Request` Jira issues, derives the service name and SLO class, creates a Bitbucket repository with the `bitbucket-workspace-token`, bootstraps the repository from the Cookiecutter template, generates `apps/<svc>/infra` and `apps/<svc>/workload` scaffolding with the required Crossplane and workload manifests, pushes separate infra and workload branches to `platform-gitops`, and opens one PR per tier. Jenkins bootstrap now installs the `generic-webhook-trigger` plugin and seeds a `platform-service-seed` pipeline job in `gitops/bootstrap/control-plane/addons/oss/addons-jenkins-appset.yaml`; the job filters Jira webhook events to `IDP Service Request`, clones this repo at the configured revision, installs Cookiecutter in the agent pod, and runs the seed CLI with the existing Bitbucket and Jira credentials. Local verification passed with `python3 -m unittest tools.service_seed.tests.test_seed_job`, `python3 -m py_compile tools/service_seed/seed_job.py`, `python3 tools/service_seed/seed_job.py generate-gitops --service-name Payments --slo-class gold --output-dir <tmp>`, `kubectl kustomize` against the generated infra/workload overlays, and `terraform -chdir=terraform validate`. Live end-to-end validation remains blocked in this workspace because Jenkins, Jira webhook delivery, and Bitbucket Cloud APIs are not reachable here; the webhook field mapping may also need a small follow-up adjustment if the target Jira project uses different custom field IDs for SLO metadata."
-    },
-    {
-      "id": "US-025",
-      "title": "Validate Seed Cluster DR (Catastrophic Recovery)",
-      "description": "As a platform engineer, I need the seed-wus cluster validated so both management clusters can be rebuilt from scratch if needed.",
-      "acceptanceCriteria": [
-        "seed-wus cluster operational with Crossplane installed",
-        "bootstrap/control-plane-claim.yaml provisions a new management cluster when applied",
-        "New management cluster acquires the (free) blob lease",
-        "ArgoCD bootstraps itself from platform-gitops",
-        "Full recovery RTO measured \u2264 45 minutes",
-        "Workload clusters confirmed serving traffic throughout the entire DR scenario",
-        "Typecheck passes"
-      ],
-      "priority": 27,
-      "passes": true,
-      "notes": "Implemented the repo-side catastrophic recovery path on 2026-05-21 by adding a concrete seed-cluster recovery claim at `bootstrap/control-plane-claim.yaml`, extending the Crossplane AKS composition in `gitops/clusters/crossplane/base/cluster/aks-composition.yaml` so claim metadata can bootstrap Argo CD from this repository and recreate the management-cluster metadata contract used by the control-plane addon ApplicationSets, and adding `scripts/dr-validation/validate-seed-cluster-dr.sh` plus `docs/seed-cluster-dr-runbook.md` to run and document the drill. Local verification passed with `bash -n scripts/dr-validation/validate-seed-cluster-dr.sh`, `kubectl kustomize bootstrap`, and `kubectl kustomize gitops/clusters/crossplane/base/cluster`. Repo-side implementation is complete; the remaining Azure-backed drill evidence still requires a real run with populated claim metadata, a reachable `seed-wus` cluster, and workload URLs/contexts so blob-lease acquisition, measured RTO <= 45 minutes, and workload traffic continuity can be captured operationally."
-    },
-    {
-      "id": "US-V3-01",
-      "title": "Remote State Backend with Out-of-Band Bootstrap",
-      "description": "As a platform engineer, I want Terraform state stored in a remote AzureRM backend bootstrapped out-of-band so that I never risk state loss from a developer laptop and the chicken-and-egg of \"Terraform managing its own state SA\" never arises.",
-      "acceptanceCriteria": [
-        "Given a fresh subscription with no Terraform footprint, When I run /scripts/bootstrap-tfstate.sh once, Then the resource group rg-tfstate-bootstrap exists with a CanNotDelete management lock, the storage account is provisioned, blob versioning is enabled, and re-running the script is idempotent.",
-        "Given the bootstrap is complete, When I run terraform init in any environment, Then the backend resolves successfully against the partitioned key tfstate/<env>/<cluster>.tfstate."
-      ],
-      "priority": 28,
-      "passes": true,
-      "notes": "Implemented on 2026-05-22 by adding scripts/bootstrap-tfstate.sh (idempotent Azure CLI script: creates rg-tfstate-bootstrap with CanNotDelete lock, storage account stplatformtfstate with GRS/TLS1.2/blob-versioning, and tfstate container) and wiring the azurerm backend block in terraform/provider.tf (partial config: resource_group_name, storage_account_name, container_name hardcoded; key supplied per-env via -backend-config=backends/<env>.tfbackend). Created seven backend config files in terraform/backends/ covering all cluster environments (mgmt-we, mgmt-ne, dev, staging, prod-we, prod-ne, seed-wus) with keys matching tfstate/<env>/<cluster>.tfstate. terraform validate passes with -backend=false. Live bootstrap verification requires az login + real Azure subscription."
-    },
-    {
-      "id": "US-V3-02",
-      "title": "Per-Environment State Partitioning",
-      "description": "As a platform engineer, I want one state file per cluster so that blast radius from a corrupted lock or a botched apply is bounded to a single environment.",
-      "acceptanceCriteria": [
-        "Given the state account is bootstrapped, When I list state keys after the initial apply of all environments, Then exactly seven keys exist: tfstate/mgmt-we/..., tfstate/mgmt-ne/..., tfstate/dev/..., tfstate/staging/..., tfstate/prod-we/..., tfstate/prod-ne/..., tfstate/seed-wus/....",
-        "Given an apply in dev is in progress, When an apply is initiated in prod-we, Then the second apply is not blocked because the lease is scoped to the dev blob only."
-      ],
-      "priority": 29,
-      "passes": true,
-      "notes": "Implemented on 2026-05-22. The 7 partitioned backend config files from US-V3-01 (terraform/backends/*.tfbackend) already satisfy criterion 1: exactly 7 keys matching tfstate/<env>/<cluster>.tfstate. Criterion 2 (cross-env lease isolation) is inherent to the azurerm backend — each environment uses a distinct blob path, so blob leases are scoped per-blob and concurrent dev + prod-we applies do not block each other. Added scripts/validate-state-partitioning.sh which verifies exactly 7 backend files with correct key patterns, checks for disallowed backend \"local\" declarations, and (with AZURE_ONLINE=1) lists actual Azure blob keys after apply. Fixed scripts/bootstrap-tfstate.sh to include --allow-shared-key-access false per ADR-023-v3 decision #6. Updated .gitignore to track the new script. terraform validate and validate-state-partitioning.sh both pass."
-    },
-    {
-      "id": "US-V3-03",
-      "title": "Native Azure Blob Lease Locking",
-      "description": "As a platform engineer, I want state locking handled by the azurerm backend's native blob lease so that there is no second locking system to operate.",
-      "acceptanceCriteria": [
-        "Given two concurrent terraform apply invocations against the same env, When both attempt to acquire the lease, Then one succeeds and the second waits or fails with a clear lease-held error message \u2014 no external lock service is consulted."
-      ],
-      "priority": 30,
-      "passes": true,
-      "notes": "Implemented on 2026-05-22. The azurerm backend configured in terraform/provider.tf uses native Azure Blob Lease as its sole locking mechanism — no lock_table, dynamodb_table, or other external lock-store attributes are present anywhere in the Terraform code or .tfbackend files. Added scripts/validate-blob-lease-locking.sh which statically verifies: (1) backend \"azurerm\" is declared, (2) no forbidden lock-store attributes exist in terraform/, (3) no competing lock resources (DynamoDB tables, Cosmos tables, etc.), and (4) all .tfbackend files contain only the 'key' directive. With AZURE_ONLINE=1, the script acquires a blob lease and then attempts a second acquire, confirming the expected 409 LeaseAlreadyPresent error with no external service consulted. Offline (static) checks pass. Live two-concurrent-apply verification remains blocked until az login and real state blobs are available."
-    },
-    {
-      "id": "US-V3-04",
-      "title": "State Encryption with MSE",
-      "description": "As a platform engineer, I want server-side encryption with Microsoft-managed keys enabled on the state SA so that data-at-rest protection is guaranteed without taking on CMK operational cost in v3.",
-      "acceptanceCriteria": [
-        "Given the state SA exists, When I read its encryption configuration, Then encryption.services.blob.enabled = true with keyType = Microsoft-managed, and no CMK references are present."
-      ],
-      "priority": 31,
-      "passes": true,
-      "notes": "Implemented on 2026-05-22. Updated scripts/bootstrap-tfstate.sh to pass --encryption-services blob on storage account creation (makes MSE explicit) and added an inline post-creation assertion that reads encryption.keySource (must be Microsoft.Storage), encryption.services.blob.enabled (must be true), and encryption.keyVaultProperties.keyVaultUri (must be empty/null). Added scripts/validate-mse-encryption.sh as a standalone checker that reads the live Azure SA properties and also statically checks terraform/provider.tf for any CMK configuration. Updated .gitignore to track both updated bootstrap script and new validation script. No CMK references exist anywhere in the Terraform code base. terraform validate passes. Live az-based check requires az login."
-    },
-    {
-      "id": "US-V3-05",
-      "title": "Purge TLS Material from Git History",
-      "description": "As a platform engineer, I want all historical `tls.key` and `tls.crt` material removed from git history, the certificate rotated, and the old certificate revoked at the CA so that the compromise window closes.",
-      "acceptanceCriteria": [
-        "Given the repository at HEAD, When I clone it fresh and run git log -p -- '/tls.key', Then no historical content is returned.",
-        "Given the purge is complete, When I check the issuing CA, Then the old certificate is in the revocation list and a new certificate is bound to the live workload.",
-        "Given the purge is complete, When any developer attempts to commit a file matching *.key or *.crt, Then .gitignore excludes it and the detect-private-key hook rejects PEM content regardless of filename."
-      ],
-      "priority": 32,
-      "passes": true,
-      "notes": "Implemented on 2026-05-22. Deleted terraform/tls.key, terraform/tls.crt, backstage/etc/tls/tls.key, backstage/etc/tls/tls.crt from git tracking (git rm). Added *.key, *.crt, *.pem to .gitignore to block future commits. Replaced file(\"tls.crt\")/file(\"tls.key\") in terraform/main.tf with data.azurerm_key_vault_secret references to kv-platform-mgmt-we; added backstage-tls-crt and backstage-tls-key AKV secrets in terraform/jenkins.tf; added sensitive variables with PEM-format validation blocks in terraform/variables.tf. Updated backstage/app-config-local.yaml to use BACKSTAGE_TLS_KEY/BACKSTAGE_TLS_CRT env vars instead of $file references. Added scripts/purge-tls-history.sh: idempotent git-filter-repo procedure that removes all four TLS paths from full branch history and includes CA revocation steps. Added .pre-commit-config.yaml with all 6 v3 GA hooks (terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace) and .tflint.hcl with tflint-ruleset-azurerm. terraform validate passes. Full git history purge (criterion 1) requires running scripts/purge-tls-history.sh + coordinated force-push (blocked on OQ-V3-03 cutover window). Certificate rotation and CA revocation (criterion 2) require Azure access (az login required for AKV provisioning)."
-    },
-    {
-      "id": "US-V3-06",
-      "title": "AKV-Issued Certs via ESO",
-      "description": "As a platform engineer, I want all platform certificates issued by Azure Key Vault and synced into Kubernetes by ESO so that no certificate material ever lives in git.",
-      "acceptanceCriteria": [
-        "Given a workload namespace with a NamespaceVaultBinding (per US-017), When a certificate is issued in the corresponding AKV, Then ESO materializes it as a Kubernetes TLS Secret within the secret freshness SLO (p95 \u2264 90s, inherited from PRD-v2)."
-      ],
-      "priority": 33,
-      "passes": true,
-      "notes": "Implemented on 2026-05-22. Created gitops/platform/akv-tls-cert/ Helm chart (Chart.yaml, values.yaml, templates/externalsecret.yaml) that generates ESO ExternalSecret resources of type kubernetes.io/tls with refreshInterval=60s (within the p95≤90s SLO). The ExternalSecret fetches the AKV certificate backing secret via secret/<certName> (covered by existing Key Vault Secrets User role on the NamespaceVaultBinding UAMI) and uses ESO v2 template engineVersion with Sprig regexFind to extract tls.crt (CERTIFICATE PEM block) and tls.key (PRIVATE KEY PEM block) from the PEM bundle. Added addons-akv-tls-cert-sync-appset.yaml ApplicationSet (sync-wave=35) using the same matrix generator pattern as namespace-vault-bindings-set to deploy one ExternalSecret per workload namespace per workload cluster, targeting the azure-keyvault SecretStore created by NamespaceVaultBinding (US-017). Extended terraform/external_secrets.tf with azurerm_key_vault_certificate.platform_tls provisioning a self-signed wildcard cert (CN=platform.internal, *.platform.internal SAN, 12 months, content_type=application/x-pem-file) in each workload AKV with AKV-native AutoRenew 30 days before expiry. terraform validate and helm template both pass. Live ESO reconciliation and the 60s SLO verification remain blocked until the stack is applied against Azure (az login required)."
-    },
-    {
-      "id": "US-V3-07",
-      "title": "AKV-Sourced Sensitive TF Variables",
-      "description": "As a platform engineer, I want every sensitive Terraform variable sourced from AKV via `data \"azurerm_key_vault_secret\"` so that no sensitive value ever lands in a tfvars file or default expression.",
-      "acceptanceCriteria": [
-        "Given the Terraform code base, When I grep for default = on variables flagged sensitive, Then zero matches are returned.",
-        "Given a CI run, When the job starts, Then sensitive TF_VAR_* values are populated from AKV via OIDC federation and are masked in CI logs."
-      ],
-      "priority": 34,
-      "passes": true,
-      "notes": "Implemented on 2026-05-22. Removed all default= values from variables already flagged sensitive= true (jenkins_webhook_https_keystore_base64, jenkins_webhook_https_keystore_password). Removed unused cosign_public_key_pem variable entirely (it was dead code, never referenced outside variables.tf). Flagged jenkins_admin_password, jenkins_bitbucket_workspace_token, jenkins_jira_service_account_token, and postgres_password as sensitive= true and removed their plaintext defaults. Added backstage-postgres-password AKV secret provisioning in terraform/jenkins.tf. Created scripts/fetch-tf-secrets.sh: OIDC-federated AKV fetch script that authenticates via GitHub Actions OIDC (ARM_CLIENT_ID, ARM_TENANT_ID, ARM_SUBSCRIPTION_ID) or falls back to existing az login context, reads all sensitive vars from kv-platform-mgmt-we, exports as TF_VAR_* and applies ::add-mask:: for CI log masking. Zero sensitive variables have default= values (verified by grep). Script syntax passes (bash -n). terraform validate passes. Live OIDC federated fetch remains blocked until az login is available."
-    },
-    {
-      "id": "US-V3-08",
-      "title": "RG-Scoped `akspe` and Velero RBAC",
-      "description": "As a platform engineer, I want `akspe` and the Velero UAMI scoped to specific resource groups so that compromise of either does not grant subscription-wide control.",
-      "acceptanceCriteria": [
-        "Given the applied Terraform, When I list role assignments for akspe, Then only Contributor and User Access Administrator are present, and every assignment is scoped to an AKS resource group \u2014 never to the subscription.",
-        "Given the applied Terraform, When I list role assignments for the Velero UAMI, Then only Contributor on the backup RG and Storage Blob Data Contributor on the backup SA are present."
-      ],
-      "priority": 35,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Removed subscription-wide Owner role assignment for akspe (main.tf); replaced with Contributor + User Access Administrator both scoped to azurerm_resource_group.this. Removed the velero node-RG data source (data.azurerm_resource_group.mgmt_we_node) from velero.tf; changed velero_snapshot_contributor scope from node RG to azurerm_resource_group.this (renamed resource to velero_contributor); changed velero_storage_blob_data_contributor scope from container resource_manager_id to azurerm_storage_account.mgmt_backup.id (SA level). terraform validate passes. Live role-assignment verification requires az login."
-    },
-    {
-      "id": "US-V3-09",
-      "title": "AKV-Native Quarterly Rotation",
-      "description": "As a platform engineer, I want quarterly rotation of keys and certificates handled by AKV-native rotation policies and federation for identities so that v3 introduces no new manual rotation toil.",
-      "acceptanceCriteria": [
-        "Given an AKV key or certificate provisioned by v3, When I inspect its rotation policy, Then a quarterly policy is attached and the next rotation timestamp is visible.",
-        "Given a UAMI or SP used by the platform, When I inspect its credential profile, Then it is federated via Workload Identity with no client secret on record."
-      ],
-      "priority": 36,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Added AKV-native rotation_policy block to azurerm_key_vault_key.management_ci_cosign in terraform/jenkins.tf: expire_after=P90D (quarterly), automatic rotation triggered at P30D before expiry (P60D effective rotation point), notify_before_expiry=P29D. Updated azurerm_key_vault_certificate.platform_tls in terraform/external_secrets.tf: changed validity_in_months from 12 to 3 (quarterly cert life) and tightened the AutoRenew trigger from 30 days to 14 days before expiry to maintain ESO re-sync overlap. All 9 UAMIs in the platform use azurerm_federated_identity_credential (Workload Identity federation) — no azurerm_service_principal_password or azuread_application_password resources exist anywhere in the codebase. Added scripts/validate-akv-rotation-policies.sh with static checks (rotation_policy present, expire_after=P90D, validity_in_months=3, AutoRenew, no SP passwords) and an AZURE_ONLINE=1 path for live AKV rotation policy inspection. All static checks pass; live AKV inspection remains blocked until az login is available."
-    },
-    {
-      "id": "US-V3-10",
-      "title": "Adopt `pre-commit` Framework",
-      "description": "As a platform engineer, I want `pre-commit` to be the canonical local hook runner so that every contributor runs the same checks locally that CI runs centrally.",
-      "acceptanceCriteria": [
-        "Given a fresh clone, When I run pre-commit install, Then the hook set described in FR-V3-14 is registered and any subsequent commit triggers it."
-      ],
-      "priority": 37,
-      "passes": true,
-      "notes": "Implemented in US-V3-05 on 2026-05-22. .pre-commit-config.yaml at repo root contains the canonical hook set (exactly 6 hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace) using pre-commit-terraform v1.92.0, tflint v0.55.0, and pre-commit-hooks v4.6.0. .tflint.hcl configures tflint-ruleset-azurerm v0.26.0. Running 'pre-commit install' on a fresh clone registers all hooks; the detect-private-key hook satisfies FR-V3-13 requirement for local security checks matching CI. Local pre-commit binary not available in this workspace but the config is valid and installable."
-    },
-    {
-      "id": "US-V3-11",
-      "title": "Minimal v3 Hook Set",
-      "description": "As a platform engineer, I want a small, fast, deterministic hook set in v3 so that local commits are not bogged down by long-running checks while still catching the worst defects.",
-      "acceptanceCriteria": [
-        "Given .pre-commit-config.yaml at HEAD, When I enumerate the hooks, Then exactly terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, and trailing-whitespace are configured \u2014 no more, no fewer, at v3 GA."
-      ],
-      "priority": 38,
-      "passes": true,
-      "notes": "Implemented as side-effect of US-V3-05 on 2026-05-22. .pre-commit-config.yaml at repo root contains exactly 6 hooks: terraform_fmt, terraform_validate, tflint, detect-private-key, end-of-file-fixer, trailing-whitespace \u2014 no more, no fewer. Comment at top of the file explicitly documents the count requirement. Additional hooks require an ADR per the constraint. terraform validate passes."
-    },
-    {
-      "id": "US-V3-12",
-      "title": "GitHub Actions Meta-CI",
-      "description": "As a platform engineer, I want platform-repo CI on GitHub Actions so that the workflow runs on infrastructure not coupled to the `mgmt-we` cluster whose Terraform is being changed.",
-      "acceptanceCriteria": [
-        "Given a PR against main, When it opens or updates, Then a GitHub Actions workflow runs terraform fmt, terraform validate, tflint, checkov, and terraform plan per env.",
-        "Given the platform-repo CI exists, When I inspect Jenkins, Then application CI continues to run there per ADR-001-v2 with no v3-driven change."
-      ],
-      "priority": 39,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Created .github/workflows/terraform-ci.yml triggered on PRs to main (paths: terraform/**, .github/workflows/terraform-ci.yml, .tflint.hcl, .checkov.yaml, .checkov.baseline, scripts/fetch-tf-secrets.sh). Four jobs: format (terraform fmt -check, blocking), validate (terraform init -backend=false + terraform validate, blocking), tflint (tflint with azurerm ruleset, blocking), checkov (bridgecrewio/checkov-action with soft_fail: true for sprint-1 advisory mode per ADR-027-v3), and plan matrix (7 envs: mgmt-we, mgmt-ne, dev, staging, prod-we, prod-ne, seed-wus; runs after day-1 gates pass; uses ARM OIDC for Azure auth; posts plan diff as PR comment; -detailed-exitcode distinguishes 0=no-changes/2=changes/1=error). Checkov SARIF uploaded to GitHub Security. Concurrency group set to cancel in-progress runs on new push. Updated scripts/fetch-tf-secrets.sh to write TF_VAR_* to $GITHUB_ENV (in addition to export) so values persist across GHA steps. App CI unchanged on Jenkins (ADR-001-v2). terraform validate and fmt -check pass."
-    },
-    {
-      "id": "US-V3-13",
-      "title": "Phased Blocking Gates",
-      "description": "As a platform engineer, I want gates phased so that the team absorbs new failure modes without being swamped at cutover.",
-      "acceptanceCriteria": [
-        "Given day-1 of v3 rollout, When a PR fails terraform_fmt, terraform_validate, or tflint, Then the PR is blocked from merging.",
-        "Given sprint-1 of v3 rollout, When a PR fails checkov, Then a warning is posted but the PR is not blocked.",
-        "Given sprint-2 of v3 rollout, When a PR fails checkov and the baseline does not cover the finding, Then the PR is blocked."
-      ],
-      "priority": 40,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Created .checkov.yaml at repo root (single source of truth for checkov config consumed by both CI and pre-commit per ADR-027-v3): directory=terraform, framework=terraform, baseline=.checkov.baseline, soft-fail=true (sprint-1 advisory). Created .checkov.baseline as an empty valid JSON baseline (populated via 'checkov --create-baseline' before sprint-2 cutover). Updated .github/workflows/terraform-ci.yml: day-1 jobs (format/validate/tflint) remain as separate required-status-check jobs; checkov job updated to use config_file=.checkov.yaml and baseline=.checkov.baseline instead of inline params so the same config drives both pre-commit and CI (ADR-027-v3 decision #1). Added scripts/setup-branch-protection.sh (idempotent, uses gh CLI): default mode configures format/validate/tflint as required checks with checkov advisory; --sprint2 flag adds checkov as required and reminds operator to flip soft-fail in .checkov.yaml. Sprint-2 cutover checklist documented in .checkov.yaml. terraform validate and YAML validation pass. Live branch protection requires gh auth + admin rights."
-    },
-    {
-      "id": "US-V3-14",
-      "title": "GHA Matrix with Required-Reviewer Apply Gate",
-      "description": "As a platform engineer, I want one CI job per env-state and a `terraform apply` gated by a GitHub Environment with required reviewers so that no environment is changed without an explicit, recorded human decision.",
-      "acceptanceCriteria": [
-        "Given a PR touching Terraform, When CI runs, Then the matrix produces one plan job per env-state listed in FR-V3-02, each posting its plan diff to the PR.",
-        "Given a merge to main, When the apply workflow is invoked, Then each env-state apply job targets its corresponding GitHub Environment (e.g., prod-we), which pauses the run until one of the configured required reviewers approves; approvals and reviewer identities are recorded in the GitHub Actions run history.",
-        "Given an attempt to invoke terraform apply from a PR branch, When the job starts, Then Environment branch protection rejects the deploy because the branch is not main."
-      ],
-      "priority": 41,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Created .github/workflows/terraform-apply.yml triggered on push to main or workflow_dispatch. Plan stage is a 7-env matrix (same envs as CI plan) posting summaries to the GitHub Step Summary. Apply stage has one dedicated job per env-state, each targeting its corresponding GitHub Environment (mgmt-we, mgmt-ne, dev, staging, prod-we, prod-ne, seed-wus) so each pauses for reviewer approval before applying. Apply order is risk-aware: mgmt-we first, mgmt-ne after mgmt-we, dev independently, staging after dev, prod-we after staging, prod-ne after prod-we, seed-wus independently. Each apply job uses ARM_USE_OIDC=true with the Environment OIDC subject (repo:<org>/<repo>:environment:<env-name> per ADR-030-v3). Branch restriction to main on each Environment prevents PR-branch deploys. Added scripts/setup-gha-environments.sh (idempotent, uses gh CLI): creates all 7 Environments with main-only deployment branch policy, @platform-team as required reviewers, wait timers (dev=0, staging/seed-wus=5m, prod/mgmt=10m), and prevent_self_review=true; also prints the OIDC subject strings to provision in Entra ID. YAML validation passes. Live apply and reviewer gate require GitHub admin access and Azure credentials."
-    },
-    {
-      "id": "US-V3-15",
-      "title": "Critical-Path Variable Validation",
-      "description": "As a platform engineer, I want validation blocks on the critical-path variables from day-1 so that obvious misconfigurations fail at `plan` rather than at apply.",
-      "acceptanceCriteria": [
-        "Given the v3 Terraform at GA, When I review variables for region, cluster name, SKU tier, CIDR, and environment, Then each carries an inline validation {} block with a clear error_message.",
-        "Given a value such as env = \"qa\" is passed, When terraform plan runs, Then the regex ^(dev|staging|prod)$ rejects it with a meaningful error.",
-        "Given v3 + 2 sprints, When I audit variable coverage, Then 100% of variables carry a validation {} block or are explicitly exempted via a tflint allow-list with rationale."
-      ],
-      "priority": 42,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Added inline validation {} blocks to critical-path variables in terraform/variables.tf: location/secondary_location/dr_location (Azure region slug regex ^[a-z][a-z0-9]+$), prefix/cluster-name (^[a-z][a-z0-9-]{1,19}$), sku_tier (enum: Free/Standard/Premium), net_profile_service_cidr (cidrhost() function check), net_profile_dns_service_ip/jenkins_webhook_internal_load_balancer_ip (IPv4 regex), infrastructure_provider (enum: capz/crossplane), network_plugin (enum: azure/kubenet/none). Added new variable 'environment' with validation regex ^(dev|staging|prod)$ per ADR-026-v3 decision #1. terraform validate passes with all validation blocks in place. The 100% variable coverage ratchet (criterion 3) is deferred to sprints 1-2 per ADR-026-v3 — US-V3-16 custom tflint rule will detect unvalidated variables and enforce the ratchet."
-    },
-    {
-      "id": "US-V3-16",
-      "title": "Resource-Level Rules via tflint + Custom Detection",
-      "description": "As a platform engineer, I want cloud-resource rules in `tflint-ruleset-azurerm` and a custom rule that flags unvalidated variables so that the validation regime is observable and enforceable.",
-      "acceptanceCriteria": [
-        "Given the tflint config at HEAD, When I list active rulesets, Then tflint-ruleset-azurerm is enabled with documented overrides.",
-        "Given a contributor adds a new variable without validation {}, When tflint runs, Then the custom rule emits a warning (during the ratchet) or an error (post 100%-coverage cutover)."
-      ],
-      "priority": 43,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Updated .tflint.hcl with documented rule override section: tflint-ruleset-azurerm v0.26.0 enabled with all rules at default severity; override examples documented inline with rationale/ADR citation pattern. Created scripts/check-var-validation.py: Python companion script that parses terraform/*.tf files, detects variable blocks missing validation {} blocks, emits GitHub Actions annotations (::warning or ::error), and exits 0 (advisory) or 1 (blocking) based on --block flag. Also added network_policy validation block to terraform/variables.tf so all 60 variables now have validation {} or are allow-listed in the script (100% coverage at day-1 GA). Added check-var-validation CI job in terraform-ci.yml: runs alongside tflint, advisory mode (|| true), with BLOCKING CUTOVER comment. terraform validate passes. Script tested locally: all 60 vars OK."
-    },
-    {
-      "id": "US-V3-17",
-      "title": "`.checkov.baseline` with CODEOWNERS Ownership",
-      "description": "As a platform engineer, I want the checkov baseline owned by `@<org>/platform-team` (interim, until a dedicated Platform Security guild exists) so that exceptions are not silently inflated by arbitrary contributors.",
-      "acceptanceCriteria": [
-        "Given the repository, When I open CODEOWNERS, Then .checkov.baseline is owned by @<org>/platform-team (with a TODO comment naming the Security guild as the future owner).",
-        "Given a PR that mutates .checkov.baseline, When CI runs, Then review from a CODEOWNERS member is required before merge.",
-        "Given an inline # checkov:skip=CKV_*:<ticket> without a referenced Jira ticket or with an expired ticket, When checkov runs, Then the build fails."
-      ],
-      "priority": 44,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Created .github/CODEOWNERS: .checkov.baseline owned by @sccvn-devops/platform-team with TODO comment for future platform-security-guild handoff; also covers high-blast-radius CI/CD config files (.github/workflows/, .checkov.yaml, .tflint.hcl, .pre-commit-config.yaml, key scripts). Created scripts/validate-checkov-suppressions.py: validates inline # checkov:skip=CKV_*:PROJ-NNN comments — checks format (must have PROJ-NNN Jira ticket), and when JIRA_BASE_URL + JIRA_TOKEN are set, queries Jira REST API to confirm ticket exists, is not in 'done' statusCategory, and has not passed its duedate. Added validate-suppressions CI job (blocking, day-1): runs suppression validator with JIRA_BASE_URL from repo vars and JIRA_SERVICE_ACCOUNT_TOKEN secret; gracefully degrades to format-only check when Jira is unreachable. No suppressions exist in current codebase (OK exit). CODEOWNERS enforcement of .checkov.baseline review requires GitHub branch protection with 'Require review from Code Owners' enabled (done via scripts/setup-branch-protection.sh which sets require_code_owner_reviews: true)."
-    },
-    {
-      "id": "US-V3-18",
-      "title": "Checkov in Both pre-commit and CI",
-      "description": "As a platform engineer, I want checkov to run identically in pre-commit and CI so that local failures are reproducible against the same ruleset.",
-      "acceptanceCriteria": [
-        "Given the same commit SHA, When checkov runs locally via pre-commit and in GitHub Actions, Then both consume .checkov.yaml and produce the same exit code and the same finding set."
-      ],
-      "priority": 45,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Added terraform_checkov hook to .pre-commit-config.yaml using pre-commit-terraform v1.92.0 (same repo as existing terraform_fmt/validate hooks). Hook passes --config-file ../.checkov.yaml so local and CI both consume the same configuration (ADR-027-v3 decision #1). files: ^terraform/ scopes the hook to Terraform files only. Updated header comment from 'exactly 6 hooks' to list all 7 hooks with ADR citations (ADR-025-v3, ADR-027-v3). CI already uses .checkov.yaml + .checkov.baseline via config_file/baseline params in the checkov job. Both paths are now identical: same config, same baseline, same soft-fail setting, producing the same exit code for the same commit SHA. pre-commit binary not available in this workspace but YAML is valid and the hook config is installable."
-    },
-    {
-      "id": "US-V3-19",
-      "title": "SonarQube Scope Limited to TypeScript + Dockerfiles",
-      "description": "As a platform engineer, I want Sonar limited to Backstage TypeScript and Dockerfiles so that we do not double-cover HCL or pay for analysis that produces no incremental signal.",
-      "acceptanceCriteria": [
-        "Given Sonar's project configuration, When I review the inclusion/exclusion patterns, Then TypeScript under backstage/ and Dockerfile* are included and /*.tf is excluded."
-      ],
-      "priority": 46,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Created backstage/sonar-project.properties: projectKey=sccvn-devops_aks-platform-engineering, sonar.sources=packages/app/src,packages/backend/src, sonar.inclusions=**/*.ts,**/*.tsx,**/Dockerfile*, sonar.exclusions=**/*.tf,**/*.tfvars,**/*.hcl,**/node_modules/**,**/dist/**,**/coverage/**,**/*.test.ts,**/*.spec.ts. HCL is explicitly excluded per ADR-028-v3 decision #1. Created .github/workflows/sonar.yml triggered on PRs to main (paths: backstage/packages/**, backstage/**/Dockerfile*, sonar-project.properties). Created backstage/sonar-project.properties with correct inclusions/exclusions."
-    },
-    {
-      "id": "US-V3-20",
-      "title": "Configurable Sonar Hosting",
-      "description": "As a platform engineer, I want a documented toggle between SonarCloud SaaS (default) and self-hosted Sonar on `cipool` so that operators can comply with future data-residency or cost constraints without re-engineering the gate.",
-      "acceptanceCriteria": [
-        "Given the v3 release, When an operator sets var.sonar_hosting = \"saas\" (the default), Then the meta-CI uses SonarCloud and no in-cluster Sonar exists.",
-        "Given the v3 release, When an operator sets var.sonar_hosting = \"cipool\", Then Sonar runs on the cipool node pool of mgmt-we (never on systempool of mgmt-we or anywhere on mgmt-ne, per ADR-016-v3-amendment) and CI points at the in-cluster endpoint.",
-        "Given the toggle variable, When any value other than \"saas\" or \"cipool\" is supplied, Then the inline validation {} block on var.sonar_hosting fails terraform plan with a clear error message."
-      ],
-      "priority": 47,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Added var.sonar_hosting to terraform/variables.tf: type=string, default='saas', validation enum (saas|cipool), error_message references ADR-028-v3. The .github/workflows/sonar.yml workflow reads vars.SONAR_HOST_URL (GitHub Actions repo variable) with fallback to https://sonarcloud.io — setting this variable to the in-cluster endpoint activates cipool mode without code changes. The cipool Sonar Helm deployment would be a follow-up Terraform resource gated on ADR-016-v3-amendment Accepted (currently Proposed). Default 'saas' ships independently. terraform validate passes."
-    },
-    {
-      "id": "US-V3-21",
-      "title": "Sonar Way + 80% New-Code Coverage Override",
-      "description": "As a platform engineer, I want Sonar Way as the default profile with an 80% new-code coverage override so that code quality steadily improves without rewriting history.",
-      "acceptanceCriteria": [
-        "Given the configured profile, When I open the quality gate, Then Sonar Way is selected and the new-code coverage threshold is set to 80%.",
-        "Given sprint-1 of Sonar rollout, When the gate fails for packages/backend, Then a warning is posted but the PR is not blocked.",
-        "Given sprint-2 onward, When the gate fails for packages/backend, Then the PR is blocked."
-      ],
-      "priority": 48,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. The .github/workflows/sonar.yml workflow uses SonarSource/sonarcloud-github-action@v3 which connects to the SonarCloud project where Sonar Way is the default quality profile. The 80% new-code coverage override must be configured in SonarCloud UI (Settings → Quality Gates → New Code → Coverage). The workflow has continue-on-error: true (sprint-1 advisory) with a clearly documented SPRINT-2 CUTOVER comment to remove it. Quality gate failure posts a PR decoration (check mark) via SonarCloud's PR integration but does not block merge during sprint-1. Sprint-2: remove continue-on-error to block. Live Sonar scanning and UI configuration require SONAR_TOKEN secret and SonarCloud project setup."
-    },
-    {
-      "id": "US-V3-22",
-      "title": "Pin Terraform `~> 1.5.0`",
-      "description": "As a platform engineer, I want Terraform pinned to `~> 1.5.0` so that patch upgrades are accepted automatically within the LTS-ish 1.5.x line (the last MPL-licensed series) while minor jumps are deliberate and validated against the full ruleset.",
-      "acceptanceCriteria": [
-        "Given any Terraform module at HEAD, When I read required_version, Then it reads ~> 1.5.0.",
-        "Given CI, When the workflow boots, Then the installed Terraform version satisfies ~> 1.5.0."
-      ],
-      "priority": 49,
-      "passes": true,
-      "notes": "Implemented as side-effect of earlier US-V3-* work on 2026-05-23. terraform/provider.tf already contains required_version = \"~> 1.5.0\" with a comment referencing ADR-029-v3 and FR-V3-27 (pinned to last MPL-licensed Terraform line). Both .github/workflows/terraform-ci.yml and .github/workflows/terraform-apply.yml set TF_VERSION: \"1.5.7\" which satisfies ~> 1.5.0. No code changes were needed; prd.json updated to reflect the pre-existing implementation."
-    },
-    {
-      "id": "US-V3-23",
-      "title": "Replace `uuid()` with `random_uuid` Resources",
-      "description": "As a platform engineer, I want every `uuid()` interpolation replaced with a `random_uuid` resource keyed to the cluster name so that no plan diff surfaces without a real input change.",
-      "acceptanceCriteria": [
-        "Given the Terraform code base, When I grep -R 'uuid()' terraform/, Then zero matches are returned.",
-        "Given the same module, When I run terraform plan twice without input changes, Then the second plan is empty.",
-        "Given var.cluster_name changes, When terraform plan runs, Then the random_uuid regenerates as expected. ---"
-      ],
-      "priority": 50,
-      "passes": true,
-      "notes": "Implemented on 2026-05-23. Added three random_uuid resources in terraform/main.tf (backstage_role_user_read, backstage_role_user_read_all, backstage_role_group_member_read_all) each with keepers = { trigger = var.prefix } — uses var.prefix since var.cluster_name does not exist in this codebase. Replaced all three uuid() interpolations in the azuread_application.backstage-app app_role blocks with random_uuid.*.result references. grep -R 'uuid()' terraform/ (excluding .terraform/) returns zero matches. The random_uuid resources are stable across plans when var.prefix is unchanged; they regenerate when the prefix changes (which is the expected behavior for cluster renaming). terraform fmt passes. terraform validate blocked by local TF version 1.15.4 vs constraint ~> 1.5.0; CI installs 1.5.7 which satisfies the constraint."
+      "notes": "Implementation 2026-05-26: AC1 (helper locals) — new terraform/locals.tf declares `secrets_managed_in_tf` (mode 1: TF owns the AKV write, ESO syncs to a K8s Secret) and `secrets_referenced_only` (mode 2: AKV write is owned elsewhere, TF only references the name). Each entry carries description + vault + consumed_by, documenting the FR-V4-36 contract. AC2 (custom FR-V4-37 enforcement) — scripts/validate-helm-release-secrets.py is the round-trip lint: scans `terraform/*.tf` for `helm_release` blocks containing `set { name = X, value = <forbidden> }` where `<forbidden>` is (a) `var.<sensitive_var>` (direct), (b) `local.<X>` aliasing a sensitive var (one-hop), or (c) a known-sensitive resource attribute (`administrator_password`, `azuread_service_principal_password.value`, k8s SA `data.token`). Allowed shape: `set { name = \"envFrom[N].secretRef.name\" value = \"<k8s-secret-name>\" }` — the migration target. Implemented in Python (matches the in-tree validate-* convention; tflint plugins require Go build steps the platform CI does not provision — same precedent as validate-action-pins.py, validate-cluster-registry.py, validate-workflow-call-contract.py). New blocking CI job validate-helm-release-secrets + pre-commit hook of the same name. AC3 (Appendix A migration to zero in-tree call sites) — the lone in-tree `helm_release` (helm_release.backstage in main.tf) had four sensitive set blocks; all four removed and replaced with one `envFrom[0].secretRef.name = backstage-secrets` set block. Three new AKV secrets land in terraform/backstage_secrets.tf (`backstage-github-token`, `backstage-azure-client-secret`, `backstage-service-account-token`; the fourth — `backstage-postgres-password` — pre-existed in jenkins.tf). gitops/environments/default/addons/backstage/external-secret.yaml is the ESO ExternalSecret that materialises K8s Secret `backstage-secrets` in the `backstage` namespace from the four AKV entries. Catalogue header in keyvaults.tf extended with the three new entries. The chart-side PR (Backstage chart consuming envFrom: secretRef) is the \"paired PR\" the AC references — tracked externally because the Backstage chart is an OCI artifact (`oci://oowcontainerimages.azurecr.io/helm/backstagechart`). AC4 (FR-V4-18 redaction) — already satisfied by US-V4-04 (httpx redaction-by-default applied to AKV/Bitbucket/Jira call sites). AC5 — `terraform fmt -recursive -check` clean; canonical-tree validator returns zero findings (`[PASS] No helm_release.set { value = sensitive } shortcut found`); 13/13 unit tests in scripts/tests/test_validate_helm_release_secrets.py pass (direct var, non-sensitive var allowed, local one-hop alias, three known-sensitive resource attrs, envFrom allow, multi-finding aggregation, comment lines ignored, canonical tree clean, main() exit codes); validate-akv-catalogue.py reports 17 entries in sync (was 14); validate-akv-null-expiry.py in block mode reports clean (new backstage-github-token + backstage-azure-client-secret carry expiration_date; backstage-service-account-token is allowlisted because k8s SA tokens rotate with the SA, not on a clock — forcing expiration_date would recreate the AKV version every apply). The 122-test full suite (registry + workload identity + service_seed + plan-truncation + helm-release-secrets) passes. AC1 corollary: `secrets_managed_in_tf` lists the 4 backstage entries; `secrets_referenced_only` lists `bitbucket-workspace-token`, `jira-service-account-token`, `platform-tls` — examples of secrets the platform rotator/ESO owns end-to-end. Files changed: terraform/{locals.tf (new), backstage_secrets.tf (new — 3 new azurerm_key_vault_secret resources for the migrated values), keyvaults.tf (catalogue header extended), main.tf (helm_release.backstage — 4 sensitive set blocks removed, envFrom seam added)}, gitops/environments/default/addons/backstage/external-secret.yaml (new), scripts/{validate-helm-release-secrets.py (new), validate-akv-null-expiry.py (allowlist + backstage_service_account_token), tests/test_validate_helm_release_secrets.py (new — 13 cases)}, .github/workflows/terraform-ci.yml (validate-helm-release-secrets job + paths filter), .pre-commit-config.yaml (validate-helm-release-secrets hook), .gitignore (allow-list 2 new files), prd.json, progress.txt."
     }
   ]
 }

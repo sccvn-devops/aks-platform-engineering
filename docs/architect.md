@@ -1,8 +1,17 @@
 # IDP GitOps Platform — Engineering Guide
 
 > Authoritative operational and architectural reference for the CityOS Internal Developer Platform.
-> Synthesized from: IDP-GitOps-Blueprint-v2.md, IDP-GitOps-ADRs-v2.md, IDP-GitOps-Blueprint-PRD.md.
-> Last updated: 2026-05-22.
+> Synthesized from: IDP-GitOps-Blueprint-v2.md, IDP-GitOps-ADRs-v2.md, IDP-GitOps-Blueprint-PRD.md,
+> IDP-GitOps-Blueprint-PRD-v3.md, and **IDP-GitOps-Blueprint-PRD-v4.md** (architecture deepening).
+> Last updated: 2026-05-25.
+>
+> **Alignment:** Aligned with **PRD-v4** (2026-05-25). Supersedes the PRD-v3 alignment archived at
+> [`archived/architect.v3.md`](../archived/architect.v3.md). PRD-v4 is an additive addendum:
+> all v2 (FR-1..25, US-001..025) and v3 (FR-V3-NN, US-V3-NN) requirements remain in force verbatim.
+> v4 additions live in the `FR-V4-NN` / `US-V4-NN` namespace and surface throughout this guide
+> (cluster registry §3.4, workload-identity module §15.5, reusable TF workflows §18.5,
+> Go HTTP transport seam §7.5, service-seed split §11.4, hybrid Helm→ESO §6.5, robustness §15.6,
+> CI hygiene §18.6). New ADR: **ADR-031-v4** (cluster topology lives in a single committed registry).
 
 ---
 
@@ -10,18 +19,28 @@
 
 1. [Glossary and Naming Conventions](#1-glossary-and-naming-conventions)
 2. [Architecture Overview](#2-architecture-overview)
-3. [Cluster Topology](#3-cluster-topology)
+3. [Cluster Topology](#3-cluster-topology) (incl. **§3.4 Cluster Topology Registry — PRD-v4**)
 4. [Network Topology](#4-network-topology)
 5. [GitOps Patterns](#5-gitops-patterns)
-6. [Secrets Management](#6-secrets-management)
-7. [Management-Plane Singleton Lock](#7-management-plane-singleton-lock)
-8. [CI Pipeline](#8-ci-pipeline)
+6. [Secrets Management](#6-secrets-management) (incl. **§6.5 Hybrid Helm → ESO — PRD-v4**)
+7. [Management-Plane Singleton Lock](#7-management-plane-singleton-lock) (incl. **§7.5 Go Tooling Architecture — PRD-v4**)
+8. [CI Pipeline](#8-ci-pipeline) (incl. **§8.5 Reusable Workflows + Composite Action — PRD-v4**)
 9. [Supply Chain Security](#9-supply-chain-security)
 10. [Progressive Delivery](#10-progressive-delivery)
-11. [Self-Service Service Seed Workflow](#11-self-service-service-seed-workflow)
+11. [Self-Service Service Seed Workflow](#11-self-service-service-seed-workflow) (incl. **§11.4 Three-Module Split + Jinja — PRD-v4**)
 12. [Observability and Alerting](#12-observability-and-alerting)
 13. [DR Runbooks](#13-dr-runbooks)
-14. [Key ADR Decisions](#14-key-adr-decisions)
+14. [Key ADR Decisions](#14-key-adr-decisions) (incl. **ADR-031-v4**)
+15. [Terraform State Management](#15-terraform-state-management) (incl. **§15.5 Workload-Identity Module + §15.6 Robustness Pass — PRD-v4**)
+16. [Secret Material Lifecycle](#16-secret-material-lifecycle)
+17. [RBAC Scope-Down (Post-v3)](#17-rbac-scope-down-post-v3)
+18. [Quality Gates (Pre-commit + CI)](#18-quality-gates-pre-commit--ci)
+19. [Variable Validation](#19-variable-validation)
+20. [Supply-Chain Scanning (Checkov)](#20-supply-chain-scanning-checkov)
+21. [Static Analysis (SonarQube)](#21-static-analysis-sonarqube)
+22. [ADR-016 Amendment Note](#22-adr-016-amendment-note)
+23. [**CI Hygiene (PRD-v4)**](#23-ci-hygiene-prd-v4)
+24. [**PRD-v4 Mapping (Quick Reference)**](#24-prd-v4-mapping-quick-reference)
 
 ---
 
@@ -58,6 +77,8 @@
 | ArgoCD Application (infra) | `<svc>-infra-<env>` | `myapp-infra-prod` |
 | ArgoCD Application (workload) | `<svc>-app-<env>-<cluster>` | `myapp-app-prod-aks-prod-we` |
 | Crossplane XRD group | `platform.cityos.io` | — |
+
+> **Naming convention.** Terraform resource files use `snake_case.tf`; Go binary names and Helm chart names use `kebab-case`. This is intentional and not a drift signal.
 
 ---
 
@@ -116,6 +137,22 @@ labels:
 ```
 
 `controller-scaler` updates `lease-status` on management cluster Secrets when the blob lease changes hands.
+
+### 3.4 Cluster Topology Registry (PRD-v4, FR-V4-01..04, ADR-031-v4)
+
+PRD-v4 collapses the previous three-way encoding of cluster topology (Terraform locals + ArgoCD ApplicationSet locals + `seed_job.py` hardcoded maps) into a **single committed registry**:
+
+| Artifact | Path | Role |
+|---|---|---|
+| Registry data | `gitops/clusters/registry.yaml` | Sole authoritative source of cluster identity. Day-1: 7 entries (`mgmt-we`, `mgmt-ne`, `aks-dev-we`, `aks-staging-we`, `aks-prod-we`, `aks-prod-ne`, `seed-wus`). |
+| Registry schema | `gitops/clusters/registry.schema.json` | JSON Schema enforced in pre-commit + CI. |
+| Terraform consumer | `terraform/locals.tf` (and dependent `*.tf`) | Reads via `yamldecode(file("${path.module}/../gitops/clusters/registry.yaml"))`. No literal subscription IDs / regions / RG names / ACR hostnames may remain in `terraform/*.tf` after v4. |
+| ArgoCD consumer | ApplicationSet locals under `gitops/clusters/` | Derive from the registry; no hand maintenance. |
+| Python consumer | `tools/service_seed/cli.py` | Loads the registry once; passes data into `service_template.render(...)` and `gitops_pr.compose(...)` (see §11.4). |
+
+Each registry entry carries: `subscription_id`, `region`, `region_abbrev`, `resource_group`, `acr_hostname`, `aks_name`, `mgmt_role` (`active|standby|workload|seed`), `azs` (list), `sku_tier`, `gitops_addons` (map of `enable_*` flags). Adding a cluster is a **one-PR** edit (the registry); the schema validator blocks malformed PRs at pre-commit time and in CI.
+
+The decision to use a committed YAML rather than a CRD on `mgmt-we` is documented in **ADR-031-v4** (rejected alternative during grilling: CRD-based registry).
 
 ---
 
@@ -247,6 +284,23 @@ Bitbucket workspace token and Jira service-account token cannot use federated id
 - Rotated quarterly by `saas-token-rotator` CronJob (lease-aware; only runs on active mgmt cluster)
 - Old versions revoked 24 hours after rotation
 
+### 6.5 Hybrid Helm → ESO Migration for Sensitive Values (PRD-v4, FR-V4-36..40)
+
+PRD-v4 eliminates the residual `helm_release.set { name = X, value = <sensitive_var> }` pattern that survived v3. Every secret-bearing chart value must arrive via an `ExternalSecret`-projected Kubernetes Secret. A two-mode helper local in `terraform/locals.tf` (or equivalent) classifies each call site:
+
+| Mode | Semantics | When to use |
+|---|---|---|
+| `secrets_managed_in_tf` | Terraform generates the secret (`random_password`) → writes to AKV → ESO syncs into the workload namespace | System-generated material owned end-to-end by TF (e.g., internal admin passwords) |
+| `secrets_referenced_only` | Terraform reads the secret via `data "azurerm_key_vault_secret"`; never generates it | Operator-rotated material pre-populated in AKV (e.g., Bitbucket workspace token, AKV-issued TLS) |
+
+Enforcement:
+
+- A custom **tflint** rule (FR-V4-37) fails CI when any `helm_release.set.value` references a variable declared `sensitive = true`.
+- Charts that cannot natively consume an `ExternalSecret` must add the indirection before migration (FR-V4-38).
+- Pre-existing call sites are inventoried in PRD-v4 §Appendix A and migrated iteratively across P5 (FR-V4-39).
+
+Combined with the Go HTTP transport seam (§7.5, FR-V4-18), secret material is also absent from error strings — closing the Q7 credential-leak vector for free.
+
 ---
 
 ## 7. Management-Plane Singleton Lock
@@ -292,6 +346,60 @@ mgmt-cli failback --to mgmt-we --confirm
 # Emergency: break a stuck lease (only if mgmt-leader-lease is not running)
 mgmt-cli break-lease --confirm
 ```
+
+> **Note (PRD-v4, OQ-V4-04):** The future of `mgmt-cli` is an open question — it may merge into `mgmt-leader-lease` or remain as an operator escape hatch. Decision is targeted before P3 begins.
+
+### 7.5 Go Tooling Architecture (PRD-v4, FR-V4-15..26)
+
+PRD-v4 deepens four shallow seams across the `tools/mgmt-plane-lock/` Go binaries: HTTP transport policy, AKV writer consolidation, lifecycle plumbing, and per-binary run-loops.
+
+#### 7.5.1 HTTP Transport Seam — `internal/httpx/` (FR-V4-15..18)
+
+A single package owns HTTP policy across the binary set. Every `http.Client` is constructed by `httpx.NewTransport(opts) http.RoundTripper`; no `http.DefaultClient` survives in `cmd/argocd-jira-bridge`, `cmd/saas-token-rotator`, or `internal/akvwriter`.
+
+`httpx.Options` declares:
+
+- **Timeout** — per-request, mandatory.
+- **Retry policy** — max attempts + exponential backoff with jitter; retry-on covers 5xx + 429 + network errors.
+- **Redaction policy** — response bodies are **never** embedded in error strings by default. Callers opt in via `httpx.WithBodyOnError(maxBytes)`, which still passes the body through a configurable redactor. This single switch closes the Q7 credential-leak class for the platform.
+
+Every transport call carries a `context.Context`; the package rejects nil contexts. A context-aware sleep helper replaces the three legacy blocking `time.Sleep(...)` calls during shutdown grace periods.
+
+#### 7.5.2 AKV Secret Writer — `internal/akvwriter` (FR-V4-19..22)
+
+`internal/akvwriter` becomes the **single AKV write path** across the binary set. `cmd/saas-token-rotator/main.go` stops open-coding AKV PUT calls. The writer builds its `http.Client` via `httpx.NewTransport(...)` (FR-V4-20) — no bespoke retry or timeout remains inside the package.
+
+API shape:
+
+```go
+err := akvw.Put(ctx, name, value, akvwriter.Overwrite)        // hard-overwrite latest
+err := akvw.Put(ctx, name, value, akvwriter.NewVersionOnly)   // never write if name absent
+err := akvw.Put(ctx, name, value, akvwriter.RecoverIfSoftDeleted)
+```
+
+Typed errors replace the v3-era generic `error` wrapping of HTTP body strings: `ErrSecretNotFound`, `ErrAuthFailed`, `ErrConflict`, `ErrSoftDeletedSecretExists`. An in-memory fake adapter at `akvwriter/fake_test.go` is test-only and backs unit tests for every consumer.
+
+#### 7.5.3 Lifecycle Plumbing — `internal/bootstrap/` + Per-Binary `Runner` Types (FR-V4-23..26)
+
+A new `internal/bootstrap/` package owns process lifecycle:
+
+- `bootstrap.SignalContext() context.Context` — SIGTERM/SIGINT-aware context creation.
+- `bootstrap.ServeMetrics(ctx, addr, registry)` — the metrics HTTP server pattern.
+
+`bootstrap` does **not** own flag parsing, config loading, or DI wiring. It is a thin, testable seam.
+
+Run-loops migrate **out of `main.go`** and into the binary's existing `internal/` package as a named `Runner` type:
+
+| Binary | Run-loop home |
+|---|---|
+| `controller-scaler` | `internal/scaling.Runner.Run(ctx) error` |
+| `mgmt-leader-lease` | `internal/bloblease.LeaseRunner.Run(ctx) error` |
+| `saas-token-rotator` | `internal/rotation.Runner.Run(ctx) error` (new package) |
+| `argocd-jira-bridge` | no runner — lifecycle from `internal/bootstrap` only |
+
+No shared `Runner` interface is introduced (anti-pattern explicitly rejected during grilling); each binary's runner is consumer-defined. Each `main.go` compresses to **≤40 lines**: flag parsing, config load, runner construction, single `runner.Run(ctx)` call.
+
+The blocking `time.Sleep(...)` in `cmd/saas-token-rotator/main.go` (rotation grace period) converts to `select { case <-time.After(...): case <-ctx.Done(): }` so SIGTERM is honored within 1 second.
 
 ---
 
@@ -345,6 +453,42 @@ Jenkins:
   3. Signature attestation stored alongside image in ACR
   4. kustomize edit set image → commit [ci skip] → push with retry
 ```
+
+### 8.5 Platform-Repo CI: Reusable Workflows + Composite Action (PRD-v4, FR-V4-10..14)
+
+> Application CI continues on Jenkins (ADR-001-v2). This section covers **platform-repo** CI on GitHub Actions, which v4 deepens.
+
+PRD-v4 collapses the two copy-pasted Terraform workflows from v3 into a **reusable-workflow** layout. The reusable workflows live under a `reusable/` sub-directory so their filenames do not collide with the existing top-level callers; the existing `.github/workflows/terraform-ci.yml` and `.github/workflows/terraform-apply.yml` at the top level are rewritten as **thin callers** that invoke the reusable workflows. No third workflow file is introduced.
+
+```
+.github/
+├── actions/
+│   └── setup-tf/action.yml                       # Composite action: install TF from .tool-versions,
+│                                                  #   Azure OIDC login, set TF_IN_AUTOMATION / TF_INPUT=false
+└── workflows/
+    ├── reusable/
+    │   ├── terraform-plan.yml                    # on: workflow_call:
+    │   │                                          # permissions: id-token write, contents read, pull-requests write
+    │   │                                          # owns: init, fmt-check, validate, tflint, checkov,
+    │   │                                          #       plan, JSON-diff render, PR comment (60KB truncation)
+    │   └── terraform-apply.yml                   # on: workflow_call:
+    │                                              # permissions: id-token write, contents read (NO pull-requests)
+    │                                              # owns: init, apply
+    ├── terraform-ci.yml                          # PR entrypoint — thin caller of reusable/terraform-plan.yml
+    └── terraform-apply.yml                       # main entrypoint — thin caller of reusable/terraform-apply.yml
+                                                   #   with the two-phase matrix declared here
+```
+
+**Two-phase apply matrix** (FR-V4-11):
+
+- **Phase 1:** `[mgmt-we, mgmt-ne]`
+- **Phase 2:** `[dev, staging, prod-we, prod-ne, seed-wus]` with `needs: [phase-1]`
+
+Phase 2 jobs never start until phase 1 succeeds. Each matrix entry retains its dedicated GitHub Environment protection (§18.4) — the seven environments configured by v3 are unchanged.
+
+**Plan-output truncation logic** lives in exactly one file (inside `terraform-plan.yml`), at one threshold (60KB). Output exceeding 60KB is truncated with a link to the full artifact (FR-V4-13).
+
+**Composite action `.github/actions/setup-tf`** owns the shared bootstrap (TF install + Azure OIDC login + TF env vars). Both reusable workflows consume it; no inline duplication.
 
 ---
 
@@ -427,7 +571,8 @@ A Jira ticket of type **"IDP Service Request"** triggers a Jenkins webhook (`gen
 5. Pushes infra and workload branches to `platform-gitops`
 6. Opens **two PRs** — one for `infra/`, one for `workload/`
 
-Source: `tools/service_seed/seed_job.py`
+Source (PRD-v3): `tools/service_seed/seed_job.py`.
+Source (PRD-v4): split into three modules + thin CLI — see §11.4.
 
 ### 11.3 End-to-End Timeline (target p95)
 
@@ -440,6 +585,43 @@ Jira ticket created
 
 Total target: ≤ 45 minutes (infra provision is the long pole)
 ```
+
+### 11.4 service_seed Three-Module Split + Jinja Templates (PRD-v4, FR-V4-27..35)
+
+PRD-v4 retires the 981-line `seed_job.py` god module in favor of three concerns + a thin CLI, all template-driven:
+
+| Module | Role | Inputs | Outputs |
+|---|---|---|---|
+| `tools/service_seed/jira_intake.py` | Jira fetch + parse → `ServiceRequest` dataclass | Jira API client, issue key | Validated frozen `@dataclass` (no I/O after fetch) |
+| `tools/service_seed/service_template.py` | Render rollout/infra manifests to a working tree | `ServiceRequest`, cluster registry data, Jinja env | Filesystem write only |
+| `tools/service_seed/gitops_pr.py` | Compose Bitbucket branch + PR | Working tree, `BitbucketClient` | Pushed branch, opened PR |
+| `tools/service_seed/cli.py` | ≤40-line wiring layer | argparse, env-vars, registry path | Wired pipeline run |
+
+Cross-module contract: **`ServiceRequest`** is a frozen `@dataclass` whose `__post_init__` validates SLO class, service name, owner team, and required fields. It is the **only** shared type — no shared mutable state. Cluster registry data (loaded by `cli.py` from `gitops/clusters/registry.yaml`, §3.4) is **passed as data** into `render(...)` and `compose(...)`; neither module re-reads the registry.
+
+`BitbucketClient` lives inside `gitops_pr.py` only — the consumer-defined `RemoteRepo` protocol is mocked at the call site in tests. It is **not** promoted to a shared module until a second consumer exists (explicit rejection of premature abstraction).
+
+#### Jinja Templates + SLO/Rollout Profile YAMLs (FR-V4-32..35)
+
+All YAML emission migrates from Python string templates into Jinja2:
+
+```
+tools/service_seed/
+├── templates/
+│   ├── infra/                       # XRCs (SQL, Cosmos, Service Bus, namespace-binding)
+│   ├── workload/base/               # rollout.yaml.j2, service.yaml.j2, ingress.yaml.j2, ...
+│   └── workload/overlays/{dev,staging,prod}/
+└── profiles/
+    ├── slo.yaml                     # gold|silver|bronze → success_rate, p99_ms, probe_interval
+    └── rollout.yaml                 # gold|silver|bronze → canary step strategy
+```
+
+- Jinja2 runs with **`StrictUndefined`** — missing template variables fail rendering loudly.
+- **No SLO numeric literal** (e.g., `0.99`, `500`, `5m`) may remain inside `service_template.py`. Profiles are the source of truth.
+- **No YAML literal** may remain inside `service_template.py` — every output file is template-driven.
+- CI runs `kubeconform` against rendered output for a `ServiceRequest` fixture of each SLO class. Schema drift fails the PR.
+
+Packaging: `tools/service_seed/pyproject.toml` declares the package and pins dependencies (`jinja2`, `pyyaml`, `cookiecutter`); `pip install -e tools/service_seed` exposes the CLI as a `console_scripts` entry point.
 
 ---
 
@@ -524,17 +706,25 @@ Workload clusters continue serving traffic throughout — data plane is independ
 
 ## 14. Key ADR Decisions
 
-| ADR | Decision | Why |
-|---|---|---|
-| ADR-001-v2 | Jenkins: single-replica StatefulSet in `mgmt-we` only | Upstream Jenkins is single-master. CI pauses ~30m during WE outage — acceptable for failure-domain isolation from Atlassian SaaS. |
-| ADR-004-v2 | Active-Active reads, Active-Passive writes (Cosmos) | `multipleWriteLocationsEnabled: false`. Multi-master Cosmos requires conflict-aware app design. Auto-failover handles write-region loss automatically. |
-| ADR-005-v2 | Per-region AKV pair + per-namespace SecretStore | Single vault = single failure domain. `ClusterSecretStore` = cluster-wide trust. Per-namespace UAMI provides IAM-level isolation per workload. |
-| ADR-008-v2 | Cosign + AKV-backed key + Kyverno (not Gatekeeper) | Gatekeeper replaced by Kyverno as sole policy engine. Cosign provides image provenance; Kyverno verifies at admission on every cluster. |
-| ADR-013-v2 | Two-tier ApplicationSets (infra + workload) | Infra lifecycle (Crossplane XRCs, 30m provision) and workload lifecycle (K8s manifests, 3m sync) differ fundamentally. Separate retry policies and prune behavior prevent infra churn from blocking workload deploys. |
-| ADR-017 | Standby mgmt controllers scaled to zero | Eliminates ARM ownership thrash and double-writes to AKV. Lease arbitration (ADR-022) is the sole authority for which cluster is active. |
-| ADR-020 | Per-namespace UAMI isolation (not ABAC prefix conditions) | Azure Key Vault data-plane RBAC does not support attribute-based conditions on secret names. Per-namespace UAMI binding is the maximum isolation Azure supports for Key Vault secret-plane access. |
-| ADR-021 | Argo Rollouts mandatory in production | `kyverno-prod-requires-rollout` rejects `Deployment` on prod clusters. AnalysisTemplate auto-generated from SLO class via `NamespaceRolloutPolicy` Composition (`xnamespacerolloutpolicies.platform.cityos.io`). |
-| ADR-022 | Azure Storage Blob Lease as singleton lock | Lease TTL=60s, renewal=15s. Geo-replicated GRS storage with private endpoint. Single source of truth preventing split-brain. |
+| ADR | Decision | Why | Status |
+|---|---|---|---|
+| ADR-001-v2 | Jenkins: single-replica StatefulSet in `mgmt-we` only | Upstream Jenkins is single-master. CI pauses ~30m during WE outage — acceptable for failure-domain isolation from Atlassian SaaS. | Accepted (v2) |
+| ADR-004-v2 | Active-Active reads, Active-Passive writes (Cosmos) | `multipleWriteLocationsEnabled: false`. Multi-master Cosmos requires conflict-aware app design. Auto-failover handles write-region loss automatically. | Accepted (v2) |
+| ADR-005-v2 | Per-region AKV pair + per-namespace SecretStore | Single vault = single failure domain. `ClusterSecretStore` = cluster-wide trust. Per-namespace UAMI provides IAM-level isolation per workload. | Accepted (v2) |
+| ADR-008-v2 | Cosign + AKV-backed key + Kyverno (not Gatekeeper) | Gatekeeper replaced by Kyverno as sole policy engine. Cosign provides image provenance; Kyverno verifies at admission on every cluster. | Accepted (v2) |
+| ADR-013-v2 | Two-tier ApplicationSets (infra + workload) | Infra lifecycle (Crossplane XRCs, 30m provision) and workload lifecycle (K8s manifests, 3m sync) differ fundamentally. Separate retry policies and prune behavior prevent infra churn from blocking workload deploys. | Accepted (v2) |
+| ADR-017 | Standby mgmt controllers scaled to zero | Eliminates ARM ownership thrash and double-writes to AKV. Lease arbitration (ADR-022) is the sole authority for which cluster is active. | Accepted (v2) |
+| ADR-020 | Per-namespace UAMI isolation (not ABAC prefix conditions) | Azure Key Vault data-plane RBAC does not support attribute-based conditions on secret names. Per-namespace UAMI binding is the maximum isolation Azure supports for Key Vault secret-plane access. | Accepted (v2) |
+| ADR-021 | Argo Rollouts mandatory in production | `kyverno-prod-requires-rollout` rejects `Deployment` on prod clusters. AnalysisTemplate auto-generated from SLO class via `NamespaceRolloutPolicy` Composition (`xnamespacerolloutpolicies.platform.cityos.io`). | Accepted (v2) |
+| ADR-022 | Azure Storage Blob Lease as singleton lock | Lease TTL=60s, renewal=15s. Geo-replicated GRS storage with private endpoint. Single source of truth preventing split-brain. | Accepted (v2) |
+| ADR-023-v3 | Remote Terraform state in Azure Blob with native lease locking | Replaces v2 local-state anti-pattern; per-cluster state keys bound blast radius (§15). | Accepted (PRD-v3) |
+| ADR-024-v3 | Scoped RBAC for `akspe` / Velero / `gha-platform-ci` UAMIs | Removes subscription-Owner anti-pattern; CI gate fails any subscription-scoped or `Owner` assignment (§17). | Accepted (PRD-v3) |
+| ADR-025-v3 | Pre-commit + GHA quality gates with phased blocking | Single `.checkov.yaml` consumed locally and in CI; phased advisory → blocking ratchet (§18). | Accepted (PRD-v3) |
+| ADR-026-v3 | Inline `validation {}` + `tflint-ruleset-azurerm` + custom unvalidated-var rule | Day-1 critical path validates inline; full coverage ratchets to blocking (§19). | Accepted (PRD-v3) |
+| ADR-027-v3 | Checkov with inline ticket-referenced expiring suppressions + CODEOWNERS-protected baseline | No silent merges (§20). | Accepted (PRD-v3) |
+| ADR-028-v3 | Sonar covers Backstage TS + Dockerfiles only; HCL excluded | Avoids double-coverage with tflint/checkov (§21). | Accepted (PRD-v3) |
+| ADR-016-v3-amendment | `cipool` on `mgmt-we` is an allowed DX-plane tooling host; `systempool` and workload clusters are not | Ratifies Jenkins-on-`cipool` reality and gates `var.sonar_hosting = "cipool"` (§22). | Accepted (PRD-v3) |
+| **ADR-031-v4** | **Cluster topology lives in a single committed registry (YAML at `gitops/clusters/registry.yaml`)** | **Eliminates three-way encoding across Terraform locals + ArgoCD ApplicationSet locals + `seed_job.py` hardcoded maps. Pre-commit + CI JSON-schema validation. CRD alternative explicitly rejected — registry is human-curated and PR-reviewed. Underpins FR-V4-01..04 (§3.4).** | **Accepted (PRD-v4)** |
 
 ---
 
@@ -597,6 +787,59 @@ Concurrent `terraform apply` against different env-states never block each other
 ### 15.4 Encryption Posture (MSE Now, CMK Roadmap)
 
 v3 ships with Microsoft-managed keys for the state SA — the minimum bar for data-at-rest protection without the operational cost of running a CMK rotation. AKV-backed CMK is on the roadmap and tracked under OQ-V3-04 of PRD-v3; retrofitting CMK in v3 without a follow-up ADR is explicitly forbidden (FR-V3-04). The migration plan (in-place rotate vs. mirror-to-new-SA-and-cutover) will be authored alongside the CMK ADR.
+
+### 15.5 Workload Identity Terraform Module (PRD-v4, FR-V4-05..09)
+
+PRD-v4 collapses the copy-pasted UAMI + federated-credential + role-assignment pattern (repeated across `jenkins.tf`, `external_secrets.tf`, `akv_sync_exporter.tf`, `saas_token_rotator.tf`, `velero.tf`) into a single reusable module at **`terraform/modules/workload_identity/`** with a **single-identity interface** (no maps inside — multiplicity is HCL `for_each` at the call site).
+
+Inputs:
+
+```hcl
+module "workload_identity_jenkins" {
+  source = "./modules/workload_identity"
+
+  name                          = "jenkins"
+  resource_group                = local.rg_mgmt_we
+  location                      = "westeurope"
+  kubernetes_namespace          = "jenkins"
+  kubernetes_service_account    = "jenkins"
+  oidc_issuer_url               = local.mgmt_we.oidc_issuer_url
+  role_assignments              = [
+    { scope = data.azurerm_key_vault.mgmt_we.id, role_definition_name = "Key Vault Secrets User" },
+    { scope = data.azurerm_key_vault.mgmt_we.id, role_definition_name = "Key Vault Crypto User" },
+  ]
+  tags                          = local.common_tags
+  # allow_subscription_scope     = false   # default; module asserts no subscription-scoped role unless explicit
+}
+```
+
+Module ownership boundary:
+
+- **Owns:** `azurerm_user_assigned_identity`, `azurerm_federated_identity_credential` (with audience/issuer/subject formatted inside), and the role assignments.
+- **Does NOT own:** Key Vault access policies, Helm release wiring, secret material. Wiring stays at the call site so the module is reusable across charts.
+
+The duplicated Key Vault role-assignment loops in `keyvaults.tf:64–78` and `jenkins.tf:64–68` collapse into a single loop driven by the module's outputs (FR-V4-08).
+
+`terraform test` blocks at `terraform/modules/workload_identity/tests/` assert:
+
+- Federated-credential subject equals `system:serviceaccount:<ns>:<sa>`.
+- Role assignments live at the requested scope only.
+- **No role assignment at subscription scope** unless `allow_subscription_scope = true` (default `false`). This guard reinforces ADR-024-v3 at module level.
+
+Success metric: PR diff for adding a new workload identity is ≥60% smaller than the equivalent v3-era PR.
+
+### 15.6 Robustness Pass (PRD-v4, FR-V4-41..44)
+
+PRD-v4 closes four robustness gaps surfaced by the architecture review:
+
+| Gap | Closing requirement | Resource(s) |
+|---|---|---|
+| Accidental destruction of stateful storage | `lifecycle { prevent_destroy = true }` blocks | `terraform/storage.tf` (mgmt-plane lease blob container), `terraform/velero.tf` (Velero backup container). Removal requires a deliberate two-PR sequence: lift the lifecycle, then destroy. |
+| Cross-variable invariants asserted as advisory | Convert `check{}` advisories to `precondition{}` blocks on the consuming resources | Day-1 invariants: spoke CIDR non-overlap with hub CIDR (`networking.tf`); `region_abbrev` consistency with `region` per registry (§3.4); Bitbucket CIDR list provenance comment + last-verified date in `variables.tf`. |
+| Python hangs on network/subprocess calls | Explicit timeouts everywhere | `urlopen(..., timeout=30)` for HTTP; `subprocess.run(..., timeout=300)` for git. Identical defaults across `jira_intake.py`, `gitops_pr.py`, `service_template.py`. Token material never appears in git remote URLs (use credential helpers or `.netrc`). |
+| Cookiecutter path traversal | Resolved-path containment assertion | `service_template.py` asserts `target.resolve().is_relative_to(destination.resolve())` before writing each file. |
+
+These changes apply to v4-touched surfaces only; legacy untouched code is grandfathered.
 
 ---
 
@@ -961,3 +1204,71 @@ ADR-016 (Platform Terminology) is widely read as "no DX-plane tooling on managem
 - Workload clusters remain entirely off-limits to DX tooling (no Jenkins, no Sonar).
 
 Until the amendment is `Accepted`, `var.sonar_hosting` must remain at its default `"saas"`. Switching to `"cipool"` is gated on the amendment's ratification (tracked in PRD-v3 as OQ-V3-05).
+
+---
+
+## 23. CI Hygiene (PRD-v4)
+
+> Codifies PRD-v4 FR-V4-45..49 — `QW-CI` items Q3, Q4, Q5, Q10.
+
+### 23.1 Single Source of Truth for Tool Versions (`.tool-versions`)
+
+A single `.tool-versions` file at the repository root declares versions for `terraform`, `tflint`, `checkov`, `terragrunt`, `kubectl`, `kustomize`. CI workflows source versions from this file via `asdf-vm/actions/install@<sha>` (or the `mise` equivalent). Pre-commit hooks read the same file via `additional_dependencies` templating or a small bootstrap script.
+
+**Exactly one** file in the repo declares those tool versions — drift is impossible by construction.
+
+Contributors without `asdf`/`mise` use `scripts/install-tools.sh` (R-V4-7 mitigation), which reads `.tool-versions` and installs via `tfenv` / direct download.
+
+### 23.2 SHA-Pinned GitHub Actions (Dependabot-Managed)
+
+All `uses:` references in `.github/workflows/*.yml` and `.github/actions/*/action.yml` pin to a **40-character commit SHA** with the human-readable tag in a comment:
+
+```yaml
+- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+```
+
+Dependabot opens a weekly PR upgrading the pinned SHAs together with comment tags. PRs are auto-mergeable subject to standard review.
+
+### 23.3 Checkov Baseline Per-Finding Metadata Schema
+
+`.checkov.yaml` and `.checkov.baseline` enforce per-finding metadata: each baseline entry carries `rationale` (non-empty string), `owner` (GitHub team or @-handle), and `expiry` (ISO date ≤ 180 days from entry creation). Findings missing any field, or whose `expiry` lapses, fail the CI Checkov job with a pointer to the offending entry.
+
+CODEOWNERS protection on `.checkov.baseline` (v3, §20.4) is retained.
+
+### 23.4 Pre-commit + CI Scope Parity
+
+Pre-commit Checkov scope **matches** CI Checkov scope. Both scan `terraform/`, `backstage/**/Dockerfile*`, and any hand-authored Kubernetes manifest under `gitops/` (templates excluded). The pre-commit tflint hook passes `--config=.tflint.hcl` explicitly — identical to CI.
+
+A CI job runs `pre-commit run --all-files` after a clean CI run and asserts a zero diff. Drift between pre-commit and CI is a regression-tested failure mode (FR-V4-49).
+
+---
+
+## 24. PRD-v4 Mapping (Quick Reference)
+
+> Quick index for engineers and agents reading this guide alongside PRD-v4.
+
+| PRD-v4 area | FR range | User story | Guide section |
+|---|---|---|---|
+| Cluster topology registry | FR-V4-01..04 | US-V4-01 | §3.4 |
+| Workload-identity TF module | FR-V4-05..09 | US-V4-02 | §15.5 |
+| Reusable TF workflows + composite action | FR-V4-10..14 | US-V4-03 | §8.5 |
+| Go HTTP transport seam | FR-V4-15..18 | US-V4-04 | §7.5.1 |
+| AKV writer consolidation | FR-V4-19..22 | US-V4-05 | §7.5.2 |
+| Go binary lifecycle + per-binary runners | FR-V4-23..26 | US-V4-06 | §7.5.3 |
+| service_seed three-module split | FR-V4-27..31 | US-V4-07 | §11.4 |
+| Jinja templates + SLO/rollout profiles | FR-V4-32..35 | US-V4-08 | §11.4 |
+| Hybrid Helm → ESO secret migration | FR-V4-36..40 | US-V4-09 | §6.5 |
+| Robustness pass | FR-V4-41..44 | US-V4-10 | §15.6 |
+| CI hygiene | FR-V4-45..49 | US-V4-11 | §23 |
+| Cluster topology ADR | n/a | n/a | ADR-031-v4 (§14) |
+
+**prd.json priority → PRD-v4 phase mapping**
+
+| prd.json priority | PRD-v4 phase | Stories |
+|---|---|---|
+| 1 | P0 — Foundation | US-V4-11 |
+| 2 | P1 — Registry + workflows | US-V4-01, US-V4-03 |
+| 3 | P2 — Self-contained TF + Robustness | US-V4-02, US-V4-10 |
+| 4 | P3 — Go deepening | US-V4-04, US-V4-05, US-V4-06 |
+| 5 | P4 — Python deepening | US-V4-07, US-V4-08 |
+| 6 | P5 — Secrets migration | US-V4-09 |

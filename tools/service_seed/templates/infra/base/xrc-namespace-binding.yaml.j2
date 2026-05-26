@@ -1,0 +1,11 @@
+# NamespaceVaultBinding claims are rendered automatically by namespace-vault-bindings-set
+# from workload overlays. This stub keeps the expected scaffold file in the service repo
+# without creating duplicate Crossplane claims after the GitOps PR is merged.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ service }}-namespace-vault-binding-reference
+  namespace: placeholder-infra
+data:
+  serviceName: {{ service }}
+  namespacePrefix: {{ service }}

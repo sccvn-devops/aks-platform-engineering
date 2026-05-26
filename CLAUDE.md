@@ -93,6 +93,8 @@ See `_docs/IDP-GitOps-ADRs-v2.md` for the authoritative ADR set. Highlights:
 | `aks-prod-ne` | North Europe | Production replica, multi-AZ, Premium SKU |
 | `seed-wus` | West US 2 | DR seed — single-node, catastrophic bootstrap only |
 
+Authoritative topology data lives in **`gitops/clusters/registry.yaml`** (single committed source of truth — ADR-031-v4). Consumers: `terraform/registry.tf` (`yamldecode` → `local.cluster_registry`), and `tools/service_seed/cli.py` (`load_registry`, `get_cluster`, `workload_keyvault_id`). Adding a cluster is one PR to the registry; `scripts/validate-cluster-registry.py` enforces the schema (blocking CI + pre-commit). Do not hardcode per-cluster identity elsewhere in `terraform/*.tf` or `tools/service_seed/**/*.py`.
+
 ## GitOps Addon Labels
 
 Terraform labels the AKS cluster metadata with which addons to enable (e.g., `enable_argocd=true`, `enable_kyverno=true`). ArgoCD ApplicationSet uses those labels to determine which apps to install. Changing an addon's enabled state means changing `terraform/main.tf` locals and re-applying.

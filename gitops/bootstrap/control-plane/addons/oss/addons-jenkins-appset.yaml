@@ -484,7 +484,7 @@ spec:
               cd "$workdir/platform"
               git checkout "$PLATFORM_REPO_REVISION"
 
-              python3 "$workdir/platform/tools/service_seed/seed_job.py" seed-from-jira \
+              python3 -m tools.service_seed.cli seed-from-jira \
                 --jira-base-url "$JIRA_BASE_URL" \
                 --jira-issue-key "$JIRA_ISSUE_KEY" \
                 --jira-issue-type "$JIRA_ISSUE_TYPE" \

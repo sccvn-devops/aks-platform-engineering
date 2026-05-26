@@ -1,0 +1,28 @@
+# profiles/rollout.yaml — Argo Rollouts canary-step strategy per SLO class.
+# US-V4-08 (FR-V4-32..35): step durations and traffic-shift weights live here
+# and are consumed by templates/workload/overlays/rollout.yaml.j2.  No SLO
+# pause duration (5m) or traffic weight may appear as a Python literal in
+# service_template.py.
+#
+# Schema (per class):
+#   steps: list[str] — sequence of Argo Rollouts canary step entries, each
+#                      already YAML-formatted (e.g., "setWeight: 5",
+#                      "pause: {duration: 5m}").  Joined verbatim into the
+#                      strategy.canary.steps[] list at render time.
+gold:
+  steps:
+    - "setWeight: 5"
+    - "pause: {duration: 5m}"
+    - "setWeight: 25"
+    - "pause: {duration: 5m}"
+    - "setWeight: 50"
+    - "pause: {duration: 5m}"
+    - "setWeight: 100"
+silver:
+  steps:
+    - "setWeight: 25"
+    - "pause: {duration: 5m}"
+    - "setWeight: 100"
+bronze:
+  steps:
+    - "setWeight: 100"

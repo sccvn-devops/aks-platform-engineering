@@ -1,4 +1,4 @@
-# terraform-ci.yml — GitHub Actions meta-CI for platform Terraform (US-V3-12, US-V3-13)
+# terraform-ci.yml — GitHub Actions meta-CI for platform Terraform (US-V3-12, US-V3-13, US-V4-11)
 #
 # Runs on every PR targeting main.  Application CI stays on Jenkins (ADR-001-v2).
 #
@@ -6,6 +6,15 @@
 #   Day-1  : terraform_fmt, terraform_validate, tflint  — blocking (required status checks in branch protection)
 #   Sprint-1: checkov                                   — advisory (soft_fail controlled by .checkov.yaml)
 #   Sprint-2: checkov                                   — blocking (flip soft-fail in .checkov.yaml → false)
+#
+# Tool versions (FR-V4-45): all tool versions come from .tool-versions via the
+# jdx/mise-action step in each job.  No `TF_VERSION` / `TFLINT_VERSION` /
+# `CHECKOV_VERSION` env var or step input declares them — see
+# scripts/validate-tool-version-singleton.py for the round-trip lint.
+#
+# Action pinning (FR-V4-46): every `uses:` is pinned to a 40-character commit
+# SHA with the human-readable tag in a trailing comment.  Dependabot reads the
+# comment, bumps both the SHA and the comment together (.github/dependabot.yml).
 #
 # Branch protection (day-1 required checks — configure once via scripts/setup-branch-protection.sh):
 #   Required status checks: "Terraform Format", "Terraform Validate", "TFLint"
@@ -26,15 +35,34 @@ on:
     paths:
       - "terraform/**"
       - ".github/workflows/terraform-ci.yml"
+      - ".github/workflows/terraform-apply.yml"
       - ".tflint.hcl"
       - ".checkov.yaml"
       - ".checkov.baseline"
+      - ".tool-versions"
+      - ".pre-commit-config.yaml"
       - "scripts/fetch-tf-secrets.sh"
       - "scripts/setup-branch-protection.sh"
+      - "scripts/validate-akv-null-expiry.py"
+      - "scripts/validate-akv-catalogue.py"
+      - "scripts/validate-action-pins.py"
+      - "scripts/validate-checkov-baseline.py"
+      - "scripts/validate-tool-version-singleton.py"
+      - "scripts/validate-cluster-registry.py"
+      - "scripts/validate-workflow-call-contract.py"
+      - "scripts/truncate-plan-output.py"
+      - "scripts/validate-rendered-manifests.sh"
+      - "scripts/validate-helm-release-secrets.py"
+      - "scripts/tests/**"
+      - "gitops/clusters/registry.yaml"
+      - "gitops/clusters/registry.schema.json"
+      - "tools/workload_identity_tests/**"
+      - "tools/service_seed/**"
+      - "tools/mgmt-plane-lock/**"
+      - ".github/actions/setup-tf/**"
+      - ".github/workflows/reusable/**"
 
 env:
-  TF_VERSION: "1.5.7"
-  TFLINT_VERSION: "v0.55.0"
   WORKING_DIR: terraform
 
 # Cancel in-progress runs when a new commit is pushed to the same PR.
@@ -50,11 +78,13 @@ jobs:
     name: Terraform Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Check formatting
         run: terraform fmt -recursive -check -diff
@@ -67,11 +97,13 @@ jobs:
     name: Terraform Validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Init (offline — no backend)
         run: terraform init -backend=false -input=false
@@ -88,11 +120,13 @@ jobs:
     name: TFLint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: terraform-linters/setup-tflint@v4
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          tflint_version: ${{ env.TFLINT_VERSION }}
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Init tflint plugins
         run: tflint --init --config=../.tflint.hcl
@@ -111,10 +145,10 @@ jobs:
     name: Check Variable Validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
 
@@ -132,10 +166,10 @@ jobs:
     name: Validate Checkov Suppressions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
 
@@ -150,9 +184,382 @@ jobs:
           JIRA_TOKEN: ${{ secrets.JIRA_SERVICE_ACCOUNT_TOKEN }}
 
   # ---------------------------------------------------------------------------
+  # AKV null-expiry assertion (US-V3.1-01, FR-V3.1-03).
+  # Advisory in sprint-1 (NULL_EXPIRY_MODE=advisory): emits warning annotations
+  # and posts findings, but never fails the PR.
+  # Sprint-2 cutover: flip NULL_EXPIRY_MODE to "block" in the env block below.
+  # ---------------------------------------------------------------------------
+  akv-null-expiry:
+    name: AKV Null-Expiry Assertion
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run null-expiry assertion
+        run: python3 scripts/validate-akv-null-expiry.py
+        env:
+          # Sprint-2 cutover: change to "block" to fail PRs on null expiry.
+          NULL_EXPIRY_MODE: advisory
+
+  # ---------------------------------------------------------------------------
+  # AKV catalogue completeness lint (US-V3.1-01, FR-V3.1-05) — blocking.
+  # Every azurerm_key_vault_secret / azurerm_key_vault_certificate must appear
+  # in the catalogue header at the top of terraform/keyvaults.tf.
+  # ---------------------------------------------------------------------------
+  akv-catalogue:
+    name: AKV Catalogue Completeness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run catalogue lint
+        run: python3 scripts/validate-akv-catalogue.py
+
+  # ---------------------------------------------------------------------------
+  # Action-pin validator (US-V4-11, FR-V4-46) — blocking.
+  # Asserts every `uses:` in .github/workflows/* is pinned to a 40-char SHA
+  # with a human-readable tag comment.  Dependabot bumps both together.
+  # ---------------------------------------------------------------------------
+  validate-action-pins:
+    name: Validate Action SHA Pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run validator
+        run: python3 scripts/validate-action-pins.py
+
+  # ---------------------------------------------------------------------------
+  # Checkov baseline metadata validator (US-V4-11, FR-V4-47) — blocking.
+  # Asserts every skipped finding carries rationale + owner + expiry and that
+  # expiry is in the future.  See docs/checkov-baseline-metadata-schema.md.
+  # ---------------------------------------------------------------------------
+  validate-checkov-baseline:
+    name: Validate Checkov Baseline Metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run validator
+        run: python3 scripts/validate-checkov-baseline.py
+
+  # ---------------------------------------------------------------------------
+  # Tool-version singleton lint (US-V4-11, FR-V4-45) — blocking.
+  # Asserts no file other than .tool-versions declares terraform / tflint /
+  # checkov / terragrunt / kubectl / kustomize versions.  Stops drift at PR
+  # time.
+  # ---------------------------------------------------------------------------
+  validate-tool-version-singleton:
+    name: Validate Tool-Version Singleton
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run validator
+        run: python3 scripts/validate-tool-version-singleton.py
+
+  # ---------------------------------------------------------------------------
+  # Cluster topology registry schema validator (US-V4-01, FR-V4-04, ADR-031-v4).
+  # Blocking from day-1: a registry edit that breaks the schema fails the PR.
+  # Runs the registry loader test suite as well, so any divergence between
+  # cli.py and the canonical registry shape surfaces in CI rather than at
+  # service-seed apply time.
+  # ---------------------------------------------------------------------------
+  validate-cluster-registry:
+    name: Validate Cluster Registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install jsonschema
+        run: pip install jsonschema==4.23.0
+
+      - name: Validate registry against JSON Schema
+        run: python3 scripts/validate-cluster-registry.py
+
+      - name: Run registry loader unit tests
+        run: python3 -m unittest tools.service_seed.tests.test_registry -v
+
+  # ---------------------------------------------------------------------------
+  # Workload-identity module contract validator (US-V4-02, FR-V4-05..09) —
+  # blocking. Asserts the workload_identity module enforces its invariants
+  # (subject format, audience pin, subscription-scope guard) and that the 5
+  # in-tree call sites (Jenkins, ESO workload, ESO mgmt-we, akv-sync-exporter,
+  # saas-token-rotator, Velero) consume the module.  Equivalent assertions are
+  # encoded in HCL at terraform/modules/workload_identity/tests/*.tftest.hcl
+  # for when the project upgrades terraform from 1.5.x to >= 1.6.
+  # ---------------------------------------------------------------------------
+  validate-workload-identity:
+    name: Validate Workload Identity Module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run module contract tests
+        run: python3 -m unittest tools.workload_identity_tests.test_module_contract -v
+
+  # ---------------------------------------------------------------------------
+  # Helm-release secret-leak validator (US-V4-09, FR-V4-36..40) — blocking.
+  # Asserts no `helm_release` block in terraform/*.tf passes a sensitive
+  # Terraform variable through `set { name = X, value = var.<sensitive> }`,
+  # a one-hop sensitive local alias, or a known-sensitive resource attribute
+  # (administrator_password, azuread_service_principal_password.value, k8s
+  # SA-token data.token). The custom FR-V4-37 enforcement is implemented as a
+  # Python validator (the in-tree convention; tflint plugins require a Go
+  # build step CI does not currently provision) and is wired into both
+  # pre-commit and CI in lockstep — the round-trip lint guarantees the
+  # in-tree call-site count stays at zero (AC3 success-metric).
+  # ---------------------------------------------------------------------------
+  validate-helm-release-secrets:
+    name: Validate Helm Release Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run validator (FR-V4-37 round-trip lint)
+        run: python3 scripts/validate-helm-release-secrets.py
+
+      - name: Run validator unit tests
+        run: python3 -m unittest scripts.tests.test_validate_helm_release_secrets -v
+
+  # ---------------------------------------------------------------------------
+  # Service-seed robustness validator (US-V4-10, FR-V4-43..44) — blocking.
+  # Asserts every external call in seed_job.py declares the contractually
+  # required timeout (HTTP 30s, subprocess 300s) and that the cookiecutter
+  # fallback renderer rejects path-traversal templates before any file is
+  # written.  Equivalent to the AC "pytest --cov on timeouts + path-traversal
+  # assertions passes" — uses unittest (no third-party dependency) to keep
+  # the runner image minimal.
+  # ---------------------------------------------------------------------------
+  validate-service-seed-robustness:
+    name: Validate Service-Seed Robustness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run robustness unit tests
+        run: |
+          python3 -m unittest \
+            tools.service_seed.tests.test_robustness \
+            tools.service_seed.tests.test_seed_job \
+            -v
+
+  # ---------------------------------------------------------------------------
+  # Service-seed Jinja templates + SLO/rollout profile contract (US-V4-08,
+  # FR-V4-32..35) — blocking.  Asserts:
+  #   - Every emitted GitOps manifest is template-driven (zero YAML literals
+  #     in service_template.py).
+  #   - Jinja2 runs with StrictUndefined (a missing context key raises
+  #     UndefinedError instead of producing an incomplete manifest).
+  #   - SLO thresholds + Argo Rollouts step strategies come from
+  #     tools/service_seed/profiles/{slo,rollout}.yaml.
+  #   - No SLO numeric (0.99, 500, 5m) appears as a Python literal in
+  #     service_template.py.
+  #   - Kubeconform validates the rendered output against the built-in k8s
+  #     schema catalogue for each SLO class fixture (--ignore-missing-schemas
+  #     skips platform CRDs whose templates ARE the schema).
+  # ---------------------------------------------------------------------------
+  validate-service-seed-templates:
+    name: Validate Service-Seed Templates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Jinja2 + PyYAML
+        run: pip install "Jinja2>=3.1,<4" "PyYAML>=6.0,<7"
+
+      - name: Run template + profile contract tests
+        run: |
+          python3 -m unittest \
+            tools.service_seed.tests.test_template_profiles \
+            tools.service_seed.tests.test_service_template \
+            -v
+
+      - name: Install kubeconform
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      - name: Validate rendered manifests with kubeconform
+        run: bash scripts/validate-rendered-manifests.sh
+
+  # ---------------------------------------------------------------------------
+  # Go binary lifecycle + per-binary runners (US-V4-06, FR-V4-23..26) — blocking.
+  # Asserts:
+  #   - cmd/{controller-scaler,mgmt-leader-lease,saas-token-rotator,argocd-jira-bridge}/main.go
+  #     are each ≤40 lines (FR-V4-24 size bound).
+  #   - No `signal.Notify(...)` / `os/signal` import remains in cmd/* mains
+  #     (FR-V4-23: signal handling lives in internal/bootstrap.SignalContext).
+  #   - go build, go vet, and go test ./... all pass for the mgmt-plane-lock
+  #     module (the gate for the runner refactor).
+  #   - go test -race covers the two packages that don't import client-go (httpx,
+  #     bootstrap, akvwriter, rotation) — the k8s.io/client-go-importing packages
+  #     hit the documented Go 1.25.x bufio toolchain bug under -race, so they run
+  #     non-race here (matching the US-V4-04/US-V4-05 precedent).
+  # ---------------------------------------------------------------------------
+  validate-mgmt-plane-lock-runners:
+    name: Validate mgmt-plane-lock Runners
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # v5.5.0
+        with:
+          go-version: "1.24"
+          cache-dependency-path: tools/mgmt-plane-lock/go.sum
+
+      - name: Assert each cmd/*/main.go is ≤40 lines
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in cmd/controller-scaler/main.go cmd/mgmt-leader-lease/main.go \
+                   cmd/saas-token-rotator/main.go cmd/argocd-jira-bridge/main.go; do
+            lines=$(wc -l < "$f")
+            if [ "$lines" -gt 40 ]; then
+              echo "::error file=tools/mgmt-plane-lock/$f::main.go is $lines lines, FR-V4-24 limit is 40"
+              fail=1
+            else
+              echo "ok: $f = $lines lines"
+            fi
+          done
+          exit "$fail"
+
+      - name: Assert no signal.Notify in cmd/* mains (FR-V4-23)
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          if grep -RnE '"os/signal"|signal\.Notify' cmd/; then
+            echo "::error::cmd/* mains MUST use bootstrap.SignalContext() (FR-V4-23) — direct os/signal use is forbidden"
+            exit 1
+          fi
+
+      - name: go build / vet / test
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+
+      - name: go test -race on runner-safe packages
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          # Race-mode runs on packages this story owns that don't import
+          # k8s.io/client-go (documented Go 1.25.x toolchain bug under -race).
+          go test -race -count=1 \
+            ./internal/bootstrap/... \
+            ./internal/rotation/... \
+            ./internal/httpx/... \
+            ./internal/akvwriter/...
+
+      - name: Assert combined runner-package coverage ≥80% (FR-V4-26)
+        working-directory: tools/mgmt-plane-lock
+        run: |
+          set -euo pipefail
+          go test \
+            -coverprofile=/tmp/runner-combined.cov \
+            -coverpkg=./internal/scaling,./internal/bloblease,./internal/rotation \
+            ./internal/scaling/... ./internal/bloblease/... ./internal/rotation/...
+          total=$(go tool cover -func=/tmp/runner-combined.cov | awk '/^total:/ {gsub("%",""); print $3}')
+          echo "combined coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { if (t+0 < 80) { print "FAIL: combined coverage " t "% < 80%"; exit 1 } }'
+
+  # ---------------------------------------------------------------------------
+  # Pre-commit drift check (US-V4-11, FR-V4-48..49) — blocking.
+  # Runs `pre-commit run --all-files` in CI; asserts the resulting working tree
+  # diff is empty.  This guarantees CI and pre-commit converge (no formatter
+  # drift, no checkov / tflint configuration drift between contexts).
+  # ---------------------------------------------------------------------------
+  precommit-drift:
+    name: Pre-commit Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
+        with:
+          version: 2024.11.7
+          install: true
+          cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pre-commit
+        run: pip install pre-commit==3.7.1
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+
+      - name: Assert clean working tree
+        # If any hook modified a tracked file, fail loudly with the diff so the
+        # PR author can fix it locally with `pre-commit run --all-files`.
+        run: |
+          if ! git diff --exit-code --stat; then
+            echo "::error::pre-commit hooks modified tracked files — CI/pre-commit drift detected."
+            git diff
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
   # Checkov security scan — advisory in sprint-1, blocking in sprint-2.
   # Gate phase is controlled by `soft-fail` in .checkov.yaml (ADR-027-v3).
   # Sprint-2 cutover: set soft-fail: false in .checkov.yaml; do NOT change this file.
+  # Runs the mise-installed checkov CLI (FR-V4-45 — version from .tool-versions).
   # ---------------------------------------------------------------------------
   checkov:
     name: Checkov Security Scan
@@ -161,37 +568,68 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
+        with:
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Run Checkov
-        uses: bridgecrewio/checkov-action@v12
-        with:
-          # Configuration and advisory/blocking mode are centralised in .checkov.yaml.
-          # Both CI and pre-commit consume the same file (ADR-027-v3, US-V3-18).
-          config_file: .checkov.yaml
-          baseline: .checkov.baseline
-          output_format: cli,sarif
-          output_file_path: console,checkov-results.sarif
+        # Configuration and advisory/blocking mode are centralised in .checkov.yaml.
+        # Both CI and pre-commit consume the same file (ADR-027-v3, US-V3-18).
+        run: |
+          checkov \
+            --config-file .checkov.yaml \
+            --baseline .checkov.baseline \
+            --output cli \
+            --output sarif \
+            --output-file-path console,checkov-results.sarif
 
       - name: Upload Checkov SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57  # v3.36.0
         if: always()
         with:
           sarif_file: checkov-results.sarif
           category: checkov
 
   # ---------------------------------------------------------------------------
-  # Terraform plan — one job per env-state (informational diff posted to PR).
-  # Runs only after day-1 gates pass.
+  # workflow_call contract smoke test (US-V4-03, FR-V4-10..14) — blocking.
+  # Asserts every `uses: ./.github/workflows/...` invocation passes only
+  # declared inputs/secrets and satisfies the callee's required inputs.
+  # Static equivalent of `act --workflow_call`; runs act --list opportunistically
+  # if the binary is available on the runner.
+  # ---------------------------------------------------------------------------
+  validate-workflow-call-contract:
+    name: Validate Workflow-Call Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pyyaml
+        run: pip install pyyaml==6.0.2
+
+      - name: Run contract validator
+        run: python3 scripts/validate-workflow-call-contract.py
+
+      - name: Run plan-truncation unit tests
+        run: python3 -m unittest scripts.tests.test_truncate_plan_output -v
+
+  # ---------------------------------------------------------------------------
+  # Terraform plan — delegates to .github/workflows/reusable/terraform-plan.yml
+  # via workflow_call.  Matrix-fans across the 7 env-states.  All plan
+  # choreography (init, plan, truncation, PR comment) lives in the reusable
+  # workflow; this file is now a thin caller (US-V4-03, FR-V4-10).
   # ---------------------------------------------------------------------------
   plan:
     name: Plan (${{ matrix.env }})
-    runs-on: ubuntu-latest
     needs: [format, validate, tflint]
-    permissions:
-      id-token: write
-      contents: read
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -203,101 +641,16 @@ jobs:
           - prod-we
           - prod-ne
           - seed-wus
-    env:
+    uses: ./.github/workflows/reusable/terraform-plan.yml
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    with:
+      env: ${{ matrix.env }}
+      post_comment: true
+    secrets:
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-
-      - name: Fetch sensitive TF vars from AKV
-        # fetch-tf-secrets.sh sources itself: exports TF_VAR_* in the current
-        # shell AND writes them to $GITHUB_ENV so subsequent steps inherit them.
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-        env:
-          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-
-      - name: Terraform Init
-        run: |
-          terraform init \
-            -backend-config=backends/${{ matrix.env }}.tfbackend \
-            -input=false \
-            -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-
-      - name: Terraform Plan
-        id: plan
-        run: |
-          set +e
-          terraform plan \
-            -no-color \
-            -input=false \
-            -detailed-exitcode \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}" \
-            2>&1 | tee "${{ runner.temp }}/plan-${{ matrix.env }}.txt"
-          TF_EXIT="${PIPESTATUS[0]}"
-          echo "exitcode=${TF_EXIT}" >> "$GITHUB_OUTPUT"
-        shell: bash
-        working-directory: ${{ env.WORKING_DIR }}
-
-      - name: Post plan diff to PR
-        uses: actions/github-script@v7
-        if: github.event_name == 'pull_request' && always()
-        env:
-          PLAN_ENV: ${{ matrix.env }}
-          PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
-          PLAN_FILE: ${{ runner.temp }}/plan-${{ matrix.env }}.txt
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const env = process.env.PLAN_ENV;
-            const exitCode = process.env.PLAN_EXITCODE;
-            const planFile = process.env.PLAN_FILE;
-            let planOutput = '';
-            try {
-              planOutput = fs.readFileSync(planFile, 'utf8');
-            } catch (_) {
-              planOutput = '(plan output not available)';
-            }
-            // Truncate to stay within GitHub comment limits (~65 KB)
-            if (planOutput.length > 60000) {
-              planOutput = planOutput.slice(0, 60000) + '\n... (output truncated)';
-            }
-            const icon = exitCode === '0' ? '✅' : (exitCode === '2' ? '📋' : '❌');
-            const statusLabel = exitCode === '0' ? 'no changes' : (exitCode === '2' ? 'changes pending' : 'error');
-            const body = [
-              `#### ${icon} Terraform Plan \`${env}\` — ${statusLabel}`,
-              '',
-              '<details><summary>Show Plan Output</summary>',
-              '',
-              '```hcl',
-              planOutput,
-              '```',
-              '',
-              '</details>',
-              '',
-              `*Commit: ${context.sha.slice(0, 7)} · Workflow: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`,
-            ].join('\n');
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body,
-            });
-
-      - name: Fail if plan errored
-        # Exit code 2 means changes pending (not an error); 0 = no changes; 1 = error.
-        if: steps.plan.outputs.exitcode == '1'
-        run: |
-          echo "::error::terraform plan failed for env: ${{ matrix.env }}"
-          exit 1
+      GITOPS_ADDONS_ORG: ${{ secrets.GITOPS_ADDONS_ORG }}

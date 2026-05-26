@@ -31,6 +31,10 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.17"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.12"
+    }
   }
   # Pin to 1.5.x (last MPL-licensed line; compatible with tflint, checkov, azurerm toolchain — ADR-029-v3, FR-V3-27)
   required_version = "~> 1.5.0"
@@ -66,3 +70,5 @@ provider "helm" {
   }
 }
 provider "random" {}
+
+provider "time" {}

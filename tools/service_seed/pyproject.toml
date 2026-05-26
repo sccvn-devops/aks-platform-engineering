@@ -1,0 +1,76 @@
+# US-V4-07 (FR-V4-31): installable package + console_script entry points.
+#
+# Installs via ``pip install -e tools/service_seed`` from the repository root.
+# The orchestrator CLI is exposed as ``service-seed`` and the registry-only
+# inspector as ``service-seed-registry``.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "service-seed"
+version = "0.4.0"
+description = "Seed service repositories and GitOps scaffolding from Jira intake requests."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "Platform Engineering" }]
+dependencies = [
+    # PyYAML is optional at runtime — cli._yaml_load falls back to an embedded
+    # subset parser when it's absent.  Pin to a known-good major to avoid
+    # silent breakage if the parser API shifts upstream.
+    "PyYAML>=6.0,<7",
+    # Jinja2 is required at runtime (US-V4-08, FR-V4-32..35) for the
+    # template-driven YAML emitters in service_template.  StrictUndefined
+    # behavior + ``trim_blocks``/``lstrip_blocks`` semantics are stable across
+    # the 3.x line so the bound is pinned to the current major.
+    "Jinja2>=3.1,<4",
+]
+
+[project.optional-dependencies]
+# Cookiecutter is invoked via subprocess; the Python API is not used.  Pinned
+# here so ``pip install -e .[render]`` provides the same binary the seed-job
+# expects in CI.  When cookiecutter is absent, service_template falls back to
+# render_cookiecutter_fallback (which is pure-Python and path-traversal safe).
+render = ["cookiecutter>=2.5,<3"]
+# Test dependencies (pytest + coverage) — the project's tests are written in
+# stdlib ``unittest`` so neither is strictly required, but pytest-cov is the
+# acceptance-criteria gate (AC3).
+test = [
+    "pytest>=8.0,<9",
+    "pytest-cov>=4.1,<6",
+]
+typecheck = ["mypy>=1.8,<2"]
+
+[project.scripts]
+service-seed = "tools.service_seed.cli:main"
+service-seed-registry = "tools.service_seed.cli:registry_main"
+
+[tool.setuptools]
+# The ``tools.service_seed`` package lives one level above this pyproject in
+# the repo tree, so the install needs to walk back to find it.  ``pip install
+# -e tools/service_seed`` is the supported invocation; the package_dir maps
+# ``tools.service_seed`` to the source tree.
+package-dir = { "tools.service_seed" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tests*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"tools.service_seed" = [
+    "cookiecutter-service/**",
+    "templates/**/*.j2",
+    "profiles/*.yaml",
+]
+
+[tool.mypy]
+strict = true
+files = ["."]
+exclude = ["tests/", "cookiecutter-service/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

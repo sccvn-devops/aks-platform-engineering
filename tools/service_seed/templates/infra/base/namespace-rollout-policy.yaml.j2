@@ -1,0 +1,14 @@
+apiVersion: platform.cityos.io/v1alpha1
+kind: NamespaceRolloutPolicy
+metadata:
+  name: {{ service }}-rollout-policy
+  namespace: {{ service }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  compositionRef:
+    name: namespacerolloutpolicy-{{ slo_class }}.platform.cityos.io
+  parameters:
+    namespace: {{ service }}-prod
+    sloClass: {{ slo_class }}
+    prometheusAddress: http://prometheus-operated.monitoring.svc.cluster.local:9090

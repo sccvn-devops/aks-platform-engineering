@@ -1,0 +1,83 @@
+# terraform-apply.yml (reusable) — owns all `terraform apply` choreography for
+# one env-state (US-V4-03, FR-V4-11/12/14).
+#
+# Called by:
+#   .github/workflows/terraform-apply.yml — two-phase matrix orchestrator.
+#
+# Permissions (FR-V4-11): id-token + contents read. No pull-requests permission;
+# apply runs only after merge to main.
+#
+# GitHub Environment protection (FR-V4-14): the caller passes the env name via
+# `inputs.env` and this workflow sets `environment: ${{ inputs.env }}`, so the
+# per-environment reviewer/approval policy gates the apply job (ADR-025-v3).
+#
+# Tool versions (FR-V4-45) and Azure OIDC env (ADR-030-v3) are bootstrapped by
+# the shared .github/actions/setup-tf composite action (FR-V4-12).
+
+name: Terraform Apply (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: "env-state name (must match a GitHub Environment + backends/<env>.tfbackend)"
+        type: string
+        required: true
+      working_directory:
+        description: "Directory containing the Terraform root module."
+        type: string
+        required: false
+        default: terraform
+    secrets:
+      ARM_CLIENT_ID:
+        required: true
+      ARM_TENANT_ID:
+        required: true
+      ARM_SUBSCRIPTION_ID:
+        required: true
+      GITOPS_ADDONS_ORG:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  apply:
+    name: Apply
+    runs-on: ubuntu-latest
+    # FR-V4-14: per-matrix-entry environment protection — required reviewers,
+    # branch restriction, and audit trail come from the GH Environment config.
+    environment: ${{ inputs.env }}
+    env:
+      ARM_USE_OIDC: "true"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Terraform + Azure OIDC
+        uses: ./.github/actions/setup-tf
+        with:
+          arm-client-id: ${{ secrets.ARM_CLIENT_ID }}
+          arm-tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          arm-subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+      - name: Fetch sensitive TF vars from AKV
+        run: source scripts/fetch-tf-secrets.sh
+        shell: bash
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config=backends/${{ inputs.env }}.tfbackend \
+            -input=false \
+            -no-color
+        working-directory: ${{ inputs.working_directory }}
+
+      - name: Terraform Apply
+        run: |
+          terraform apply \
+            -auto-approve \
+            -no-color \
+            -input=false \
+            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}"
+        working-directory: ${{ inputs.working_directory }}

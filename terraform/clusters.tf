@@ -1,88 +1,32 @@
 locals {
+  # FR-V4-02: per-cluster autoscaling profile (the only piece NOT in the registry —
+  # capacity planning is environment-tier policy, not cluster identity).
+  aks_cluster_autoscale_profiles = {
+    "mgmt-ne"        = { enable_auto_scaling = false, agents_count = 1, agents_min_count = null, agents_max_count = null, default_nodepool_vm_size = var.agents_size }
+    "aks-dev-we"     = { enable_auto_scaling = true, agents_count = null, agents_min_count = 1, agents_max_count = 3, default_nodepool_vm_size = var.agents_size }
+    "aks-staging-we" = { enable_auto_scaling = true, agents_count = null, agents_min_count = 1, agents_max_count = 5, default_nodepool_vm_size = var.agents_size }
+    "aks-prod-we"    = { enable_auto_scaling = true, agents_count = null, agents_min_count = 3, agents_max_count = 10, default_nodepool_vm_size = "Standard_D4s_v3" }
+    "aks-prod-ne"    = { enable_auto_scaling = true, agents_count = null, agents_min_count = 3, agents_max_count = 10, default_nodepool_vm_size = "Standard_D4s_v3" }
+    "seed-wus"       = { enable_auto_scaling = false, agents_count = 1, agents_min_count = null, agents_max_count = null, default_nodepool_vm_size = var.agents_size }
+  }
+
+  # FR-V4-02: aks_cluster_definitions is derived from the cluster registry.
+  # location, sku_tier, agents_availability_zones — sourced from gitops/clusters/registry.yaml.
+  # mgmt-we is provisioned by the dedicated `module.aks` in main.tf; it is NOT in this map.
   aks_cluster_definitions = {
-    "mgmt-ne" = {
-      location                  = var.secondary_location
-      subnet_key                = "mgmt-ne"
-      sku_tier                  = "Standard"
-      enable_auto_scaling       = false
-      agents_count              = 1
-      agents_min_count          = null
-      agents_max_count          = null
-      agents_availability_zones = null
+    for k, profile in local.aks_cluster_autoscale_profiles : k => {
+      location                  = local.cluster_registry[k].region
+      subnet_key                = k
+      sku_tier                  = local.cluster_registry[k].sku_tier
+      enable_auto_scaling       = profile.enable_auto_scaling
+      agents_count              = profile.agents_count
+      agents_min_count          = profile.agents_min_count
+      agents_max_count          = profile.agents_max_count
+      agents_availability_zones = length(local.cluster_registry[k].azs) > 0 ? local.cluster_registry[k].azs : null
       default_nodepool_name     = "system"
-      default_nodepool_vm_size  = var.agents_size
-      default_nodepool_labels   = { nodepool = "defaultnodepool", cluster = "mgmt-ne" }
-      default_nodepool_tags     = { Agent = "defaultnodepoolagent", cluster = "mgmt-ne" }
-    }
-    "aks-dev-we" = {
-      location                  = var.location
-      subnet_key                = "aks-dev-we"
-      sku_tier                  = "Standard"
-      enable_auto_scaling       = true
-      agents_count              = null
-      agents_min_count          = 1
-      agents_max_count          = 3
-      agents_availability_zones = ["1"]
-      default_nodepool_name     = "system"
-      default_nodepool_vm_size  = var.agents_size
-      default_nodepool_labels   = { nodepool = "defaultnodepool", cluster = "aks-dev-we" }
-      default_nodepool_tags     = { Agent = "defaultnodepoolagent", cluster = "aks-dev-we" }
-    }
-    "aks-staging-we" = {
-      location                  = var.location
-      subnet_key                = "aks-staging-we"
-      sku_tier                  = "Standard"
-      enable_auto_scaling       = true
-      agents_count              = null
-      agents_min_count          = 1
-      agents_max_count          = 5
-      agents_availability_zones = ["1", "2", "3"]
-      default_nodepool_name     = "system"
-      default_nodepool_vm_size  = var.agents_size
-      default_nodepool_labels   = { nodepool = "defaultnodepool", cluster = "aks-staging-we" }
-      default_nodepool_tags     = { Agent = "defaultnodepoolagent", cluster = "aks-staging-we" }
-    }
-    "aks-prod-we" = {
-      location                  = var.location
-      subnet_key                = "aks-prod-we"
-      sku_tier                  = "Premium"
-      enable_auto_scaling       = true
-      agents_count              = null
-      agents_min_count          = 3
-      agents_max_count          = 10
-      agents_availability_zones = ["1", "2", "3"]
-      default_nodepool_name     = "system"
-      default_nodepool_vm_size  = "Standard_D4s_v3"
-      default_nodepool_labels   = { nodepool = "defaultnodepool", cluster = "aks-prod-we" }
-      default_nodepool_tags     = { Agent = "defaultnodepoolagent", cluster = "aks-prod-we" }
-    }
-    "aks-prod-ne" = {
-      location                  = var.secondary_location
-      subnet_key                = "aks-prod-ne"
-      sku_tier                  = "Premium"
-      enable_auto_scaling       = true
-      agents_count              = null
-      agents_min_count          = 3
-      agents_max_count          = 10
-      agents_availability_zones = ["1", "2", "3"]
-      default_nodepool_name     = "system"
-      default_nodepool_vm_size  = "Standard_D4s_v3"
-      default_nodepool_labels   = { nodepool = "defaultnodepool", cluster = "aks-prod-ne" }
-      default_nodepool_tags     = { Agent = "defaultnodepoolagent", cluster = "aks-prod-ne" }
-    }
-    "seed-wus" = {
-      location                  = var.dr_location
-      subnet_key                = "seed-wus"
-      sku_tier                  = "Standard"
-      enable_auto_scaling       = false
-      agents_count              = 1
-      agents_min_count          = null
-      agents_max_count          = null
-      agents_availability_zones = null
-      default_nodepool_name     = "system"
-      default_nodepool_vm_size  = var.agents_size
-      default_nodepool_labels   = { nodepool = "defaultnodepool", cluster = "seed-wus" }
-      default_nodepool_tags     = { Agent = "defaultnodepoolagent", cluster = "seed-wus" }
+      default_nodepool_vm_size  = profile.default_nodepool_vm_size
+      default_nodepool_labels   = { nodepool = "defaultnodepool", cluster = k }
+      default_nodepool_tags     = { Agent = "defaultnodepoolagent", cluster = k }
     }
   }
 }

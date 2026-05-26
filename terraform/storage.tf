@@ -41,12 +41,28 @@ resource "azurerm_storage_account" "mgmt_lease" {
     service = "mgmt-lease-storage"
     region  = "we"
   })
+
+  # FR-V4-41 / US-V4-10: the storage account underpins the management-plane
+  # singleton lease (ADR-022) and Velero backup lifecycle.  Destroying it
+  # accidentally would split-brain the active/standby contract.  Removal
+  # requires a deliberate two-PR sequence: PR-1 removes this block, PR-2
+  # destroys.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_storage_container" "mgmt_lease" {
   name                  = "leases"
   storage_account_name  = azurerm_storage_account.mgmt_lease.name
   container_access_type = "private"
+
+  # FR-V4-41 / US-V4-10: the `leases` container holds the mgmt-active blob
+  # whose lease arbitrates active vs. standby control planes (ADR-022).  Loss
+  # of the container is loss of the lease history.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_storage_blob" "mgmt_active" {

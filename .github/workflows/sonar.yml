@@ -48,13 +48,13 @@ jobs:
       run:
         working-directory: backstage
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           # Fetch full history for accurate blame and new-code detection
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: "20"
           cache: "yarn"
@@ -73,7 +73,7 @@ jobs:
         # Sprint-1: advisory mode — warning posted but PR not blocked.
         # Sprint-2 cutover: remove `continue-on-error: true` to block on gate failure.
         continue-on-error: true
-        uses: SonarSource/sonarcloud-github-action@v3
+        uses: SonarSource/sonarcloud-github-action@383f7e52eae3ab0510c3cb0e7d9d150bbaeab838  # v3.1.0
         with:
           projectBaseDir: backstage
           args: >

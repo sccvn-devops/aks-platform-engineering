@@ -3,7 +3,7 @@ locals {
     "mgmt-ne" = {
       environment             = "control-plane"
       env                     = "control-plane"
-      region                  = var.secondary_location
+      region                  = local.cluster_registry["mgmt-ne"].region
       role                    = "management"
       lease_status            = "standby"
       enable_argocd           = "false"
@@ -17,7 +17,7 @@ locals {
     "aks-dev-we" = {
       environment             = "dev"
       env                     = "dev"
-      region                  = var.location
+      region                  = local.cluster_registry["aks-dev-we"].region
       role                    = "workload"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -32,7 +32,7 @@ locals {
     "aks-staging-we" = {
       environment             = "staging"
       env                     = "staging"
-      region                  = var.location
+      region                  = local.cluster_registry["aks-staging-we"].region
       role                    = "workload"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -47,7 +47,7 @@ locals {
     "aks-prod-we" = {
       environment             = "prod"
       env                     = "prod"
-      region                  = var.location
+      region                  = local.cluster_registry["aks-prod-we"].region
       role                    = "workload"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -62,7 +62,7 @@ locals {
     "aks-prod-ne" = {
       environment             = "prod"
       env                     = "prod"
-      region                  = var.secondary_location
+      region                  = local.cluster_registry["aks-prod-ne"].region
       role                    = "workload"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -77,7 +77,7 @@ locals {
     "seed-wus" = {
       environment             = "dr"
       env                     = "dr"
-      region                  = var.dr_location
+      region                  = local.cluster_registry["seed-wus"].region
       role                    = "bootstrap"
       lease_status            = "unmanaged"
       enable_argocd           = "false"
@@ -131,7 +131,7 @@ resource "kubernetes_secret_v1" "argocd_registered_clusters" {
       mgmt_lease_blob_url = azurerm_storage_blob.mgmt_active.url
       }, each.value.role == "management" ? {
       mgmt_lease_identity_client_id      = azurerm_user_assigned_identity.mgmt_cluster[each.key].client_id
-      velero_identity_client_id          = azurerm_user_assigned_identity.velero.client_id
+      velero_identity_client_id          = module.velero_identity.client_id
       velero_backup_storage_account_name = azurerm_storage_account.mgmt_backup.name
       velero_backup_container_name       = azurerm_storage_container.mgmt_backup.name
       velero_backup_resource_group_name  = azurerm_resource_group.this.name
@@ -139,7 +139,7 @@ resource "kubernetes_secret_v1" "argocd_registered_clusters" {
       velero_schedules_disabled          = each.value.lease_status == "active" ? "false" : "true"
       } : {}, contains(keys(local.external_secrets_workload_clusters), each.key) ? {
       oidc_issuer_url                         = each.value.oidc_issuer_url
-      external_secrets_identity_client_id     = azurerm_user_assigned_identity.external_secrets[each.key].client_id
+      external_secrets_identity_client_id     = module.external_secrets_identity[each.key].client_id
       external_secrets_vault_id               = azurerm_key_vault.platform[local.external_secrets_workload_clusters[each.key].key_vault_key].id
       external_secrets_vault_url              = azurerm_key_vault.platform[local.external_secrets_workload_clusters[each.key].key_vault_key].vault_uri
       external_secrets_smoke_test_secret_name = azurerm_key_vault_secret.external_secrets_smoke_test[local.external_secrets_workload_clusters[each.key].key_vault_key].name

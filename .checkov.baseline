@@ -1,4 +1,10 @@
 {
+  "_schema": {
+    "version": "us-v4-11",
+    "doc": "docs/checkov-baseline-metadata-schema.md",
+    "validator": "scripts/validate-checkov-baseline.py",
+    "metadata_required_per_finding": ["rationale", "owner", "expiry"]
+  },
   "results": {
     "passed_checks": [],
     "failed_checks": [],

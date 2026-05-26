@@ -1,20 +1,34 @@
-# terraform-apply.yml — gated Terraform apply with per-environment reviewers (US-V3-14, ADR-025-v3)
+# terraform-apply.yml — thin caller / two-phase matrix orchestrator for
+# gated Terraform apply (US-V3-14, US-V4-03, ADR-025-v3, FR-V4-11/14).
 #
-# Triggered on merge to main (or manual dispatch).  Application CI stays on Jenkins (ADR-001-v2).
+# Triggered on merge to main (or manual dispatch). Application CI stays on
+# Jenkins (ADR-001-v2). All apply choreography lives in the reusable workflow
+# at .github/workflows/reusable/terraform-apply.yml. This file declares only
+# the two-phase matrix that fans the reusable across env-states.
 #
-# Each env-state job targets a GitHub Environment (e.g., prod-we) which:
+# Two-phase matrix (FR-V4-11):
+#   Phase 1: [mgmt-we, mgmt-ne]
+#   Phase 2: [dev, staging, prod-we, prod-ne, seed-wus]   needs: apply-phase-1
+#
+# GitHub Environment protection (FR-V4-14): the reusable callee sets
+# `environment: ${{ inputs.env }}`, so each matrix entry inherits the per-env
+# reviewer policy from `gh api environments/<env>` (configured by
+# scripts/setup-gha-environments.sh).
+#
+# Each Environment:
 #   - Pauses execution until at least two @platform-team members approve
 #   - Records reviewer identity in the GHA run history for audit
 #   - Restricts the deployment branch to `main` — PRs cannot trigger apply
 #
-# OIDC subjects (ADR-030-v3) — federated credential must exist per environment in Entra ID:
-#   repo:sccvn-devops/aks-platform-engineering:environment:<env-name>
+# Tool versions (FR-V4-45) and Azure OIDC env (ADR-030-v3) flow through the
+# composite action at .github/actions/setup-tf consumed by the reusable.
+#
+# OIDC subjects (ADR-030-v3) — federated credential must exist per environment
+# in Entra ID: repo:sccvn-devops/aks-platform-engineering:environment:<env>.
 # Run scripts/setup-gha-environments.sh once to create the 7 GitHub Environments.
 #
-# Required GitHub Secrets (same as terraform-ci.yml):
+# Required GitHub Secrets:
 #   ARM_CLIENT_ID, ARM_TENANT_ID, ARM_SUBSCRIPTION_ID, GITOPS_ADDONS_ORG
-#
-# Gate order: plan matrix (informational) → env-specific apply jobs (gated)
 #
 # References:
 #   ADR-025-v3 — quality gates + apply gating
@@ -29,24 +43,16 @@ on:
     paths:
       - "terraform/**"
       - ".github/workflows/terraform-apply.yml"
+      - ".github/workflows/reusable/terraform-apply.yml"
+      - ".github/workflows/reusable/terraform-plan.yml"
+      - ".github/actions/setup-tf/**"
+      - ".tool-versions"
       - "scripts/fetch-tf-secrets.sh"
-  # Manual dispatch allows re-applying without a code change.
-  workflow_dispatch:
-    inputs:
-      env:
-        description: "Single env-state to apply (leave blank for all)"
-        required: false
-        type: choice
-        default: ""
-        options:
-          - ""
-          - mgmt-we
-          - mgmt-ne
-          - dev
-          - staging
-          - prod-we
-          - prod-ne
-          - seed-wus
+  # Manual dispatch re-applies the full two-phase matrix without a code change.
+  # (For single-env re-applies, run the reusable workflow directly via gh-cli
+  # `gh workflow run terraform-apply.yml` then approve only the affected
+  # environment in the GH Environment review queue.)
+  workflow_dispatch: {}
 
 # Serialise concurrent applies per workflow ref to prevent state corruption.
 # One concurrent run per env-state is safe; the matrix handles intra-run isolation.
@@ -54,22 +60,13 @@ concurrency:
   group: ${{ github.workflow }}-apply
   cancel-in-progress: false
 
-env:
-  TF_VERSION: "1.5.7"
-  WORKING_DIR: terraform
-
-# ---------------------------------------------------------------------------
-# Stage 1: Pre-apply plan — informational diff for all envs before any apply.
-# Runs without gating so reviewers see the full blast radius before approving.
-# ---------------------------------------------------------------------------
 jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1: Pre-apply plan — informational diff for all envs before any apply.
+  # Runs without gating so reviewers see the full blast radius before approving.
+  # ---------------------------------------------------------------------------
   plan:
     name: Plan (${{ matrix.env }})
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -81,320 +78,71 @@ jobs:
           - prod-we
           - prod-ne
           - seed-wus
-    env:
+    uses: ./.github/workflows/reusable/terraform-plan.yml
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    with:
+      env: ${{ matrix.env }}
+      post_comment: false
+    secrets:
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-
-      - name: Fetch sensitive TF vars from AKV
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-        env:
-          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-
-      - name: Terraform Init
-        run: |
-          terraform init \
-            -backend-config=backends/${{ matrix.env }}.tfbackend \
-            -input=false \
-            -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-
-      - name: Terraform Plan
-        id: plan
-        run: |
-          set +e
-          terraform plan \
-            -no-color \
-            -input=false \
-            -detailed-exitcode \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}" \
-            2>&1 | tee "${{ runner.temp }}/plan-${{ matrix.env }}.txt"
-          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
-        shell: bash
-        working-directory: ${{ env.WORKING_DIR }}
-
-      - name: Summarise plan
-        if: always()
-        env:
-          PLAN_ENV: ${{ matrix.env }}
-          PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
-          PLAN_FILE: ${{ runner.temp }}/plan-${{ matrix.env }}.txt
-        run: |
-          icon="❌"; status="error"
-          [[ "${PLAN_EXITCODE}" == "0" ]] && icon="✅" && status="no changes"
-          [[ "${PLAN_EXITCODE}" == "2" ]] && icon="📋" && status="changes pending"
-          echo "### ${icon} Plan \`${PLAN_ENV}\` — ${status}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "<details><summary>Output</summary>" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo '```hcl' >> "$GITHUB_STEP_SUMMARY"
-          head -c 30000 "${PLAN_FILE}" >> "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "</details>" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Fail if plan errored
-        if: steps.plan.outputs.exitcode == '1'
-        run: |
-          echo "::error::terraform plan failed for env: ${{ matrix.env }}"
-          exit 1
+      GITOPS_ADDONS_ORG: ${{ secrets.GITOPS_ADDONS_ORG }}
 
   # ---------------------------------------------------------------------------
-  # Stage 2: Gated apply — one job per env-state targeting its GitHub Environment.
-  # Each Environment has required reviewers + branch restriction to `main`.
-  # OIDC subject: repo:<org>/<repo>:environment:<env-name> (ADR-030-v3).
+  # Stage 2 / Phase 1: management plane (mgmt-we then mgmt-ne in parallel).
+  # Each matrix entry inherits its GitHub Environment protection rules via
+  # the reusable callee's `environment: ${{ inputs.env }}` (FR-V4-14).
   # ---------------------------------------------------------------------------
-  apply-mgmt-we:
-    name: Apply (mgmt-we)
+  apply-phase-1:
+    name: Apply Phase 1 (${{ matrix.env }})
     needs: plan
-    if: github.event.inputs.env == '' || github.event.inputs.env == 'mgmt-we'
-    runs-on: ubuntu-latest
-    environment: mgmt-we
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - mgmt-we
+          - mgmt-ne
+    uses: ./.github/workflows/reusable/terraform-apply.yml
     permissions:
       id-token: write
       contents: read
-    env:
+    with:
+      env: ${{ matrix.env }}
+    secrets:
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-      - name: Fetch sensitive TF vars from AKV
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-      - name: Init
-        run: terraform init -backend-config=backends/mgmt-we.tfbackend -input=false -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-      - name: Apply
-        run: |
-          terraform apply \
-            -auto-approve \
-            -no-color \
-            -input=false \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}"
-        working-directory: ${{ env.WORKING_DIR }}
+      GITOPS_ADDONS_ORG: ${{ secrets.GITOPS_ADDONS_ORG }}
 
-  apply-mgmt-ne:
-    name: Apply (mgmt-ne)
-    needs: [plan, apply-mgmt-we]
-    if: github.event.inputs.env == '' || github.event.inputs.env == 'mgmt-ne'
-    runs-on: ubuntu-latest
-    environment: mgmt-ne
+  # ---------------------------------------------------------------------------
+  # Stage 2 / Phase 2: workload + seed clusters.
+  # `needs: [apply-phase-1]` enforces phase ordering — workloads cannot apply
+  # until both mgmt-we and mgmt-ne succeed (FR-V4-11).
+  # ---------------------------------------------------------------------------
+  apply-phase-2:
+    name: Apply Phase 2 (${{ matrix.env }})
+    needs: [plan, apply-phase-1]
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - dev
+          - staging
+          - prod-we
+          - prod-ne
+          - seed-wus
+    uses: ./.github/workflows/reusable/terraform-apply.yml
     permissions:
       id-token: write
       contents: read
-    env:
+    with:
+      env: ${{ matrix.env }}
+    secrets:
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-      - name: Fetch sensitive TF vars from AKV
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-      - name: Init
-        run: terraform init -backend-config=backends/mgmt-ne.tfbackend -input=false -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-      - name: Apply
-        run: |
-          terraform apply \
-            -auto-approve \
-            -no-color \
-            -input=false \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}"
-        working-directory: ${{ env.WORKING_DIR }}
-
-  apply-dev:
-    name: Apply (dev)
-    needs: plan
-    if: github.event.inputs.env == '' || github.event.inputs.env == 'dev'
-    runs-on: ubuntu-latest
-    environment: dev
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-      - name: Fetch sensitive TF vars from AKV
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-      - name: Init
-        run: terraform init -backend-config=backends/dev.tfbackend -input=false -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-      - name: Apply
-        run: |
-          terraform apply \
-            -auto-approve \
-            -no-color \
-            -input=false \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}"
-        working-directory: ${{ env.WORKING_DIR }}
-
-  apply-staging:
-    name: Apply (staging)
-    needs: [plan, apply-dev]
-    if: github.event.inputs.env == '' || github.event.inputs.env == 'staging'
-    runs-on: ubuntu-latest
-    environment: staging
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-      - name: Fetch sensitive TF vars from AKV
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-      - name: Init
-        run: terraform init -backend-config=backends/staging.tfbackend -input=false -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-      - name: Apply
-        run: |
-          terraform apply \
-            -auto-approve \
-            -no-color \
-            -input=false \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}"
-        working-directory: ${{ env.WORKING_DIR }}
-
-  apply-prod-we:
-    name: Apply (prod-we)
-    needs: [plan, apply-staging]
-    if: github.event.inputs.env == '' || github.event.inputs.env == 'prod-we'
-    runs-on: ubuntu-latest
-    environment: prod-we
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-      - name: Fetch sensitive TF vars from AKV
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-      - name: Init
-        run: terraform init -backend-config=backends/prod-we.tfbackend -input=false -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-      - name: Apply
-        run: |
-          terraform apply \
-            -auto-approve \
-            -no-color \
-            -input=false \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}"
-        working-directory: ${{ env.WORKING_DIR }}
-
-  apply-prod-ne:
-    name: Apply (prod-ne)
-    needs: [plan, apply-prod-we]
-    if: github.event.inputs.env == '' || github.event.inputs.env == 'prod-ne'
-    runs-on: ubuntu-latest
-    environment: prod-ne
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-      - name: Fetch sensitive TF vars from AKV
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-      - name: Init
-        run: terraform init -backend-config=backends/prod-ne.tfbackend -input=false -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-      - name: Apply
-        run: |
-          terraform apply \
-            -auto-approve \
-            -no-color \
-            -input=false \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}"
-        working-directory: ${{ env.WORKING_DIR }}
-
-  apply-seed-wus:
-    name: Apply (seed-wus)
-    needs: plan
-    if: github.event.inputs.env == '' || github.event.inputs.env == 'seed-wus'
-    runs-on: ubuntu-latest
-    environment: seed-wus
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_USE_OIDC: "true"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-      - name: Fetch sensitive TF vars from AKV
-        run: source scripts/fetch-tf-secrets.sh
-        shell: bash
-      - name: Init
-        run: terraform init -backend-config=backends/seed-wus.tfbackend -input=false -no-color
-        working-directory: ${{ env.WORKING_DIR }}
-      - name: Apply
-        run: |
-          terraform apply \
-            -auto-approve \
-            -no-color \
-            -input=false \
-            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}"
-        working-directory: ${{ env.WORKING_DIR }}
+      GITOPS_ADDONS_ORG: ${{ secrets.GITOPS_ADDONS_ORG }}

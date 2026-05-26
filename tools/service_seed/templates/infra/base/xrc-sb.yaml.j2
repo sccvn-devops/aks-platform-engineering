@@ -1,0 +1,16 @@
+apiVersion: platform.cityos.io/v1alpha1
+kind: ServiceBus
+metadata:
+  name: {{ service }}-sb
+  namespace: placeholder-infra
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  parameters:
+    region: {{ primary_region }}
+    location: {{ primary_region }}
+    resourceGroupName: {{ primary_resource_group }}
+    sloClass: {{ slo_class }}
+    secretName: {{ service }}-sb-conn
+    keyVaultWeId: {{ key_vault_we_id }}
+    keyVaultNeId: {{ key_vault_ne_id }}

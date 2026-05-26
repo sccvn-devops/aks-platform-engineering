@@ -1,4 +1,70 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Platform AKV catalogue (US-V3.1-01 / FR-V3.1-01..05 / closes FR-V3-12)
+#
+# This catalogue is the single source of truth for every platform-managed AKV
+# secret and certificate. Adding a new azurerm_key_vault_secret /
+# azurerm_key_vault_certificate resource to terraform/ MUST be accompanied by a
+# new entry here; CI lint script scripts/validate-akv-catalogue.py enforces
+# that every resource is listed (and vice versa).
+#
+# Columns:
+#   name            — AKV object name
+#   mode            — operator-supplied | platform-generated | akv-issued
+#   vault           — mgmt-we | workload (per-cluster) | workload-all (every workload vault)
+#   expiry-policy   — time_rotating reference (secrets) or lifetime_percentage (certs)
+#   rotation-scope  — UAMI that may rewrite this object (per-purpose UAMI is the
+#                     maximum isolation available — AKV data-plane RBAC does NOT
+#                     support ABAC prefix conditions per grilling-session 2026-05-22,
+#                     ADR-020 update; per-purpose UAMI is the equivalent control).
+#
+# ── Certificates (AKV-issued, AutoRenew at lifetime_percentage = 75) ────────
+#   platform-tls            akv-issued   workload-all   lifetime_percentage=75   akspe (Key Vault Administrator)
+#   backstage-internal-tls  akv-issued   mgmt-we        lifetime_percentage=75   akspe
+#   jenkins-webhook-tls     akv-issued   mgmt-we        lifetime_percentage=75   akspe
+#
+# ── Platform-generated secrets (90-day quarterly expiry via time_rotating) ──
+#   jenkins-admin-username                    operator-supplied      mgmt-we   no-expiry   akspe
+#   jenkins-admin-password                    operator-supplied      mgmt-we   quarterly   akspe + saas-token-rotator (vault-scope; ABAC prefix not supported)
+#   bitbucket-workspace-token                 platform-generated     mgmt-we   quarterly   saas-token-rotator
+#   jira-service-account-token                platform-generated     mgmt-we   quarterly   saas-token-rotator
+#   jenkins-webhook-https-keystore            operator-supplied      mgmt-we   quarterly   akspe
+#   jenkins-webhook-https-keystore-password   operator-supplied      mgmt-we   quarterly   akspe
+#   backstage-postgres-password               operator-supplied      mgmt-we   quarterly   akspe
+#   backstage-github-token                    operator-supplied      mgmt-we   quarterly   akspe (US-V4-09: replaces helm_release.set { value = local.github_token })
+#   backstage-azure-client-secret             platform-generated     mgmt-we   quarterly   akspe (US-V4-09: replaces helm_release.set { value = azuread_service_principal_password... })
+#   backstage-service-account-token           platform-generated     mgmt-we   no-expiry   akspe (US-V4-09: k8s SA token; rotates with the SA itself, not with a clock — see secrets_managed_in_tf in locals.tf)
+#   backstage-tls-crt                         operator-supplied      mgmt-we   quarterly   akspe (legacy; consume backstage-internal-tls cert when ready)
+#   backstage-tls-key                         operator-supplied      mgmt-we   quarterly   akspe (legacy; consume backstage-internal-tls cert when ready)
+#   eso-smoke-test                            platform-generated     workload-all   quarterly   akspe
+#   cosign-public-key                         platform-derived       workload-all   no-expiry (driven by cosign-signing-key rotation_policy in mgmt-we) akspe
+#
+# CI assertions:
+#   scripts/validate-akv-null-expiry.py     — fails the PR if any platform-tagged
+#                                              secret is missing expiration_date.
+#                                              Advisory in sprint-1, blocking from
+#                                              sprint-2 (set NULL_EXPIRY_MODE=block).
+#   scripts/validate-akv-catalogue.py       — fails the PR if a Terraform-declared
+#                                              azurerm_key_vault_secret /
+#                                              azurerm_key_vault_certificate is
+#                                              missing from the catalogue above
+#                                              (or vice versa).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Quarterly boundary for platform-generated secret expiry. The time_rotating
+# resource refreshes its `rotation_rfc3339` attribute every 90 days, which is
+# fed into expiration_date on every platform-managed secret. When the boundary
+# rotates, Terraform plan recreates the affected secret versions with a new
+# expiry 90 days ahead, satisfying FR-V3.1-02.
+resource "time_rotating" "platform_secret_quarterly" {
+  rotation_days = 90
+}
+
 locals {
+  # Computed expiry for platform-generated secrets: always 90 days ahead of the
+  # current rotation boundary. Used as expiration_date on every platform-managed
+  # azurerm_key_vault_secret resource (FR-V3.1-02).
+  platform_secret_expiry_rfc3339 = timeadd(time_rotating.platform_secret_quarterly.rotation_rfc3339, "2160h")
+
   workload_key_vaults = {
     "dev-we" = {
       name     = "kv-platform-dev-we"

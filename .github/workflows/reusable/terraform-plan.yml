@@ -1,0 +1,190 @@
+# terraform-plan.yml (reusable) — owns all `terraform plan` choreography for
+# one env-state (US-V4-03, FR-V4-10/12/13).
+#
+# Called by:
+#   .github/workflows/terraform-ci.yml      — PR-level matrix plan (posts comment)
+#   .github/workflows/terraform-apply.yml   — pre-apply blast-radius preview
+#
+# Permissions (FR-V4-10): id-token (OIDC), contents read, pull-requests write
+# (the PR-comment step is no-op when post_comment=false).
+#
+# Tool versions (FR-V4-45) and Azure OIDC env (ADR-030-v3) are bootstrapped by
+# the shared .github/actions/setup-tf composite action (FR-V4-12).
+#
+# Plan-output truncation (FR-V4-13) is delegated to scripts/truncate-plan-output.py
+# — the single source of truth. The 60KB threshold lives there.
+
+name: Terraform Plan (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: "env-state name (matches backends/<env>.tfbackend)"
+        type: string
+        required: true
+      post_comment:
+        description: "Post the plan diff back to the PR (true on pull_request, false on push)"
+        type: boolean
+        required: false
+        default: false
+      working_directory:
+        description: "Directory containing the Terraform root module."
+        type: string
+        required: false
+        default: terraform
+    secrets:
+      ARM_CLIENT_ID:
+        required: true
+      ARM_TENANT_ID:
+        required: true
+      ARM_SUBSCRIPTION_ID:
+        required: true
+      GITOPS_ADDONS_ORG:
+        required: true
+    outputs:
+      exitcode:
+        description: "terraform plan -detailed-exitcode (0=no changes, 2=changes, 1=error)"
+        value: ${{ jobs.plan.outputs.exitcode }}
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      exitcode: ${{ steps.plan.outputs.exitcode }}
+    env:
+      ARM_USE_OIDC: "true"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Terraform + Azure OIDC
+        uses: ./.github/actions/setup-tf
+        with:
+          arm-client-id: ${{ secrets.ARM_CLIENT_ID }}
+          arm-tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          arm-subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+      - name: Fetch sensitive TF vars from AKV
+        # fetch-tf-secrets.sh sources itself: exports TF_VAR_* in the current
+        # shell AND writes them to $GITHUB_ENV so subsequent steps inherit them.
+        run: source scripts/fetch-tf-secrets.sh
+        shell: bash
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config=backends/${{ inputs.env }}.tfbackend \
+            -input=false \
+            -no-color
+        working-directory: ${{ inputs.working_directory }}
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          set +e
+          terraform plan \
+            -no-color \
+            -input=false \
+            -detailed-exitcode \
+            -var="gitops_addons_org=${{ secrets.GITOPS_ADDONS_ORG }}" \
+            2>&1 | tee "${{ runner.temp }}/plan-${{ inputs.env }}.txt"
+          TF_EXIT="${PIPESTATUS[0]}"
+          echo "exitcode=${TF_EXIT}" >> "$GITHUB_OUTPUT"
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+
+      - name: Upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: plan-${{ inputs.env }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/plan-${{ inputs.env }}.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Truncate plan for PR comment
+        if: inputs.post_comment && github.event_name == 'pull_request'
+        id: truncate
+        env:
+          PLAN_FILE: ${{ runner.temp }}/plan-${{ inputs.env }}.txt
+          ARTIFACT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # FR-V4-13: truncation lives in exactly one file at one threshold.
+          python3 scripts/truncate-plan-output.py \
+            --input "${PLAN_FILE}" \
+            --artifact-url "${ARTIFACT_URL}" \
+            > "${{ runner.temp }}/plan-${{ inputs.env }}-truncated.txt"
+          echo "truncated_path=${{ runner.temp }}/plan-${{ inputs.env }}-truncated.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Post plan diff to PR
+        if: inputs.post_comment && github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7.1.0
+        env:
+          PLAN_ENV: ${{ inputs.env }}
+          PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
+          PLAN_BODY_FILE: ${{ steps.truncate.outputs.truncated_path }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const env = process.env.PLAN_ENV;
+            const exitCode = process.env.PLAN_EXITCODE;
+            let planOutput = '';
+            try {
+              planOutput = fs.readFileSync(process.env.PLAN_BODY_FILE, 'utf8');
+            } catch (_) {
+              planOutput = '(plan output not available)';
+            }
+            const icon = exitCode === '0' ? '✅' : (exitCode === '2' ? '📋' : '❌');
+            const statusLabel = exitCode === '0' ? 'no changes' : (exitCode === '2' ? 'changes pending' : 'error');
+            const body = [
+              `#### ${icon} Terraform Plan \`${env}\` — ${statusLabel}`,
+              '',
+              '<details><summary>Show Plan Output</summary>',
+              '',
+              '```hcl',
+              planOutput,
+              '```',
+              '',
+              '</details>',
+              '',
+              `*Commit: ${context.sha.slice(0, 7)} · Workflow: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Summarise plan
+        if: always() && !inputs.post_comment
+        env:
+          PLAN_ENV: ${{ inputs.env }}
+          PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
+          PLAN_FILE: ${{ runner.temp }}/plan-${{ inputs.env }}.txt
+        run: |
+          icon="❌"; status="error"
+          [[ "${PLAN_EXITCODE}" == "0" ]] && icon="✅" && status="no changes"
+          [[ "${PLAN_EXITCODE}" == "2" ]] && icon="📋" && status="changes pending"
+          echo "### ${icon} Plan \`${PLAN_ENV}\` — ${status}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "<details><summary>Output</summary>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```hcl' >> "$GITHUB_STEP_SUMMARY"
+          head -c 30000 "${PLAN_FILE}" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if plan errored
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          echo "::error::terraform plan failed for env: ${{ inputs.env }}"
+          exit 1

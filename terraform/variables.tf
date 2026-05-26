@@ -496,3 +496,26 @@ variable "backstage_tls_key" {
     error_message = "backstage_tls_key must be a PEM-encoded private key."
   }
 }
+
+# US-V3.1-01 (FR-V3.1-04): Platform on-call webhook URL for AKV near-expiry alerts.
+# Receives Event Grid-routed Microsoft.KeyVault.SecretNearExpiry and
+# Microsoft.KeyVault.CertificateNearExpiry events 14 days before expiry.
+# Default points at a placeholder; set in environment-specific tfvars to your
+# Slack/Teams/PagerDuty inbound webhook.
+variable "platform_oncall_webhook_url" {
+  description = "HTTPS inbound-webhook URL for the platform on-call channel (Slack/Teams/PagerDuty). Receives AKV near-expiry events routed via Event Grid."
+  type        = string
+  default     = "https://example.invalid/akv-near-expiry-webhook-placeholder"
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^https://", var.platform_oncall_webhook_url))
+    error_message = "platform_oncall_webhook_url must be an https:// URL."
+  }
+}
+
+variable "platform_oncall_runbook_url" {
+  description = "URL of the AKV-near-expiry runbook surfaced in alert payloads. Operators follow this link to triage and rotate the expiring secret/cert."
+  type        = string
+  default     = "https://github.com/sccvn-devops/aks-platform-engineering/blob/main/docs/akv-near-expiry-runbook.md"
+}

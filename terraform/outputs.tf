@@ -84,7 +84,7 @@ output "mgmt_cluster_uami_client_ids" {
 output "external_secrets_uami_client_ids" {
   description = "User-assigned managed identity client IDs for workload-cluster External Secrets access."
   value = {
-    for key, identity in azurerm_user_assigned_identity.external_secrets :
+    for key, identity in module.external_secrets_identity :
     key => identity.client_id
   }
 }
@@ -111,7 +111,7 @@ output "acr_login_server" {
 
 output "jenkins_uami_client_id" {
   description = "Client ID for the Jenkins user-assigned managed identity."
-  value       = azurerm_user_assigned_identity.jenkins.client_id
+  value       = module.jenkins_identity.client_id
 }
 
 output "management_ci_key_vault_name" {
@@ -126,12 +126,12 @@ output "management_ci_cosign_signing_key_id" {
 
 output "external_secrets_mgmt_we_client_id" {
   description = "Client ID for the management-cluster External Secrets workload identity."
-  value       = azurerm_user_assigned_identity.external_secrets_mgmt_we.client_id
+  value       = module.external_secrets_mgmt_we_identity.client_id
 }
 
 output "velero_uami_client_id" {
   description = "Client ID for the Velero workload identity."
-  value       = azurerm_user_assigned_identity.velero.client_id
+  value       = module.velero_identity.client_id
 }
 
 output "velero_backup_storage_account_name" {
