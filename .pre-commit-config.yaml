@@ -133,6 +133,19 @@ repos:
         files: ^tools/service_seed/.*\.py$
         pass_filenames: false
 
+      # Helm-release secret-leak validator (US-V4-09, FR-V4-36..40).
+      # Asserts no helm_release.set { value = sensitive } shortcut exists in
+      # terraform/*.tf — the FR-V4-37 round-trip lint that keeps the in-tree
+      # call-site count at zero. Implemented as a Python validator (matches
+      # the in-tree convention; tflint plugins require Go build steps that
+      # the platform CI does not currently provision).
+      - id: validate-helm-release-secrets
+        name: validate helm_release does not pass sensitive values inline
+        entry: python3 scripts/validate-helm-release-secrets.py
+        language: system
+        files: ^terraform/.*\.tf$
+        pass_filenames: false
+
       # Jinja2 templates + SLO/rollout profile contract (US-V4-08, FR-V4-32..35).
       # Asserts every emitted file is template-driven, StrictUndefined catches
       # missing context keys, profile thresholds drive rendered output, and no

@@ -31,6 +31,10 @@ ALLOWLIST = {
     # Public material derived from cosign-signing-key; rotation is driven by the
     # backing key's rotation_policy in jenkins.tf, not the secret itself.
     "cosign_public_key",
+    # K8s ServiceAccount token — rotates with the SA itself, not on a clock; a
+    # forced quarterly expiration_date would recreate the AKV version every
+    # apply and defeat the point (US-V4-09).
+    "backstage_service_account_token",
 }
 
 SECRET_BLOCK_RE = re.compile(

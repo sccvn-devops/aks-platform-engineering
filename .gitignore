@@ -138,9 +138,11 @@ scripts/*
 !scripts/validate-workflow-call-contract.py
 !scripts/validate-mgmt-plane-lock-runners.sh
 !scripts/validate-rendered-manifests.sh
+!scripts/validate-helm-release-secrets.py
 !scripts/tests/
 !scripts/tests/__init__.py
 !scripts/tests/test_truncate_plan_output.py
+!scripts/tests/test_validate_helm_release_secrets.py
 
 # python
 __pycache__/

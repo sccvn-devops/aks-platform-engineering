@@ -651,6 +651,14 @@ resource "kubernetes_secret" "tls_secret" {
 
 
 
+# US-V4-09 / FR-V4-36..40: the four formerly-inline sensitive env vars
+# (K8S_SERVICE_ACCOUNT_TOKEN, GITHUB_TOKEN, POSTGRES_PASSWORD,
+# AZURE_CLIENT_SECRET) have been migrated to AKV + ESO. The chart consumes
+# them via `envFrom: secretRef: backstage-secrets`, materialised by the
+# ExternalSecret under
+# gitops/environments/default/addons/backstage/external-secret.yaml.
+# The local.secrets_managed_in_tf catalogue in terraform/locals.tf declares
+# the inventory; scripts/validate-helm-release-secrets.py guards regressions.
 resource "helm_release" "backstage" {
   count      = local.build_backstage ? 1 : 0
   depends_on = [kubernetes_secret.tls_secret]
@@ -677,14 +685,12 @@ resource "helm_release" "backstage" {
     value = "https://${module.aks.aks_name}"
   }
 
+  # envFrom seam — the chart sources K8S_SERVICE_ACCOUNT_TOKEN, GITHUB_TOKEN,
+  # POSTGRES_PASSWORD, and AZURE_CLIENT_SECRET from the ESO-materialised
+  # backstage-secrets K8s Secret instead of a helm_release.set value.
   set {
-    name  = "env.K8S_SERVICE_ACCOUNT_TOKEN"
-    value = kubernetes_secret.backstage_service_account_secret[count.index].data.token
-  }
-
-  set {
-    name  = "env.GITHUB_TOKEN"
-    value = local.github_token
+    name  = "envFrom[0].secretRef.name"
+    value = "backstage-secrets"
   }
 
   set {
@@ -731,11 +737,6 @@ resource "helm_release" "backstage" {
   }
 
   set {
-    name  = "env.POSTGRES_PASSWORD"
-    value = azurerm_postgresql_flexible_server.backstagedbserver[count.index].administrator_password
-  }
-
-  set {
     name  = "env.POSTGRES_DB"
     value = azurerm_postgresql_flexible_server_database.backstage_plugin_catalog[count.index].name
   }
@@ -743,11 +744,6 @@ resource "helm_release" "backstage" {
   set {
     name  = "env.AZURE_CLIENT_ID"
     value = azuread_application.backstage-app[count.index].client_id
-  }
-
-  set {
-    name  = "env.AZURE_CLIENT_SECRET"
-    value = azuread_service_principal_password.backstage-sp-password[count.index].value
   }
 
   set {

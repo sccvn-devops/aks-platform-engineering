@@ -52,6 +52,7 @@ on:
       - "scripts/validate-workflow-call-contract.py"
       - "scripts/truncate-plan-output.py"
       - "scripts/validate-rendered-manifests.sh"
+      - "scripts/validate-helm-release-secrets.py"
       - "scripts/tests/**"
       - "gitops/clusters/registry.yaml"
       - "gitops/clusters/registry.schema.json"
@@ -331,6 +332,35 @@ jobs:
 
       - name: Run module contract tests
         run: python3 -m unittest tools.workload_identity_tests.test_module_contract -v
+
+  # ---------------------------------------------------------------------------
+  # Helm-release secret-leak validator (US-V4-09, FR-V4-36..40) — blocking.
+  # Asserts no `helm_release` block in terraform/*.tf passes a sensitive
+  # Terraform variable through `set { name = X, value = var.<sensitive> }`,
+  # a one-hop sensitive local alias, or a known-sensitive resource attribute
+  # (administrator_password, azuread_service_principal_password.value, k8s
+  # SA-token data.token). The custom FR-V4-37 enforcement is implemented as a
+  # Python validator (the in-tree convention; tflint plugins require a Go
+  # build step CI does not currently provision) and is wired into both
+  # pre-commit and CI in lockstep — the round-trip lint guarantees the
+  # in-tree call-site count stays at zero (AC3 success-metric).
+  # ---------------------------------------------------------------------------
+  validate-helm-release-secrets:
+    name: Validate Helm Release Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run validator (FR-V4-37 round-trip lint)
+        run: python3 scripts/validate-helm-release-secrets.py
+
+      - name: Run validator unit tests
+        run: python3 -m unittest scripts.tests.test_validate_helm_release_secrets -v
 
   # ---------------------------------------------------------------------------
   # Service-seed robustness validator (US-V4-10, FR-V4-43..44) — blocking.

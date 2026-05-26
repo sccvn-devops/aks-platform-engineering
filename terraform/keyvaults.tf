@@ -30,6 +30,9 @@
 #   jenkins-webhook-https-keystore            operator-supplied      mgmt-we   quarterly   akspe
 #   jenkins-webhook-https-keystore-password   operator-supplied      mgmt-we   quarterly   akspe
 #   backstage-postgres-password               operator-supplied      mgmt-we   quarterly   akspe
+#   backstage-github-token                    operator-supplied      mgmt-we   quarterly   akspe (US-V4-09: replaces helm_release.set { value = local.github_token })
+#   backstage-azure-client-secret             platform-generated     mgmt-we   quarterly   akspe (US-V4-09: replaces helm_release.set { value = azuread_service_principal_password... })
+#   backstage-service-account-token           platform-generated     mgmt-we   no-expiry   akspe (US-V4-09: k8s SA token; rotates with the SA itself, not with a clock — see secrets_managed_in_tf in locals.tf)
 #   backstage-tls-crt                         operator-supplied      mgmt-we   quarterly   akspe (legacy; consume backstage-internal-tls cert when ready)
 #   backstage-tls-key                         operator-supplied      mgmt-we   quarterly   akspe (legacy; consume backstage-internal-tls cert when ready)
 #   eso-smoke-test                            platform-generated     workload-all   quarterly   akspe
