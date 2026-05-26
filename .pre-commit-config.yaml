@@ -89,3 +89,13 @@ repos:
         language: system
         files: ^gitops/clusters/registry\.(yaml|schema\.json)$
         pass_filenames: false
+
+      # Reusable workflow_call contract validator (FR-V4-10..14).
+      # Asserts every `uses: ./.github/workflows/...` jobcall passes only
+      # declared inputs/secrets and that required inputs are present.
+      - id: validate-workflow-call-contract
+        name: validate workflow_call inputs/secrets between top-level and reusable workflows
+        entry: python3 scripts/validate-workflow-call-contract.py
+        language: system
+        files: ^\.github/(workflows|actions)/.*\.(ya?ml)$
+        pass_filenames: false

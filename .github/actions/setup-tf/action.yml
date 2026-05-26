@@ -1,0 +1,60 @@
+# setup-tf — composite action owning the shared TF bootstrap
+# (US-V4-03, FR-V4-12, ADR-031-v4 + ADR-030-v3).
+#
+# Responsibilities:
+#   1. Install tool binaries from .tool-versions via mise (FR-V4-45).
+#   2. Export Azure OIDC env vars to $GITHUB_ENV so subsequent terraform steps
+#      authenticate via federated credentials (no plaintext secrets — ADR-030-v3).
+#   3. Export the canonical TF automation env (TF_IN_AUTOMATION, TF_INPUT=false)
+#      so every terraform plan/apply call site behaves identically.
+#
+# Out of scope (caller's responsibility): actions/checkout, fetch-tf-secrets,
+# `terraform init` (backend selection is per-env and lives in the caller).
+#
+# Both reusable workflows under .github/workflows/reusable/ consume this action,
+# so any change to TF bootstrap (mise version, TF env vars, OIDC handling) lands
+# in exactly one place.
+
+name: Setup Terraform (.tool-versions + Azure OIDC)
+description: >-
+  Install Terraform from .tool-versions via mise, export Azure OIDC and TF
+  automation env vars. Single shared bootstrap for the reusable plan/apply
+  workflows (FR-V4-12).
+
+inputs:
+  arm-client-id:
+    description: Azure UAMI client ID (federated to the calling environment).
+    required: true
+  arm-tenant-id:
+    description: Azure AD tenant ID.
+    required: true
+  arm-subscription-id:
+    description: Azure subscription ID.
+    required: true
+  mise-version:
+    description: Pinned mise CLI release used to resolve .tool-versions.
+    required: false
+    default: "2024.11.7"
+
+runs:
+  using: composite
+  steps:
+    - name: Install tools from .tool-versions
+      uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
+      with:
+        version: ${{ inputs.mise-version }}
+        install: true
+        cache: true
+
+    - name: Export Azure OIDC + TF automation env
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          echo "ARM_CLIENT_ID=${{ inputs.arm-client-id }}"
+          echo "ARM_TENANT_ID=${{ inputs.arm-tenant-id }}"
+          echo "ARM_SUBSCRIPTION_ID=${{ inputs.arm-subscription-id }}"
+          echo "ARM_USE_OIDC=true"
+          echo "TF_IN_AUTOMATION=true"
+          echo "TF_INPUT=false"
+        } >> "$GITHUB_ENV"

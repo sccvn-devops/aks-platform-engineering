@@ -139,7 +139,12 @@ def main(argv: list[str]) -> int:
         if not WORKFLOWS_DIR.is_dir():
             print(f"{WORKFLOWS_DIR}: no such directory", file=sys.stderr)
             return 1
-        targets = sorted(p for p in WORKFLOWS_DIR.glob("*.y*ml"))
+        # Recurse so reusable subworkflows under .github/workflows/reusable/
+        # and composite actions under .github/actions/*/action.yml are checked.
+        targets = sorted(p for p in WORKFLOWS_DIR.rglob("*.y*ml"))
+        actions_dir = REPO_ROOT / ".github" / "actions"
+        if actions_dir.is_dir():
+            targets.extend(sorted(actions_dir.rglob("action.y*ml")))
 
     if not targets:
         print("No workflow files to validate.", file=sys.stderr)

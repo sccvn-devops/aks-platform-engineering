@@ -134,3 +134,8 @@ scripts/*
 !scripts/validate-checkov-baseline.py
 !scripts/validate-tool-version-singleton.py
 !scripts/validate-cluster-registry.py
+!scripts/truncate-plan-output.py
+!scripts/validate-workflow-call-contract.py
+!scripts/tests/
+!scripts/tests/__init__.py
+!scripts/tests/test_truncate_plan_output.py
