@@ -7,6 +7,14 @@
 #   - Records reviewer identity in the GHA run history for audit
 #   - Restricts the deployment branch to `main` — PRs cannot trigger apply
 #
+# Tool versions (US-V4-11, FR-V4-45): all tool versions come from .tool-versions
+# via the jdx/mise-action step in each job.  No `TF_VERSION` env var declares
+# them here — see scripts/validate-tool-version-singleton.py for the round-trip
+# lint that catches drift.
+#
+# Action pinning (US-V4-11, FR-V4-46): every `uses:` is pinned to a 40-char
+# commit SHA with the human-readable tag in a trailing comment.
+#
 # OIDC subjects (ADR-030-v3) — federated credential must exist per environment in Entra ID:
 #   repo:sccvn-devops/aks-platform-engineering:environment:<env-name>
 # Run scripts/setup-gha-environments.sh once to create the 7 GitHub Environments.
@@ -29,6 +37,7 @@ on:
     paths:
       - "terraform/**"
       - ".github/workflows/terraform-apply.yml"
+      - ".tool-versions"
       - "scripts/fetch-tf-secrets.sh"
   # Manual dispatch allows re-applying without a code change.
   workflow_dispatch:
@@ -55,7 +64,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TF_VERSION: "1.5.7"
   WORKING_DIR: terraform
 
 # ---------------------------------------------------------------------------
@@ -87,12 +95,13 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Fetch sensitive TF vars from AKV
         run: source scripts/fetch-tf-secrets.sh
@@ -169,11 +178,12 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
       - name: Fetch sensitive TF vars from AKV
         run: source scripts/fetch-tf-secrets.sh
         shell: bash
@@ -204,11 +214,12 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
       - name: Fetch sensitive TF vars from AKV
         run: source scripts/fetch-tf-secrets.sh
         shell: bash
@@ -239,11 +250,12 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
       - name: Fetch sensitive TF vars from AKV
         run: source scripts/fetch-tf-secrets.sh
         shell: bash
@@ -274,11 +286,12 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
       - name: Fetch sensitive TF vars from AKV
         run: source scripts/fetch-tf-secrets.sh
         shell: bash
@@ -309,11 +322,12 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
       - name: Fetch sensitive TF vars from AKV
         run: source scripts/fetch-tf-secrets.sh
         shell: bash
@@ -344,11 +358,12 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
       - name: Fetch sensitive TF vars from AKV
         run: source scripts/fetch-tf-secrets.sh
         shell: bash
@@ -379,11 +394,12 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
       - name: Fetch sensitive TF vars from AKV
         run: source scripts/fetch-tf-secrets.sh
         shell: bash

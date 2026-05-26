@@ -130,3 +130,6 @@ scripts/*
 !scripts/validate-akv-catalogue.py
 !scripts/tls-history-purge-mirror.sh
 !scripts/verify-tls-history-clean.sh
+!scripts/validate-action-pins.py
+!scripts/validate-checkov-baseline.py
+!scripts/validate-tool-version-singleton.py

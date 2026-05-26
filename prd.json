@@ -51,8 +51,8 @@
         "terraform validate + tflint + pre-commit run --all-files passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implementation 2026-05-26: .tool-versions declares terraform 1.5.7 / tflint 0.55.0 / checkov 3.2.345 / terragrunt 0.67.0 / kubectl 1.31.3 / kustomize 5.4.3 (FR-V4-45). All `uses:` in .github/workflows/{terraform-ci,terraform-apply,sonar}.yml pinned to 40-char SHAs with `# vX.Y.Z` tag comments (FR-V4-46). setup-terraform + setup-tflint + checkov-action replaced with jdx/mise-action@1648a78… (v4.0.1) reading from .tool-versions. .checkov.baseline carries `_schema` block declaring `metadata_required_per_finding: [rationale, owner, expiry]`; per-finding schema documented at docs/checkov-baseline-metadata-schema.md (FR-V4-47). New blocking CI jobs: validate-action-pins, validate-checkov-baseline, validate-tool-version-singleton, precommit-drift (the latter runs pre-commit run --all-files and asserts `git diff --exit-code` is empty per FR-V4-48/49). Pre-commit config replaces terraform-linters/tflint hook with a local hook calling mise-resolved tflint so tflint version stays single-sourced. Dependabot weekly group bumps SHA + tag comment together natively."
     },
     {
       "id": "US-V4-01",

@@ -1,4 +1,4 @@
-# terraform-ci.yml — GitHub Actions meta-CI for platform Terraform (US-V3-12, US-V3-13)
+# terraform-ci.yml — GitHub Actions meta-CI for platform Terraform (US-V3-12, US-V3-13, US-V4-11)
 #
 # Runs on every PR targeting main.  Application CI stays on Jenkins (ADR-001-v2).
 #
@@ -6,6 +6,15 @@
 #   Day-1  : terraform_fmt, terraform_validate, tflint  — blocking (required status checks in branch protection)
 #   Sprint-1: checkov                                   — advisory (soft_fail controlled by .checkov.yaml)
 #   Sprint-2: checkov                                   — blocking (flip soft-fail in .checkov.yaml → false)
+#
+# Tool versions (FR-V4-45): all tool versions come from .tool-versions via the
+# jdx/mise-action step in each job.  No `TF_VERSION` / `TFLINT_VERSION` /
+# `CHECKOV_VERSION` env var or step input declares them — see
+# scripts/validate-tool-version-singleton.py for the round-trip lint.
+#
+# Action pinning (FR-V4-46): every `uses:` is pinned to a 40-character commit
+# SHA with the human-readable tag in a trailing comment.  Dependabot reads the
+# comment, bumps both the SHA and the comment together (.github/dependabot.yml).
 #
 # Branch protection (day-1 required checks — configure once via scripts/setup-branch-protection.sh):
 #   Required status checks: "Terraform Format", "Terraform Validate", "TFLint"
@@ -26,17 +35,21 @@ on:
     paths:
       - "terraform/**"
       - ".github/workflows/terraform-ci.yml"
+      - ".github/workflows/terraform-apply.yml"
       - ".tflint.hcl"
       - ".checkov.yaml"
       - ".checkov.baseline"
+      - ".tool-versions"
+      - ".pre-commit-config.yaml"
       - "scripts/fetch-tf-secrets.sh"
       - "scripts/setup-branch-protection.sh"
       - "scripts/validate-akv-null-expiry.py"
       - "scripts/validate-akv-catalogue.py"
+      - "scripts/validate-action-pins.py"
+      - "scripts/validate-checkov-baseline.py"
+      - "scripts/validate-tool-version-singleton.py"
 
 env:
-  TF_VERSION: "1.5.7"
-  TFLINT_VERSION: "v0.55.0"
   WORKING_DIR: terraform
 
 # Cancel in-progress runs when a new commit is pushed to the same PR.
@@ -52,11 +65,13 @@ jobs:
     name: Terraform Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Check formatting
         run: terraform fmt -recursive -check -diff
@@ -69,11 +84,13 @@ jobs:
     name: Terraform Validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Init (offline — no backend)
         run: terraform init -backend=false -input=false
@@ -90,11 +107,13 @@ jobs:
     name: TFLint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: terraform-linters/setup-tflint@v4
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          tflint_version: ${{ env.TFLINT_VERSION }}
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Init tflint plugins
         run: tflint --init --config=../.tflint.hcl
@@ -113,10 +132,10 @@ jobs:
     name: Check Variable Validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
 
@@ -134,10 +153,10 @@ jobs:
     name: Validate Checkov Suppressions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
 
@@ -161,10 +180,10 @@ jobs:
     name: AKV Null-Expiry Assertion
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
 
@@ -183,10 +202,10 @@ jobs:
     name: AKV Catalogue Completeness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
 
@@ -194,9 +213,107 @@ jobs:
         run: python3 scripts/validate-akv-catalogue.py
 
   # ---------------------------------------------------------------------------
+  # Action-pin validator (US-V4-11, FR-V4-46) — blocking.
+  # Asserts every `uses:` in .github/workflows/* is pinned to a 40-char SHA
+  # with a human-readable tag comment.  Dependabot bumps both together.
+  # ---------------------------------------------------------------------------
+  validate-action-pins:
+    name: Validate Action SHA Pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run validator
+        run: python3 scripts/validate-action-pins.py
+
+  # ---------------------------------------------------------------------------
+  # Checkov baseline metadata validator (US-V4-11, FR-V4-47) — blocking.
+  # Asserts every skipped finding carries rationale + owner + expiry and that
+  # expiry is in the future.  See docs/checkov-baseline-metadata-schema.md.
+  # ---------------------------------------------------------------------------
+  validate-checkov-baseline:
+    name: Validate Checkov Baseline Metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run validator
+        run: python3 scripts/validate-checkov-baseline.py
+
+  # ---------------------------------------------------------------------------
+  # Tool-version singleton lint (US-V4-11, FR-V4-45) — blocking.
+  # Asserts no file other than .tool-versions declares terraform / tflint /
+  # checkov / terragrunt / kubectl / kustomize versions.  Stops drift at PR
+  # time.
+  # ---------------------------------------------------------------------------
+  validate-tool-version-singleton:
+    name: Validate Tool-Version Singleton
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run validator
+        run: python3 scripts/validate-tool-version-singleton.py
+
+  # ---------------------------------------------------------------------------
+  # Pre-commit drift check (US-V4-11, FR-V4-48..49) — blocking.
+  # Runs `pre-commit run --all-files` in CI; asserts the resulting working tree
+  # diff is empty.  This guarantees CI and pre-commit converge (no formatter
+  # drift, no checkov / tflint configuration drift between contexts).
+  # ---------------------------------------------------------------------------
+  precommit-drift:
+    name: Pre-commit Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
+        with:
+          version: 2024.11.7
+          install: true
+          cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pre-commit
+        run: pip install pre-commit==3.7.1
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+
+      - name: Assert clean working tree
+        # If any hook modified a tracked file, fail loudly with the diff so the
+        # PR author can fix it locally with `pre-commit run --all-files`.
+        run: |
+          if ! git diff --exit-code --stat; then
+            echo "::error::pre-commit hooks modified tracked files — CI/pre-commit drift detected."
+            git diff
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
   # Checkov security scan — advisory in sprint-1, blocking in sprint-2.
   # Gate phase is controlled by `soft-fail` in .checkov.yaml (ADR-027-v3).
   # Sprint-2 cutover: set soft-fail: false in .checkov.yaml; do NOT change this file.
+  # Runs the mise-installed checkov CLI (FR-V4-45 — version from .tool-versions).
   # ---------------------------------------------------------------------------
   checkov:
     name: Checkov Security Scan
@@ -205,20 +322,27 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
+        with:
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Run Checkov
-        uses: bridgecrewio/checkov-action@v12
-        with:
-          # Configuration and advisory/blocking mode are centralised in .checkov.yaml.
-          # Both CI and pre-commit consume the same file (ADR-027-v3, US-V3-18).
-          config_file: .checkov.yaml
-          baseline: .checkov.baseline
-          output_format: cli,sarif
-          output_file_path: console,checkov-results.sarif
+        # Configuration and advisory/blocking mode are centralised in .checkov.yaml.
+        # Both CI and pre-commit consume the same file (ADR-027-v3, US-V3-18).
+        run: |
+          checkov \
+            --config-file .checkov.yaml \
+            --baseline .checkov.baseline \
+            --output cli \
+            --output sarif \
+            --output-file-path console,checkov-results.sarif
 
       - name: Upload Checkov SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57  # v3.36.0
         if: always()
         with:
           sarif_file: checkov-results.sarif
@@ -253,12 +377,13 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151  # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
+          version: 2024.11.7
+          install: true
+          cache: true
 
       - name: Fetch sensitive TF vars from AKV
         # fetch-tf-secrets.sh sources itself: exports TF_VAR_* in the current
@@ -294,7 +419,7 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: Post plan diff to PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7.1.0
         if: github.event_name == 'pull_request' && always()
         env:
           PLAN_ENV: ${{ matrix.env }}

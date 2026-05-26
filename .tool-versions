@@ -1,0 +1,21 @@
+# .tool-versions — single source of truth for tool versions (US-V4-11, FR-V4-45)
+#
+# Consumed by:
+#   - GitHub Actions CI/CD via jdx/mise-action (terraform-ci.yml, terraform-apply.yml)
+#   - Local developers via mise (https://mise.jdx.dev) or asdf (https://asdf-vm.com)
+#   - Pre-commit hooks (.pre-commit-config.yaml) via mise-resolved binaries
+#
+# Bumping rules (FR-V4-45..49):
+#   - Dependabot does NOT track .tool-versions; bumps are operator-driven via PR
+#     touching this file only. Tag comments below are advisory hints, not pins.
+#   - No other file in the repo may declare these tool versions. Adding e.g.
+#     `TF_VERSION: ...` to a workflow is a regression caught by
+#     scripts/validate-tool-version-singleton.py in CI.
+#   - asdf/mise format is `<plugin> <version>`, one tool per line.
+
+terraform   1.5.7        # ADR-029-v3 pin (~> 1.5.0); paired with terraform/provider.tf required_version
+tflint      0.55.0       # CI tflint + pre-commit local hook
+checkov     3.2.345      # consumed by CI checkov job + pre-commit terraform_checkov hook
+terragrunt  0.67.0       # provisioning helper (not yet wired into CI; pinned for future use)
+kubectl     1.31.3       # cluster-access helper for cutover/runbook scripts
+kustomize   5.4.3        # kustomize-render parity with ArgoCD (kustomize.buildOptions)

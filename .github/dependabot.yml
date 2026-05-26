@@ -1,4 +1,14 @@
-# Please see the documentation for all configuration options: https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+# dependabot.yml — weekly upgrade PRs (US-V4-11, FR-V4-46).
+#
+# github-actions group:
+#   - All workflow `uses:` are SHA-pinned with `# vX.Y.Z` tag comments.
+#     Dependabot natively bumps SHA and comment together when it sees this
+#     pattern.  See https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot
+#   - All actions are grouped into one PR per week to amortise reviewer cost.
+#   - PRs are auto-mergeable subject to standard required-checks review.
+#
+# Note: .tool-versions is NOT tracked by Dependabot (no ecosystem support).
+# Tool version bumps are operator-driven PRs that touch .tool-versions only.
 
 version: 2
 updates:
@@ -14,7 +24,7 @@ updates:
       timezone: "America/New_York"
     groups:
       all-github-actions:
-        patterns: [ "*" ]
+        patterns: ["*"]
     commit-message:
       prefix: "dependabot"
       include: scope
@@ -53,9 +63,26 @@ updates:
       timezone: "America/New_York"
     groups:
       all-backstage-patch-updates:
-        patterns: [ "*" ]
+        patterns: ["*"]
         update-types:
           - "patch"
+    commit-message:
+      prefix: "dependabot"
+      include: scope
+    labels:
+      - "ok-to-test"
+      - "kind/cleanup"
+      - "release-note-none"
+
+  # pre-commit hook source repos (pre-commit-terraform, pre-commit-hooks).
+  # Dependabot bumps `rev:` in .pre-commit-config.yaml for hook source repos.
+  - directory: "/"
+    package-ecosystem: "pre-commit"
+    open-pull-requests-limit: 3
+    schedule:
+      interval: "weekly"
+      time: "09:00"
+      timezone: "America/New_York"
     commit-message:
       prefix: "dependabot"
       include: scope

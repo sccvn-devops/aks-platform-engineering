@@ -1,11 +1,17 @@
-# .pre-commit-config.yaml — canonical local hook runner (US-V3-10, US-V3-11, US-V3-18)
+# .pre-commit-config.yaml — canonical local hook runner (US-V3-10, US-V3-11, US-V3-18, US-V4-11)
 #
 # Hook set at v3 GA (ADR-025-v3, ADR-027-v3, FR-V3-14):
 #   terraform_fmt, terraform_validate, tflint, detect-private-key,
 #   end-of-file-fixer, trailing-whitespace, terraform_checkov
 #
-# Checkov is added here (US-V3-18) so local and CI runs produce identical
-# results from the same .checkov.yaml config (ADR-027-v3 decision #1).
+# Tool versions (FR-V4-45): terraform / tflint / checkov binaries are resolved
+# from .tool-versions via mise (https://mise.jdx.dev).  The pre-commit-terraform
+# `rev:` pins the *hook source repo* commit, not the underlying tool — bumping
+# pre-commit-terraform is independent of bumping terraform itself.
+# The tflint hook is a `local` hook (not the pre-commit hook from
+# terraform-linters/tflint) so that the tflint binary version stays declared
+# only in .tool-versions (validated by scripts/validate-tool-version-singleton.py).
+#
 # Additional hooks require an ADR per ADR-025-v3.
 #
 # Install: pre-commit install
@@ -22,8 +28,6 @@ repos:
       - id: terraform_validate
         args:
           - --args=-no-color
-        additional_dependencies:
-          - terraform>=1.5.0,<2.0.0
       # Checkov via pre-commit-terraform — reads .checkov.yaml so the same
       # config drives both local commits and CI (US-V3-18, ADR-027-v3).
       # Scope is terraform/ only; Dockerfile coverage is CI-only (no Dockerfile pre-commit hook).
@@ -31,13 +35,6 @@ repos:
         args:
           - --args=--config-file ../.checkov.yaml
         files: ^terraform/
-
-  - repo: https://github.com/terraform-linters/tflint
-    rev: v0.55.0
-    hooks:
-      - id: tflint
-        args:
-          - --config=.tflint.hcl
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -47,3 +44,40 @@ repos:
         exclude: '^(backstage/)'
       - id: trailing-whitespace
         exclude: '^(backstage/)'
+
+  - repo: local
+    hooks:
+      # tflint local hook — uses mise-resolved tflint binary so the version
+      # stays single-sourced in .tool-versions (FR-V4-45).  Install mise locally
+      # via `curl https://mise.run | sh && mise install`.
+      - id: tflint-local
+        name: tflint (from .tool-versions)
+        entry: bash -c 'cd terraform && tflint --init --config=../.tflint.hcl && tflint --config=../.tflint.hcl --format=compact --recursive'
+        language: system
+        files: ^terraform/.*\.tf$
+        pass_filenames: false
+
+      # Action-pin validator (FR-V4-46) — runs locally before push so SHA-pin
+      # drift never lands in a PR.
+      - id: validate-action-pins
+        name: validate GitHub Actions are SHA-pinned with tag comments
+        entry: python3 scripts/validate-action-pins.py
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: false
+
+      # Checkov baseline metadata validator (FR-V4-47).
+      - id: validate-checkov-baseline
+        name: validate .checkov.baseline metadata (rationale + owner + expiry)
+        entry: python3 scripts/validate-checkov-baseline.py
+        language: system
+        files: ^\.checkov\.baseline$
+        pass_filenames: false
+
+      # Tool-version singleton lint (FR-V4-45).
+      - id: validate-tool-version-singleton
+        name: validate .tool-versions is the single source of truth
+        entry: python3 scripts/validate-tool-version-singleton.py
+        language: system
+        files: ^(\.tool-versions|\.github/workflows/.*\.ya?ml|.*Dockerfile.*)$
+        pass_filenames: false
