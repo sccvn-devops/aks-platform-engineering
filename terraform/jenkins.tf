@@ -61,12 +61,6 @@ resource "azurerm_key_vault_key" "management_ci_cosign" {
   ]
 }
 
-resource "azurerm_role_assignment" "jenkins_management_ci_crypto_user" {
-  scope                = azurerm_key_vault.management_ci.id
-  role_definition_name = "Key Vault Crypto User"
-  principal_id         = azurerm_user_assigned_identity.jenkins.principal_id
-}
-
 resource "azurerm_private_endpoint" "management_ci_key_vault" {
   name                = "pe-kv-platform-mgmt-we"
   location            = var.location
@@ -105,50 +99,47 @@ resource "azurerm_monitor_diagnostic_setting" "management_ci_key_vault" {
   }
 }
 
-resource "azurerm_user_assigned_identity" "external_secrets_mgmt_we" {
+# ESO mgmt-we workload identity — uses the workload_identity module
+# (US-V4-02 / FR-V4-05..09).  Reader on the management Key Vault only.
+module "external_secrets_mgmt_we_identity" {
+  source = "./modules/workload_identity"
+
   name                = "uami-eso-mgmt-we"
-  resource_group_name = azurerm_resource_group.this.name
   location            = var.location
+  resource_group_name = azurerm_resource_group.this.name
   tags                = merge(var.tags, { cluster = "mgmt-we", purpose = "external-secrets" })
-}
 
-resource "azurerm_federated_identity_credential" "external_secrets_mgmt_we" {
-  name                = "eso-mgmt-we-jenkins"
-  resource_group_name = azurerm_resource_group.this.name
-  audience            = ["api://AzureADTokenExchange"]
-  issuer              = module.aks.oidc_issuer_url
-  parent_id           = azurerm_user_assigned_identity.external_secrets_mgmt_we.id
-  subject             = "system:serviceaccount:jenkins:azure-keyvault-reader"
+  federated_credentials = {
+    "eso-mgmt-we-jenkins" = {
+      issuer                    = module.aks.oidc_issuer_url
+      service_account_namespace = "jenkins"
+      service_account_name      = "azure-keyvault-reader"
+    }
+  }
 
-  depends_on = [module.aks]
-}
-
-resource "azurerm_role_assignment" "external_secrets_mgmt_we_key_vault_reader" {
-  scope                = azurerm_key_vault.management_ci.id
-  role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_user_assigned_identity.external_secrets_mgmt_we.principal_id
-}
-
-resource "azurerm_federated_identity_credential" "jenkins_controller" {
-  name                = "jenkins-controller-mgmt-we"
-  resource_group_name = azurerm_resource_group.this.name
-  audience            = ["api://AzureADTokenExchange"]
-  issuer              = module.aks.oidc_issuer_url
-  parent_id           = azurerm_user_assigned_identity.jenkins.id
-  subject             = "system:serviceaccount:jenkins:jenkins-controller"
+  role_assignments = {
+    "mgmt_kv_reader" = {
+      scope                = azurerm_key_vault.management_ci.id
+      role_definition_name = "Key Vault Secrets User"
+    }
+  }
 
   depends_on = [module.aks]
 }
 
-resource "azurerm_federated_identity_credential" "jenkins_agent" {
-  name                = "jenkins-agent-mgmt-we"
-  resource_group_name = azurerm_resource_group.this.name
-  audience            = ["api://AzureADTokenExchange"]
-  issuer              = module.aks.oidc_issuer_url
-  parent_id           = azurerm_user_assigned_identity.jenkins.id
-  subject             = "system:serviceaccount:jenkins:jenkins-agent"
+moved {
+  from = azurerm_user_assigned_identity.external_secrets_mgmt_we
+  to   = module.external_secrets_mgmt_we_identity.azurerm_user_assigned_identity.this
+}
 
-  depends_on = [module.aks]
+moved {
+  from = azurerm_federated_identity_credential.external_secrets_mgmt_we
+  to   = module.external_secrets_mgmt_we_identity.azurerm_federated_identity_credential.this["eso-mgmt-we-jenkins"]
+}
+
+moved {
+  from = azurerm_role_assignment.external_secrets_mgmt_we_key_vault_reader
+  to   = module.external_secrets_mgmt_we_identity.azurerm_role_assignment.this["mgmt_kv_reader"]
 }
 
 resource "azurerm_key_vault_secret" "jenkins_admin_username" {

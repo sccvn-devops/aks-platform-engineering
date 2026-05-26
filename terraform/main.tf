@@ -65,8 +65,8 @@ locals {
     jira_service_account_email           = var.jira_service_account_email
     kv_prod_we_url                       = azurerm_key_vault.platform["prod-we"].vault_uri
     kv_prod_ne_url                       = azurerm_key_vault.platform["prod-ne"].vault_uri
-    akv_sync_exporter_identity_client_id = azurerm_user_assigned_identity.akv_sync_exporter.client_id
-    saas_rotator_identity_client_id      = azurerm_user_assigned_identity.saas_token_rotator.client_id
+    akv_sync_exporter_identity_client_id = module.akv_sync_exporter_identity.client_id
+    saas_rotator_identity_client_id      = module.saas_token_rotator_identity.client_id
   }
 
   addons_metadata = {
@@ -577,7 +577,7 @@ module "gitops_bridge_bootstrap" {
         tenant_id                                   = data.azurerm_subscription.current.tenant_id
         mgmt_lease_blob_url                         = azurerm_storage_blob.mgmt_active.url
         mgmt_lease_identity_client_id               = azurerm_user_assigned_identity.mgmt_cluster["mgmt-we"].client_id
-        external_secrets_identity_client_id         = azurerm_user_assigned_identity.external_secrets_mgmt_we.client_id
+        external_secrets_identity_client_id         = module.external_secrets_mgmt_we_identity.client_id
         external_secrets_vault_url                  = azurerm_key_vault.management_ci.vault_uri
         management_ci_key_vault_name                = azurerm_key_vault.management_ci.name
         jenkins_admin_username_secret_name          = azurerm_key_vault_secret.jenkins_admin_username.name
@@ -586,12 +586,12 @@ module "gitops_bridge_bootstrap" {
         jenkins_jira_token_secret_name              = azurerm_key_vault_secret.jenkins_jira_service_account_token.name
         jenkins_https_keystore_secret_name          = azurerm_key_vault_secret.jenkins_webhook_https_keystore.name
         jenkins_https_keystore_password_secret_name = azurerm_key_vault_secret.jenkins_webhook_https_keystore_password.name
-        jenkins_identity_client_id                  = azurerm_user_assigned_identity.jenkins.client_id
+        jenkins_identity_client_id                  = module.jenkins_identity.client_id
         jenkins_webhook_internal_lb_ip              = var.jenkins_webhook_internal_load_balancer_ip
         jenkins_webhook_frontend_hostname           = azurerm_cdn_frontdoor_endpoint.jenkins_webhook.host_name
         cosign_signing_key_name                     = azurerm_key_vault_key.management_ci_cosign.name
         cosign_signing_key_versionless_id           = azurerm_key_vault_key.management_ci_cosign.versionless_id
-        velero_identity_client_id                   = azurerm_user_assigned_identity.velero.client_id
+        velero_identity_client_id                   = module.velero_identity.client_id
         velero_backup_storage_account_name          = azurerm_storage_account.mgmt_backup.name
         velero_backup_container_name                = azurerm_storage_container.mgmt_backup.name
         velero_backup_resource_group_name           = azurerm_resource_group.this.name

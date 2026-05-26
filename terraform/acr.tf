@@ -10,11 +10,73 @@ locals {
   )
 }
 
-resource "azurerm_user_assigned_identity" "jenkins" {
+# Jenkins workload identity — uses the workload_identity module
+# (US-V4-02 / FR-V4-05..09).  Owns the UAMI + the two federated credentials
+# (controller + agent) + the two Azure role grants (AcrPush on the platform
+# ACR + Key Vault Crypto User on the management Key Vault).
+#
+# The ACR + management KV resources are still declared in this file / jenkins.tf
+# respectively; the module collapses what was previously 5 inline TF resources
+# into one structured call.  Scope arguments retain references to the existing
+# resource addresses so Terraform's dependency graph still sees the edges.
+module "jenkins_identity" {
+  source = "./modules/workload_identity"
+
   name                = "uami-jenkins"
   location            = var.location
   resource_group_name = azurerm_resource_group.this.name
   tags                = merge(var.tags, { service = "jenkins", purpose = "acr-push" })
+
+  federated_credentials = {
+    "jenkins-controller-mgmt-we" = {
+      issuer                    = module.aks.oidc_issuer_url
+      service_account_namespace = "jenkins"
+      service_account_name      = "jenkins-controller"
+    }
+    "jenkins-agent-mgmt-we" = {
+      issuer                    = module.aks.oidc_issuer_url
+      service_account_namespace = "jenkins"
+      service_account_name      = "jenkins-agent"
+    }
+  }
+
+  role_assignments = {
+    "acr_push" = {
+      scope                = azurerm_container_registry.platform.id
+      role_definition_name = "AcrPush"
+    }
+    "mgmt_kv_crypto_user" = {
+      scope                = azurerm_key_vault.management_ci.id
+      role_definition_name = "Key Vault Crypto User"
+    }
+  }
+
+  depends_on = [module.aks]
+}
+
+moved {
+  from = azurerm_user_assigned_identity.jenkins
+  to   = module.jenkins_identity.azurerm_user_assigned_identity.this
+}
+
+moved {
+  from = azurerm_federated_identity_credential.jenkins_controller
+  to   = module.jenkins_identity.azurerm_federated_identity_credential.this["jenkins-controller-mgmt-we"]
+}
+
+moved {
+  from = azurerm_federated_identity_credential.jenkins_agent
+  to   = module.jenkins_identity.azurerm_federated_identity_credential.this["jenkins-agent-mgmt-we"]
+}
+
+moved {
+  from = azurerm_role_assignment.jenkins_acr_push
+  to   = module.jenkins_identity.azurerm_role_assignment.this["acr_push"]
+}
+
+moved {
+  from = azurerm_role_assignment.jenkins_management_ci_crypto_user
+  to   = module.jenkins_identity.azurerm_role_assignment.this["mgmt_kv_crypto_user"]
 }
 
 resource "azurerm_container_registry" "platform" {
@@ -70,10 +132,4 @@ resource "azurerm_role_assignment" "aks_acr_pull" {
   scope                = azurerm_container_registry.platform.id
   role_definition_name = "AcrPull"
   principal_id         = each.value
-}
-
-resource "azurerm_role_assignment" "jenkins_acr_push" {
-  scope                = azurerm_container_registry.platform.id
-  role_definition_name = "AcrPush"
-  principal_id         = azurerm_user_assigned_identity.jenkins.principal_id
 }

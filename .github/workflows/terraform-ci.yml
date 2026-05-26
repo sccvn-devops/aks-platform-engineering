@@ -54,6 +54,7 @@ on:
       - "scripts/tests/**"
       - "gitops/clusters/registry.yaml"
       - "gitops/clusters/registry.schema.json"
+      - "tools/workload_identity_tests/**"
       - ".github/actions/setup-tf/**"
       - ".github/workflows/reusable/**"
 
@@ -304,6 +305,29 @@ jobs:
 
       - name: Run registry loader unit tests
         run: python3 -m unittest tools.service_seed.tests.test_registry -v
+
+  # ---------------------------------------------------------------------------
+  # Workload-identity module contract validator (US-V4-02, FR-V4-05..09) —
+  # blocking. Asserts the workload_identity module enforces its invariants
+  # (subject format, audience pin, subscription-scope guard) and that the 5
+  # in-tree call sites (Jenkins, ESO workload, ESO mgmt-we, akv-sync-exporter,
+  # saas-token-rotator, Velero) consume the module.  Equivalent assertions are
+  # encoded in HCL at terraform/modules/workload_identity/tests/*.tftest.hcl
+  # for when the project upgrades terraform from 1.5.x to >= 1.6.
+  # ---------------------------------------------------------------------------
+  validate-workload-identity:
+    name: Validate Workload Identity Module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Run module contract tests
+        run: python3 -m unittest tools.workload_identity_tests.test_module_contract -v
 
   # ---------------------------------------------------------------------------
   # Pre-commit drift check (US-V4-11, FR-V4-48..49) — blocking.

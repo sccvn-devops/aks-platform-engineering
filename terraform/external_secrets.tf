@@ -16,45 +16,108 @@ locals {
       name      = "azure-keyvault-reader"
     }
   }
-
-  external_secrets_federated_subjects = {
-    for pair in setproduct(
-      keys(local.external_secrets_workload_clusters),
-      keys(local.external_secrets_service_accounts),
-      ) : "${pair[0]}:${pair[1]}" => {
-      cluster         = pair[0]
-      service_account = local.external_secrets_service_accounts[pair[1]]
-    }
-  }
 }
 
-resource "azurerm_user_assigned_identity" "external_secrets" {
+# External Secrets workload identity per workload cluster.  Migrated to the
+# workload_identity module (US-V4-02 / FR-V4-05..09); each cluster gets its
+# own module instance with one federated credential per ServiceAccount.  The
+# duplicated "uami + fic-per-SA + kv_reader role" triple that lived inline is
+# now a single ~15-line declaration here.
+module "external_secrets_identity" {
   for_each = local.external_secrets_workload_clusters
+  source   = "./modules/workload_identity"
 
   name                = "uami-eso-${each.key}"
-  resource_group_name = azurerm_resource_group.this.name
   location            = each.value.location
-}
-
-resource "azurerm_federated_identity_credential" "external_secrets" {
-  for_each = local.external_secrets_federated_subjects
-
-  name                = "eso-${each.value.cluster}-${each.value.service_account.namespace}"
   resource_group_name = azurerm_resource_group.this.name
-  audience            = ["api://AzureADTokenExchange"]
-  issuer              = module.aks_clusters[each.value.cluster].oidc_issuer_url
-  parent_id           = azurerm_user_assigned_identity.external_secrets[each.value.cluster].id
-  subject             = "system:serviceaccount:${each.value.service_account.namespace}:${each.value.service_account.name}"
+
+  federated_credentials = {
+    for sa_key, sa in local.external_secrets_service_accounts :
+    "${each.key}-${sa.namespace}" => {
+      issuer                    = module.aks_clusters[each.key].oidc_issuer_url
+      service_account_namespace = sa.namespace
+      service_account_name      = sa.name
+      name                      = "eso-${each.key}-${sa.namespace}"
+    }
+  }
+
+  role_assignments = {
+    "kv_reader" = {
+      scope                = azurerm_key_vault.platform[each.value.key_vault_key].id
+      role_definition_name = "Key Vault Secrets User"
+    }
+  }
 
   depends_on = [module.aks_clusters]
 }
 
-resource "azurerm_role_assignment" "external_secrets_key_vault_reader" {
-  for_each = local.external_secrets_workload_clusters
+moved {
+  from = azurerm_user_assigned_identity.external_secrets["aks-dev-we"]
+  to   = module.external_secrets_identity["aks-dev-we"].azurerm_user_assigned_identity.this
+}
+moved {
+  from = azurerm_user_assigned_identity.external_secrets["aks-staging-we"]
+  to   = module.external_secrets_identity["aks-staging-we"].azurerm_user_assigned_identity.this
+}
+moved {
+  from = azurerm_user_assigned_identity.external_secrets["aks-prod-we"]
+  to   = module.external_secrets_identity["aks-prod-we"].azurerm_user_assigned_identity.this
+}
+moved {
+  from = azurerm_user_assigned_identity.external_secrets["aks-prod-ne"]
+  to   = module.external_secrets_identity["aks-prod-ne"].azurerm_user_assigned_identity.this
+}
 
-  scope                = azurerm_key_vault.platform[each.value.key_vault_key].id
-  role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_user_assigned_identity.external_secrets[each.key].principal_id
+# Federated credentials previously keyed as "<cluster>:<sa_key>"; the module
+# instance keys them as "<cluster>-<namespace>".
+moved {
+  from = azurerm_federated_identity_credential.external_secrets["aks-dev-we:platform_secrets"]
+  to   = module.external_secrets_identity["aks-dev-we"].azurerm_federated_identity_credential.this["aks-dev-we-platform-secrets"]
+}
+moved {
+  from = azurerm_federated_identity_credential.external_secrets["aks-dev-we:kyverno"]
+  to   = module.external_secrets_identity["aks-dev-we"].azurerm_federated_identity_credential.this["aks-dev-we-kyverno"]
+}
+moved {
+  from = azurerm_federated_identity_credential.external_secrets["aks-staging-we:platform_secrets"]
+  to   = module.external_secrets_identity["aks-staging-we"].azurerm_federated_identity_credential.this["aks-staging-we-platform-secrets"]
+}
+moved {
+  from = azurerm_federated_identity_credential.external_secrets["aks-staging-we:kyverno"]
+  to   = module.external_secrets_identity["aks-staging-we"].azurerm_federated_identity_credential.this["aks-staging-we-kyverno"]
+}
+moved {
+  from = azurerm_federated_identity_credential.external_secrets["aks-prod-we:platform_secrets"]
+  to   = module.external_secrets_identity["aks-prod-we"].azurerm_federated_identity_credential.this["aks-prod-we-platform-secrets"]
+}
+moved {
+  from = azurerm_federated_identity_credential.external_secrets["aks-prod-we:kyverno"]
+  to   = module.external_secrets_identity["aks-prod-we"].azurerm_federated_identity_credential.this["aks-prod-we-kyverno"]
+}
+moved {
+  from = azurerm_federated_identity_credential.external_secrets["aks-prod-ne:platform_secrets"]
+  to   = module.external_secrets_identity["aks-prod-ne"].azurerm_federated_identity_credential.this["aks-prod-ne-platform-secrets"]
+}
+moved {
+  from = azurerm_federated_identity_credential.external_secrets["aks-prod-ne:kyverno"]
+  to   = module.external_secrets_identity["aks-prod-ne"].azurerm_federated_identity_credential.this["aks-prod-ne-kyverno"]
+}
+
+moved {
+  from = azurerm_role_assignment.external_secrets_key_vault_reader["aks-dev-we"]
+  to   = module.external_secrets_identity["aks-dev-we"].azurerm_role_assignment.this["kv_reader"]
+}
+moved {
+  from = azurerm_role_assignment.external_secrets_key_vault_reader["aks-staging-we"]
+  to   = module.external_secrets_identity["aks-staging-we"].azurerm_role_assignment.this["kv_reader"]
+}
+moved {
+  from = azurerm_role_assignment.external_secrets_key_vault_reader["aks-prod-we"]
+  to   = module.external_secrets_identity["aks-prod-we"].azurerm_role_assignment.this["kv_reader"]
+}
+moved {
+  from = azurerm_role_assignment.external_secrets_key_vault_reader["aks-prod-ne"]
+  to   = module.external_secrets_identity["aks-prod-ne"].azurerm_role_assignment.this["kv_reader"]
 }
 
 resource "azurerm_key_vault_secret" "external_secrets_smoke_test" {

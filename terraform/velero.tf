@@ -50,32 +50,53 @@ resource "azurerm_private_endpoint" "mgmt_backup_blob" {
   }
 }
 
-resource "azurerm_user_assigned_identity" "velero" {
+# Velero workload identity — uses the workload_identity module (US-V4-02 /
+# FR-V4-05..09).  RG-scoped Contributor is OK without allow_subscription_scope;
+# the precondition only rejects bare /subscriptions/<uuid>.
+module "velero_identity" {
+  source = "./modules/workload_identity"
+
   name                = "uami-velero"
-  resource_group_name = azurerm_resource_group.this.name
   location            = var.location
-  tags                = merge(var.tags, { cluster = "mgmt-we", purpose = "backup" })
-}
-
-resource "azurerm_federated_identity_credential" "velero" {
-  name                = "velero-server-mgmt-we"
   resource_group_name = azurerm_resource_group.this.name
-  audience            = ["api://AzureADTokenExchange"]
-  issuer              = module.aks.oidc_issuer_url
-  parent_id           = azurerm_user_assigned_identity.velero.id
-  subject             = "system:serviceaccount:velero:velero-server"
+  tags                = merge(var.tags, { cluster = "mgmt-we", purpose = "backup" })
 
-  depends_on = [module.aks]
+  federated_credentials = {
+    "velero-server-mgmt-we" = {
+      issuer                    = module.aks.oidc_issuer_url
+      service_account_namespace = "velero"
+      service_account_name      = "velero-server"
+    }
+  }
+
+  role_assignments = {
+    "storage_blob_data_contributor" = {
+      scope                = azurerm_storage_account.mgmt_backup.id
+      role_definition_name = "Storage Blob Data Contributor"
+    }
+    "rg_contributor" = {
+      scope                = azurerm_resource_group.this.id
+      role_definition_name = "Contributor"
+    }
+  }
 }
 
-resource "azurerm_role_assignment" "velero_storage_blob_data_contributor" {
-  scope                = azurerm_storage_account.mgmt_backup.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_user_assigned_identity.velero.principal_id
+moved {
+  from = azurerm_user_assigned_identity.velero
+  to   = module.velero_identity.azurerm_user_assigned_identity.this
 }
 
-resource "azurerm_role_assignment" "velero_contributor" {
-  scope                = azurerm_resource_group.this.id
-  role_definition_name = "Contributor"
-  principal_id         = azurerm_user_assigned_identity.velero.principal_id
+moved {
+  from = azurerm_federated_identity_credential.velero
+  to   = module.velero_identity.azurerm_federated_identity_credential.this["velero-server-mgmt-we"]
+}
+
+moved {
+  from = azurerm_role_assignment.velero_storage_blob_data_contributor
+  to   = module.velero_identity.azurerm_role_assignment.this["storage_blob_data_contributor"]
+}
+
+moved {
+  from = azurerm_role_assignment.velero_contributor
+  to   = module.velero_identity.azurerm_role_assignment.this["rg_contributor"]
 }

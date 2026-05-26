@@ -99,3 +99,13 @@ repos:
         language: system
         files: ^\.github/(workflows|actions)/.*\.(ya?ml)$
         pass_filenames: false
+
+      # Workload-identity module contract validator (FR-V4-05..09).
+      # Asserts the workload_identity module enforces its invariants and that
+      # the 5 in-tree call sites consume the module.
+      - id: validate-workload-identity-module
+        name: validate workload_identity module contract + call sites
+        entry: python3 -m unittest tools.workload_identity_tests.test_module_contract
+        language: system
+        files: ^(terraform/modules/workload_identity/|terraform/(saas_token_rotator|velero|akv_sync_exporter|external_secrets|jenkins|acr)\.tf|tools/workload_identity_tests/.*\.py)$
+        pass_filenames: false
