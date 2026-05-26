@@ -109,3 +109,14 @@ repos:
         language: system
         files: ^(terraform/modules/workload_identity/|terraform/(saas_token_rotator|velero|akv_sync_exporter|external_secrets|jenkins|acr)\.tf|tools/workload_identity_tests/.*\.py)$
         pass_filenames: false
+
+      # Service-seed robustness validator (US-V4-10, FR-V4-43..44).
+      # Asserts every external call in seed_job.py declares an explicit
+      # timeout and that the cookiecutter fallback renderer rejects
+      # path-traversal templates before writing any file.
+      - id: validate-service-seed-robustness
+        name: validate service_seed timeouts + path-traversal guards
+        entry: python3 -m unittest tools.service_seed.tests.test_robustness tools.service_seed.tests.test_seed_job
+        language: system
+        files: ^tools/service_seed/.*\.py$
+        pass_filenames: false

@@ -19,12 +19,26 @@ resource "azurerm_storage_account" "mgmt_backup" {
     service = "velero-backup-storage"
     region  = "we"
   })
+
+  # FR-V4-41 / US-V4-10: Velero backup storage retains cluster-state restore
+  # points; destroying the account drops every restore point in one step.
+  # Removal requires a deliberate two-PR sequence (drop prevent_destroy in
+  # PR-1, then destroy in PR-2).
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_storage_container" "mgmt_backup" {
   name                  = "velero"
   storage_account_name  = azurerm_storage_account.mgmt_backup.name
   container_access_type = "private"
+
+  # FR-V4-41 / US-V4-10: the `velero` container holds the Velero backup
+  # objects; an accidental destroy invalidates the DR plan.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_private_endpoint" "mgmt_backup_blob" {

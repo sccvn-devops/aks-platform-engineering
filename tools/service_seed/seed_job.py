@@ -19,6 +19,21 @@ from .cli import get_cluster, load_registry, workload_keyvault_id
 
 VALID_SLO_CLASSES = {"bronze", "silver", "gold"}
 
+# FR-V4-43 / US-V4-10: explicit timeouts on every external call.  HTTP_TIMEOUT_S
+# caps urllib.request.urlopen; SUBPROCESS_TIMEOUT_S caps subprocess.run.  Hard
+# values, not env-tunable: the v4 contract is that a hung network or git
+# operation returns within the declared bound rather than tying up a Jenkins
+# executor indefinitely.  When seed_job.py is split per US-V4-07 these
+# constants migrate to internal/jira_intake.py + gitops_pr.py + service_template.py.
+HTTP_TIMEOUT_S = 30
+SUBPROCESS_TIMEOUT_S = 300
+
+
+class TemplatePathTraversalError(RuntimeError):
+    """Raised by the cookiecutter fallback renderer when a template path
+    escapes the destination directory (FR-V4-44 / US-V4-10).
+    """
+
 # FR-V4-03: workload-cluster keys consumed by build_infra_files for the prod tier.
 # Any new prod region requires a registry entry, not a code change here.
 PROD_PRIMARY_CLUSTER = "aks-prod-we"
@@ -90,13 +105,18 @@ class BitbucketClient:
         req.add_header("Authorization", f"Basic {basic}")
 
         try:
-            with request.urlopen(req) as resp:
+            # FR-V4-43: explicit timeout — Bitbucket calls return within
+            # HTTP_TIMEOUT_S or raise socket.timeout (wrapped as URLError).
+            with request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 raw = resp.read().decode("utf-8")
                 return {} if not raw else json.loads(raw)
         except error.HTTPError as exc:
             if treat_conflict_as_success and exc.code == 400:
                 return {}
             detail = exc.read().decode("utf-8", "ignore")
+            # The Authorization header is not echoed back by Bitbucket; the
+            # error string carries only the HTTP method + path + status +
+            # response body, never the bearer/basic credential.
             raise RuntimeError(f"bitbucket api {method} {path} failed: {exc.code} {detail}") from exc
 
 
@@ -213,12 +233,15 @@ def jira_get_issue(base_url: str, issue_key: str, email: str, token: str) -> dic
     else:
         req.add_header("Authorization", f"Bearer {token}")
 
-    with request.urlopen(req) as resp:
+    # FR-V4-43: explicit timeout on the Jira REST call.
+    with request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def render_cookiecutter_template(template_dir: Path, destination: Path, context: dict[str, str]) -> Path:
     try:
+        # FR-V4-43: explicit subprocess timeout — cookiecutter rendering is
+        # CPU-only on local disk, so 300s is the upper-bound budget.
         subprocess.run(
             [
                 "cookiecutter",
@@ -232,10 +255,42 @@ def render_cookiecutter_template(template_dir: Path, destination: Path, context:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=SUBPROCESS_TIMEOUT_S,
         )
         return destination / context["service_slug"]
     except (FileNotFoundError, subprocess.CalledProcessError):
         return render_cookiecutter_fallback(template_dir, destination, context)
+
+
+def _safe_join(destination: Path, relative: Path) -> Path:
+    """Join ``relative`` onto ``destination`` and reject any path that
+    escapes the destination directory (FR-V4-44 / US-V4-10).
+
+    Rejects:
+      - Absolute relative paths (would discard ``destination``).
+      - Paths containing ``..`` components after rendering.
+      - Paths whose resolved location is outside ``destination``.
+
+    Resolution is symbolic (``Path.resolve(strict=False)``) so the check
+    works before any directory is created on disk.
+    """
+    if relative.is_absolute():
+        raise TemplatePathTraversalError(
+            f"absolute path in template not allowed: {relative!s}"
+        )
+    if any(part == ".." for part in relative.parts):
+        raise TemplatePathTraversalError(
+            f"path traversal in template not allowed: {relative!s}"
+        )
+    candidate = (destination / relative).resolve(strict=False)
+    dest_resolved = destination.resolve(strict=False)
+    try:
+        candidate.relative_to(dest_resolved)
+    except ValueError as exc:  # candidate escapes destination
+        raise TemplatePathTraversalError(
+            f"rendered path escapes destination: {relative!s} -> {candidate!s}"
+        ) from exc
+    return candidate
 
 
 def render_cookiecutter_fallback(template_dir: Path, destination: Path, context: dict[str, str]) -> Path:
@@ -249,7 +304,10 @@ def render_cookiecutter_fallback(template_dir: Path, destination: Path, context:
         rendered_relative = Path(
             *[render_template_string(part, render_context) for part in relative.parts]
         )
-        target = destination / rendered_relative
+        # FR-V4-44: validate the rendered target BEFORE creating directories
+        # or writing files — a path-traversal template never observes any
+        # filesystem side-effect.
+        target = _safe_join(destination, rendered_relative)
         if source.is_dir():
             target.mkdir(parents=True, exist_ok=True)
             continue
@@ -814,17 +872,33 @@ def rollout_yaml(req: ServiceRequest, env: str) -> str:
 
 
 def clone_repo(remote: str, destination: Path, branch: str = "main") -> None:
+    # FR-V4-43: git clone is bounded by SUBPROCESS_TIMEOUT_S so a hung
+    # transport (mis-configured DNS, slow remote) cannot tie up the seed
+    # job indefinitely.  `remote` may carry a basic-auth credential but git
+    # itself never echoes it in the timeout exception — TimeoutExpired
+    # surfaces only the argv slice the caller passed in.
     subprocess.run(
         ["git", "clone", "--depth", "1", "--branch", branch, remote, str(destination)],
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
 
 
 def git(*args: str, cwd: Path) -> None:
-    subprocess.run(["git", *args], cwd=str(cwd), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # FR-V4-43: ad-hoc git subcommands share the same SUBPROCESS_TIMEOUT_S
+    # budget.  git push to a hung remote is the most common offender.
+    subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT_S,
+    )
 
 
 def authenticated_remote(url: str, username: str, token: str) -> str:

@@ -139,3 +139,9 @@ scripts/*
 !scripts/tests/
 !scripts/tests/__init__.py
 !scripts/tests/test_truncate_plan_output.py
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
