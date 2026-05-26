@@ -26,7 +26,7 @@ from tools.service_seed.cli import (
     _yaml_load,
     get_cluster,
     load_registry,
-    main,
+    registry_main as main,
     workload_keyvault_id,
 )
 

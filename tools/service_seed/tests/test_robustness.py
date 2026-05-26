@@ -19,16 +19,17 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.service_seed import seed_job
-from tools.service_seed.seed_job import (
+from tools.service_seed.gitops_pr import (
     HTTP_TIMEOUT_S,
     SUBPROCESS_TIMEOUT_S,
     BitbucketClient,
-    TemplatePathTraversalError,
-    _safe_join,
     clone_repo,
     git,
-    jira_get_issue,
+)
+from tools.service_seed.jira_intake import jira_get_issue
+from tools.service_seed.service_template import (
+    TemplatePathTraversalError,
+    _safe_join,
     render_cookiecutter_fallback,
     render_cookiecutter_template,
 )
@@ -63,7 +64,7 @@ class TimeoutInvariantsTest(unittest.TestCase):
             captured["url"] = req.full_url
             return _FakeResp()
 
-        with mock.patch("tools.service_seed.seed_job.request.urlopen", side_effect=_fake_urlopen):
+        with mock.patch("tools.service_seed.gitops_pr.request.urlopen", side_effect=_fake_urlopen):
             client.create_repository("svc")
 
         self.assertEqual(captured["timeout"], HTTP_TIMEOUT_S)
@@ -86,7 +87,7 @@ class TimeoutInvariantsTest(unittest.TestCase):
             captured["timeout"] = timeout
             return _FakeResp()
 
-        with mock.patch("tools.service_seed.seed_job.request.urlopen", side_effect=_fake_urlopen):
+        with mock.patch("tools.service_seed.jira_intake.request.urlopen", side_effect=_fake_urlopen):
             jira_get_issue("https://jira.example", "X-1", "e@example", "tok")
 
         self.assertEqual(captured["timeout"], HTTP_TIMEOUT_S)
@@ -98,7 +99,7 @@ class TimeoutInvariantsTest(unittest.TestCase):
             captured.update(kwargs)
             return mock.MagicMock(returncode=0)
 
-        with mock.patch("tools.service_seed.seed_job.subprocess.run", side_effect=_fake_run):
+        with mock.patch("tools.service_seed.gitops_pr.subprocess.run", side_effect=_fake_run):
             clone_repo("https://example.com/repo.git", Path("/tmp/x"))
 
         self.assertEqual(captured.get("timeout"), SUBPROCESS_TIMEOUT_S)
@@ -111,7 +112,7 @@ class TimeoutInvariantsTest(unittest.TestCase):
             captured.update(kwargs)
             return mock.MagicMock(returncode=0)
 
-        with mock.patch("tools.service_seed.seed_job.subprocess.run", side_effect=_fake_run):
+        with mock.patch("tools.service_seed.gitops_pr.subprocess.run", side_effect=_fake_run):
             git("status", cwd=Path("/tmp"))
 
         self.assertEqual(captured.get("timeout"), SUBPROCESS_TIMEOUT_S)
@@ -130,7 +131,7 @@ class TimeoutInvariantsTest(unittest.TestCase):
             (template_dir / "{{cookiecutter.service_slug}}").mkdir()
             destination = Path(tmp) / "out"
             destination.mkdir()
-            with mock.patch("tools.service_seed.seed_job.subprocess.run", side_effect=_fake_run):
+            with mock.patch("tools.service_seed.service_template.subprocess.run", side_effect=_fake_run):
                 render_cookiecutter_template(
                     template_dir,
                     destination,

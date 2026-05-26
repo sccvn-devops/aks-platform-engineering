@@ -251,10 +251,12 @@ def workload_keyvault_id(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    """CLI entry point: ``service-seed-registry [show|paths] [name]``.
+def registry_main(argv: list[str] | None = None) -> int:
+    """``service-seed-registry [show|paths] [name]`` — operator helper.
 
-    Used by operators to verify what cli.py sees without invoking seed_job.
+    Used to verify what the registry loader sees without invoking the seed
+    orchestrator.  Kept distinct from :func:`main` so registry inspection
+    cannot accidentally trigger a Jira/Bitbucket call.
     """
     import argparse
     import json
@@ -293,6 +295,205 @@ def _entry_to_dict(entry: ClusterEntry) -> dict[str, Any]:
         "sku_tier": entry.sku_tier,
         "gitops_addons": entry.gitops_addons,
     }
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator CLI (US-V4-07 / FR-V4-30)
+#
+# Subcommands:
+#   generate-gitops  Render the gitops scaffolding for a service to a local dir.
+#   seed-from-jira   Drive the full seed pipeline (Jira -> Bitbucket -> PR).
+#   registry-show    Alias for ``service-seed-registry show``.
+#   registry-paths   Alias for ``service-seed-registry paths``.
+#
+# Errors raised by :func:`jira_intake.parse_service_request` (and any other
+# typed exception carrying ``.field``) abort the CLI with exit code 2 and a
+# pointer to the offending field, per AC2.
+# ---------------------------------------------------------------------------
+
+
+def _cmd_generate_gitops(args: Any) -> int:
+    from pathlib import Path
+
+    from .jira_intake import JiraIntakeError, parse_service_request
+    from .service_template import build_gitops_files, write_files
+
+    issue = {
+        "key": args.issue_key or "SEED-0",
+        "fields": {
+            "issuetype": {"name": "IDP Service Request"},
+            "summary": f"Seed {args.service_name}",
+            "description": f"Service Name: {args.service_name}\nSLO Class: {args.slo_class}",
+        },
+    }
+    try:
+        req = parse_service_request(issue)
+    except JiraIntakeError as exc:
+        _print_field_error(exc)
+        return 2
+    files = build_gitops_files(req)
+    output = Path(args.output_dir)
+    write_files(output, files)
+    return 0
+
+
+def _cmd_seed_from_jira(args: Any) -> int:
+    import json
+    import os
+    from pathlib import Path
+
+    from .gitops_pr import BitbucketClient, stage_gitops_pr, create_service_repository
+    from .jira_intake import JiraIntakeError, jira_get_issue, parse_service_request
+    from .service_template import build_gitops_files
+
+    try:
+        jira_token = os.environ[args.jira_token_env]
+        bitbucket_token = os.environ[args.bitbucket_token_env]
+    except KeyError as exc:
+        print(f"error: environment variable {exc.args[0]} is not set", flush=True)
+        return 2
+
+    issue = jira_get_issue(args.jira_base_url, args.jira_issue_key, args.jira_email, jira_token)
+    try:
+        req = parse_service_request(
+            issue,
+            issue_key_override=args.jira_issue_key,
+            issue_type_override=args.jira_issue_type,
+            service_name_override=args.service_name,
+            slo_class_override=args.slo_class,
+        )
+    except JiraIntakeError as exc:
+        _print_field_error(exc)
+        return 2
+
+    bitbucket = BitbucketClient(args.bitbucket_api_url, args.bitbucket_workspace, args.bitbucket_username, bitbucket_token)
+    bitbucket.create_repository(req.service_slug, project_key=args.bitbucket_project_key)
+    service_repo_url = f"{args.bitbucket_git_base_url.rstrip('/')}/{args.bitbucket_workspace}/{req.service_slug}.git"
+    create_service_repository(
+        template_dir=Path(args.cookiecutter_template),
+        req=req,
+        repo_url=service_repo_url,
+        username=args.bitbucket_username,
+        token=bitbucket_token,
+    )
+
+    generated = build_gitops_files(req)
+    infra_files = {p: c for p, c in generated.items() if f"apps/{req.service_slug}/infra/" in p}
+    workload_files = {p: c for p, c in generated.items() if f"apps/{req.service_slug}/workload/" in p}
+
+    stage_gitops_pr(
+        repo_url=args.platform_gitops_repo_url,
+        repo_username=args.bitbucket_username,
+        repo_token=bitbucket_token,
+        branch_name=f"seed/{req.service_slug}-infra-{req.issue_key.lower()}",
+        pr_title=f"[Seed] Add {req.service_slug} infra scaffolding",
+        pr_description=f"Seeded from Jira {req.issue_key} ({req.slo_class} SLO).",
+        path_root="apps",
+        files=infra_files,
+        service_slug=req.service_slug,
+        bitbucket=bitbucket,
+    )
+    stage_gitops_pr(
+        repo_url=args.platform_gitops_repo_url,
+        repo_username=args.bitbucket_username,
+        repo_token=bitbucket_token,
+        branch_name=f"seed/{req.service_slug}-workload-{req.issue_key.lower()}",
+        pr_title=f"[Seed] Add {req.service_slug} workload scaffolding",
+        pr_description=f"Seeded from Jira {req.issue_key} ({req.slo_class} SLO).",
+        path_root="apps",
+        files=workload_files,
+        service_slug=req.service_slug,
+        bitbucket=bitbucket,
+    )
+    print(json.dumps({"service": req.service_slug, "issueKey": req.issue_key, "sloClass": req.slo_class}))
+    return 0
+
+
+def _print_field_error(exc: Exception) -> None:
+    field = getattr(exc, "field", None)
+    if field:
+        print(f"error: invalid Jira intake (field={field}): {exc}", flush=True)
+    else:
+        print(f"error: {exc}", flush=True)
+
+
+def build_parser() -> "argparse.ArgumentParser":
+    import argparse
+
+    from .jira_intake import VALID_SLO_CLASSES
+
+    parser = argparse.ArgumentParser(
+        prog="service-seed",
+        description="Seed service repositories and GitOps scaffolding from Jira requests.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    generate = subparsers.add_parser("generate-gitops", help="Render gitops scaffolding to a local directory")
+    generate.add_argument("--service-name", required=True)
+    generate.add_argument("--slo-class", required=True, choices=sorted(VALID_SLO_CLASSES))
+    generate.add_argument("--output-dir", required=True)
+    generate.add_argument("--issue-key")
+    generate.set_defaults(func=_cmd_generate_gitops)
+
+    seed = subparsers.add_parser("seed-from-jira", help="Run the full Jira -> Bitbucket -> GitOps PR pipeline")
+    seed.add_argument("--jira-base-url", required=True)
+    seed.add_argument("--jira-email", default="")
+    seed.add_argument("--jira-token-env", default="JIRA_TOKEN")
+    seed.add_argument("--jira-issue-key", required=True)
+    seed.add_argument("--jira-issue-type", required=True)
+    seed.add_argument("--service-name")
+    seed.add_argument("--slo-class")
+    seed.add_argument("--bitbucket-api-url", default="https://api.bitbucket.org")
+    seed.add_argument("--bitbucket-git-base-url", default="https://bitbucket.org")
+    seed.add_argument("--bitbucket-workspace", required=True)
+    seed.add_argument("--bitbucket-project-key")
+    seed.add_argument("--bitbucket-username", default="x-token-auth")
+    seed.add_argument("--bitbucket-token-env", default="BITBUCKET_TOKEN")
+    seed.add_argument("--cookiecutter-template", required=True)
+    seed.add_argument("--platform-gitops-repo-url", required=True)
+    seed.set_defaults(func=_cmd_seed_from_jira)
+
+    show = subparsers.add_parser("registry-show", help="Print the cluster registry as JSON")
+    show.add_argument("name", nargs="?", help="optional cluster name filter")
+    show.add_argument("--registry", help="override registry path")
+    show.set_defaults(func=_cmd_registry_show)
+
+    paths = subparsers.add_parser("registry-paths", help="Print the registry file path")
+    paths.add_argument("--registry", help="override registry path")
+    paths.set_defaults(func=_cmd_registry_paths)
+
+    return parser
+
+
+def _cmd_registry_show(args: Any) -> int:
+    import json
+
+    reg = load_registry(args.registry)
+    if args.name:
+        if args.name not in reg:
+            print(f"error: cluster {args.name!r} not in registry; known: {sorted(reg)}", flush=True)
+            return 2
+        entries = {args.name: _entry_to_dict(reg[args.name])}
+    else:
+        entries = {n: _entry_to_dict(e) for n, e in reg.items()}
+    print(json.dumps(entries, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_registry_paths(args: Any) -> int:
+    print(args.registry or str(_DEFAULT_REGISTRY_PATH))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``service-seed`` orchestrator entry point.
+
+    Returns the process exit code rather than raising; callers (including the
+    console_script wrapper) should propagate via ``SystemExit``.
+    """
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return int(args.func(args))
 
 
 if __name__ == "__main__":  # pragma: no cover
