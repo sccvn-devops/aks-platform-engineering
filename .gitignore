@@ -103,6 +103,14 @@ _docs/
 .serena
 .github/skills
 .github/agents
+.agents/
+.antigravitycli/
+.claude/
+.codegraph/
+.cursor/
+.mcp.json
+skills-lock.json
+
 # private scripts
 scripts/*
 !scripts/bootstrap-tfstate.sh

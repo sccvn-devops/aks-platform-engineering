@@ -186,6 +186,7 @@ Every namespace in a management cluster must carry `tier=platform`. Workload nam
 ## Related ADRs
 - ADR-016 (canonical glossary) — defines the terms enforced here.
 - ADR-022 (singleton lock) — uses the same "mgmt cluster" definition.
+- ADR-031-v4 (PRD-v4) — codifies the data shape of the cluster topology described here.
 
 ---
 
@@ -564,6 +565,7 @@ Custom `health.lua` for Crossplane XR kinds remains the gating mechanism within 
 ## Related ADRs
 - ADR-007 (ArgoCD) — provides ApplicationSet primitives.
 - ADR-021 (Argo Rollouts) — sits inside the workload tier.
+- ADR-031-v4 (PRD-v4) — codifies the data shape of the cluster topology described here.
 
 ---
 
@@ -999,25 +1001,25 @@ The lease blob is the **authoritative** source of "who is active." Cluster label
 
 # PRD-v3 Addendum — Proposed ADRs (ADR-023-v3 .. ADR-030-v3 + ADR-016-v3-amendment)
 
-The following ADRs are introduced by **PRD-v3** (`IDP-GitOps-Blueprint-PRD-v3.md`, dated 2026-05-22) and remain in **Proposed** status until the v3 readiness review accepts them. They follow the v2 ADR template and cross-reference the PRD-v3 functional requirements (`FR-V3-NN`) and design-grilling questions (`Q-NNN`) they resolve. Number reuse remains forbidden; v3 ADRs occupy the contiguous block ADR-023..ADR-030 plus a named amendment to ADR-016.
+The following ADRs are introduced by **PRD-v3** (`IDP-GitOps-Blueprint-PRD-v3.md`, dated 2026-05-22) and were promoted to **Accepted** status at the PRD-v3 readiness review on 2026-05-26. They follow the v2 ADR template and cross-reference the PRD-v3 functional requirements (`FR-V3-NN`) and design-grilling questions (`Q-NNN`) they resolve. Number reuse remains forbidden; v3 ADRs occupy the contiguous block ADR-023..ADR-030 plus a named amendment to ADR-016.
 
 | # | Title | Status | Resolves |
 |---|---|---|---|
-| ADR-023-v3 | Terraform Remote State on Azure Storage with Per-Env Files | Proposed (PRD-v3) | Q-001, Q-002, Q-003, Q-004 |
-| ADR-024-v3 | RBAC Scope-Down for Platform UAMIs (akspe, Velero) | Proposed (PRD-v3) | Q-008 |
-| ADR-025-v3 | Pre-commit + GitHub Actions Quality Gates for Platform Repo | Proposed (PRD-v3) | Q-010..Q-014 |
-| ADR-026-v3 | Variable Validation Strategy (Inline + tflint + custom rule) | Proposed (PRD-v3) | Q-015, Q-016 |
-| ADR-027-v3 | Checkov Supply-Chain Scanning with Baseline | Proposed (PRD-v3) | Q-017, Q-018 |
-| ADR-028-v3 | SonarQube Static Analysis (TS + Dockerfile scope, configurable hosting) | Proposed (PRD-v3) | Q-019, Q-020, Q-021, A1, A7 |
-| ADR-029-v3 | Terraform Version Pin (`~> 1.5.0`) and `uuid()` Drift Fix | Proposed (PRD-v3) | Q-022 (corrected), Q-023 |
-| ADR-030-v3 | Credential Sourcing via OIDC + AKV (no plaintext defaults) | Proposed (PRD-v3) | Q-005, Q-006, Q-007, Q-009 |
-| ADR-016-v3-amendment | Permit DX Tools (Jenkins, Sonar) on `cipool` cluster | Proposed — amends ADR-016 | A5, OQ-V3-05 |
+| ADR-023-v3 | Terraform Remote State on Azure Storage with Per-Env Files | Accepted (PRD-v3 readiness review 2026-05-26) | Q-001, Q-002, Q-003, Q-004 |
+| ADR-024-v3 | RBAC Scope-Down for Platform UAMIs (akspe, Velero) | Accepted (PRD-v3 readiness review 2026-05-26) | Q-008 |
+| ADR-025-v3 | Pre-commit + GitHub Actions Quality Gates for Platform Repo | Accepted (PRD-v3 readiness review 2026-05-26) | Q-010..Q-014 |
+| ADR-026-v3 | Variable Validation Strategy (Inline + tflint + custom rule) | Accepted (PRD-v3 readiness review 2026-05-26) | Q-015, Q-016 |
+| ADR-027-v3 | Checkov Supply-Chain Scanning with Baseline | Accepted (PRD-v3 readiness review 2026-05-26) | Q-017, Q-018 |
+| ADR-028-v3 | SonarQube Static Analysis (TS + Dockerfile scope, configurable hosting) | Accepted (PRD-v3 readiness review 2026-05-26) | Q-019, Q-020, Q-021, A1, A7 |
+| ADR-029-v3 | Terraform Version Pin (`~> 1.5.0`) and `uuid()` Drift Fix | Accepted (PRD-v3 readiness review 2026-05-26) | Q-022 (corrected), Q-023 |
+| ADR-030-v3 | Credential Sourcing via OIDC + AKV (no plaintext defaults) | Accepted (PRD-v3 readiness review 2026-05-26) | Q-005, Q-006, Q-007, Q-009 |
+| ADR-016-v3-amendment | Permit DX Tools (Jenkins, Sonar) on `cipool` cluster | Accepted (PRD-v3 readiness review 2026-05-26) | A5, OQ-V3-05 |
 
 ---
 
 # ADR-023-v3: Terraform Remote State on Azure Storage with Per-Env Files
 
-**Status:** Proposed (PRD-v3)
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26)
 **Date:** 2026-05-22
 **Deciders:** Principal Architect, Platform Lead, SRE Lead
 **Resolves:** Q-001, Q-002, Q-003, Q-004
@@ -1079,7 +1081,7 @@ Terraform cannot bootstrap its own state backend without a chicken-and-egg probl
 
 # ADR-024-v3: RBAC Scope-Down for Platform UAMIs (akspe, Velero)
 
-**Status:** Proposed (PRD-v3)
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26)
 **Date:** 2026-05-22
 **Deciders:** Principal Architect, Security Lead, Platform Lead
 **Resolves:** Q-008
@@ -1129,11 +1131,95 @@ Audit finding F-07: the `akspe` user-assigned managed identity was granted **Own
 - ADR-020 — Per-namespace UAMI isolation; this ADR fixes the foundational-layer over-grant that ADR-020 sat on top of.
 - ADR-030-v3 — Credential sourcing; `gha-platform-ci` UAMI scopes also defined here.
 
+## Amendment 2026-05-26 — Crossplane UAMI Carve-Out
+
+**Status:** Accepted (PRD-v4 readiness verification 2026-05-26)
+**Deciders:** Principal Architect, Security Lead, Platform Lead
+
+### Finding
+
+The PRD-v4 readiness verification (2026-05-26) discovered that
+`crossplane_contributor` UAMI at `terraform/main.tf:249-250` retains
+`scope = data.azurerm_subscription.current.id` with role
+`Contributor`. The `akspe` and Velero scope-downs in this ADR's day-1
+set landed correctly; Crossplane was implemented with a wider scope
+because its compositions provision Azure resources across multiple
+resource groups by design (per-environment RGs, shared platform RGs,
+ESO secret RGs).
+
+### Decision (amendment)
+
+1. The Crossplane UAMI's subscription-Contributor scope is **accepted
+   as an explicit exception** to `ADR-024-v3` §Decision rule 1 ("never
+   at subscription scope").
+2. The exception is bounded: Crossplane's UAMI **must not be granted
+   `Owner`** at any scope, and must not gain additional sub-roles
+   beyond `Contributor`. The CI assertion (rule 4 of `ADR-024-v3`)
+   continues to enforce that no `Owner` assignment exists.
+3. The exception is **time-bounded**: it expires at the next platform
+   architecture review unless explicitly renewed. Renewal requires
+   either (a) a documented justification that the per-RG composition
+   pattern is still operationally infeasible, or (b) a follow-up ADR
+   that designs a Crossplane composition pattern with per-RG UAMI
+   delegation.
+4. The exception is **cataloged**: a new entry in PRD-v4
+   §Pre-existing v3 obligations lists Crossplane UAMI as the explicit
+   carve-out so that future readers do not interpret the scope as
+   accidental.
+
+### Rationale
+
+Crossplane's `azurerm` provider creates resources whose target RG is
+declared by composition inputs at run-time. Pinning the UAMI to a
+fixed RG set at provisioning time would require either (a) granting
+the UAMI on every conceivable target RG in advance — which inflates
+the RG count and re-introduces the inventory-drift class the original
+ADR was meant to close, or (b) authoring a meta-controller that
+delegates per-RG identities to each composition invocation, which is a
+non-trivial composition redesign.
+
+The exception is preferred to the half-fix of "scope to a subset of
+RGs" because half-coverage delivers the operational complexity of
+multi-RG management without delivering the security benefit of true
+least-privilege.
+
+### Consequences
+
+**Easier:**
+- Status quo of Crossplane operations is preserved; no v3.1 patch
+  required for this item.
+- The exception is explicit, named, and reviewed quarterly — not a
+  hidden gap.
+
+**Harder:**
+- A Crossplane UAMI compromise still grants subscription-Contributor
+  blast radius. The platform security review must continue to factor
+  this in.
+- Future Crossplane composition work that introduces new role types
+  (e.g., `User Access Administrator`) requires an amendment to this
+  amendment — they are NOT in scope.
+
+**Will need to revisit if:**
+- Crossplane introduces native per-composition identity delegation
+  (upstream feature; not currently available).
+- A regulated workload requires zero-subscription-scope identities
+  platform-wide for compliance reasons.
+
+### Action Items
+1. [ ] Add Crossplane UAMI to PRD-v4 §Pre-existing v3 obligations as
+       the named carve-out.
+2. [ ] Add a quarterly-review reminder for this exception (calendar
+       entry, not code).
+3. [ ] Confirm the existing CI assertion job correctly flags Crossplane
+       UAMI's subscription-scope assignment as "exception-tagged"
+       rather than as a failure — update the assertion's allow-list
+       to recognize the Crossplane UAMI by name.
+
 ---
 
 # ADR-025-v3: Pre-commit + GitHub Actions Quality Gates for Platform Repo
 
-**Status:** Proposed (PRD-v3)
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26)
 **Date:** 2026-05-22
 **Deciders:** Platform Lead, SRE Lead
 **Resolves:** Q-010, Q-011, Q-012, Q-013, Q-014
@@ -1197,7 +1283,7 @@ App CI runs on Jenkins (ADR-001-v2) and is not in question. What is missing is *
 
 # ADR-026-v3: Variable Validation Strategy (Inline + tflint + Custom Rule)
 
-**Status:** Proposed (PRD-v3)
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26)
 **Date:** 2026-05-22
 **Deciders:** Platform Lead, Principal Architect
 **Resolves:** Q-015, Q-016
@@ -1249,7 +1335,7 @@ Audit finding F-03: Terraform variables in the v2 codebase carry no `validation 
 
 # ADR-027-v3: Checkov Supply-Chain Scanning with Baseline
 
-**Status:** Proposed (PRD-v3)
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26)
 **Date:** 2026-05-22
 **Deciders:** Platform Lead, Security Lead
 **Resolves:** Q-017, Q-018
@@ -1304,7 +1390,7 @@ Audit finding F-04: no IaC-side supply-chain scanning. Cosign + Kyverno (ADR-008
 
 # ADR-028-v3: SonarQube Static Analysis (TS + Dockerfile Scope, Configurable Hosting)
 
-**Status:** Proposed (PRD-v3)
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26)
 **Date:** 2026-05-22
 **Deciders:** Platform Lead, Principal Architect
 **Resolves:** Q-019, Q-020, Q-021; clarifications A1 and A7
@@ -1372,7 +1458,7 @@ The hosting question is operator-dependent: future data-residency or cost constr
 
 # ADR-029-v3: Terraform Version Pin (`~> 1.5.0`) and `uuid()` Drift Fix
 
-**Status:** Proposed (PRD-v3)
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26)
 **Date:** 2026-05-22
 **Deciders:** Platform Lead
 **Resolves:** Q-022 (corrected from `~> 1.15.0` to `~> 1.5.0`), Q-023
@@ -1439,7 +1525,7 @@ The initial grilling-session pin proposal was `~> 1.15.0`. That number was an er
 
 # ADR-030-v3: Credential Sourcing via OIDC + AKV (No Plaintext Defaults)
 
-**Status:** Proposed (PRD-v3)
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26)
 **Date:** 2026-05-22
 **Deciders:** Principal Architect, Security Lead, Platform Lead
 **Resolves:** Q-005, Q-006, Q-007, Q-009
@@ -1502,7 +1588,7 @@ Clarification A3: the OIDC federated credential for GitHub Actions → Azure is 
 
 # ADR-016-v3-amendment: Permit DX Tools (Jenkins, Sonar) on `cipool` Cluster
 
-**Status:** Proposed — amends ADR-016
+**Status:** Accepted (PRD-v3 readiness review 2026-05-26) — amends ADR-016
 **Date:** 2026-05-22
 **Deciders:** Principal Architect, Platform Lead
 **Resolves:** Clarification A5, PRD-v3 OQ-V3-05
@@ -1557,3 +1643,150 @@ The amendment does **not** weaken the cardinal rule that management clusters hos
 - ADR-016 — The amended decision.
 - ADR-001-v2 — Establishes Jenkins on `cipool`; this amendment ratifies that placement explicitly.
 - ADR-028-v3 — Sonar configurable hosting; depends on this amendment for the `"cipool"` value.
+
+---
+
+# PRD-v4 Addendum — Proposed ADRs (ADR-031-v4)
+
+The following ADR is introduced by **PRD-v4** (`IDP-GitOps-Blueprint-PRD-v4.md`, dated 2026-05-25) and was promoted to **Accepted** status alongside PRD-v4 approval on 2026-05-26. It follows the v2 ADR template and cross-references the PRD-v4 functional requirements (`FR-V4-NN`) and design-grilling questions (`Q-V4-NN`) it resolves. Number reuse remains forbidden; v4 ADRs continue the sequence from ADR-031.
+
+| # | Title | Status | Resolves |
+|---|---|---|---|
+| ADR-031-v4 | Cluster Topology Lives in a Single Committed Registry | Accepted (PRD-v4 approved 2026-05-26) | Q-V4-03 (grilling); informs FR-V4-01..04 |
+
+---
+
+# ADR-031-v4: Cluster Topology Lives in a Single Committed Registry
+
+**Status:** Accepted (PRD-v4 approved 2026-05-26)
+**Date:** 2026-05-25
+**Deciders:** Principal Architect, Platform Lead, SRE Lead, DX Lead
+**Resolves:** Q-V4-03 (PRD-v4 grilling)
+**Implements:** FR-V4-01, FR-V4-02, FR-V4-03, FR-V4-04
+
+## Context
+
+The v3 codebase encodes the platform's cluster topology in **three independent places**:
+
+1. `terraform/clusters.tf` — CAPZ/Crossplane resource definitions per cluster.
+2. `terraform/argocd_bootstrap.tf:2–100` — `local.argocd_registered_clusters` map used by the ArgoCD ApplicationSet to determine which clusters receive which addons.
+3. `tools/service_seed/seed_job.py:314–361` — hardcoded subscription IDs, regions, resource-group names, and ACR hostnames consumed when seeding new services.
+
+Each location encodes the same facts (subscription ID, region, RG, ACR hostname, AKS name, mgmt role) in a different language with no shared schema. Adding a cluster requires three coordinated edits across HCL, HCL, and Python; missing any one of them produces silent drift that surfaces during a future apply or during the next service-seed run.
+
+The PRD-v4 architecture review (item #7) flagged this as the highest-leverage deepening opportunity: the underlying data is identical, callers are heterogeneous, and the deletion test passes — removing any single encoding concentrates complexity in the remaining ones rather than dispersing it.
+
+Three candidate sources of truth were considered during PRD-v4 grilling (Q-V4-03):
+
+- **A — Committed YAML registry** read by all consumers via `yamldecode` / `yaml.safe_load`.
+- **B — Terraform as source of truth** emitting a JSON artifact that CI commits back to git; non-TF consumers read the artifact.
+- **C — In-cluster `ClusterRegistration` CRD** on `mgmt-we`; tools query Kubernetes.
+
+Option C contradicts ADR-013-v2's two-tier infra-then-workload posture (the registry would have to live in the cluster it bootstraps, creating a chicken-and-egg) and is also incompatible with Backstage's offline planning needs. Option B introduces a CI write-back loop, requires `seed_job.py` to wait for a TF apply before knowing about new clusters, and inverts the natural direction (registry should *inform* TF, not be *generated by* it). Option A is the only candidate where the registry exists independently of any running system and is reviewable as YAML in a PR.
+
+## Decision
+
+1. **Authoritative cluster topology lives in a single committed YAML file at `gitops/clusters/registry.yaml`.** No other file in the repository may serve as a competing source of truth for cluster identity facts.
+
+2. **Schema is enforced** by `gitops/clusters/registry.schema.json` (JSON Schema draft-2020-12). Pre-commit and CI validate every change.
+
+3. **Required keys per cluster entry:**
+   - `name` (matches the cluster's canonical `<role>-<env>-<region_abbrev>` identifier)
+   - `subscription_id`
+   - `region` (full Azure region: `westeurope`, `northeurope`, `westus2`)
+   - `region_abbrev` (matching short form: `we`, `ne`, `wus`)
+   - `resource_group`
+   - `acr_hostname`
+   - `aks_name`
+   - `mgmt_role` (enum: `active | standby | workload | seed`)
+   - `azs` (list of availability zones)
+   - `sku_tier` (enum: `Free | Standard | Premium`)
+   - `gitops_addons` (map of `enable_*` boolean flags consumed by the ArgoCD ApplicationSet)
+
+4. **Consumers read the registry directly:**
+   - Terraform reads via `yamldecode(file("${path.module}/../gitops/clusters/registry.yaml"))` and exposes the parsed map as `local.cluster_registry`.
+   - ArgoCD ApplicationSet locals derive `local.argocd_registered_clusters` from `local.cluster_registry` rather than maintaining an independent map.
+   - `tools/service_seed/cli.py` loads the registry at startup and passes the parsed object as data into `service_template.render(...)` and `gitops_pr.compose(...)`.
+
+5. **The registry is human-curated.** No tool auto-generates entries from cloud discovery; cluster onboarding is a deliberate PR with reviewer approval. (Auto-generation is excluded by PRD-v4 Non-Goals Bucket 3.)
+
+6. **The registry is Azure-only at v4 scope.** Multi-cloud variants are out of scope; if a future PRD extends to other CSPs, this ADR is amended (not replaced).
+
+7. **Day-1 cluster set:** `mgmt-we`, `mgmt-ne`, `aks-dev-we`, `aks-staging-we`, `aks-prod-we`, `aks-prod-ne`, `seed-wus`. The set mirrors the v2/v3 cluster topology unchanged.
+
+## Why this works
+
+The registry is **inert reviewable data**. A PR adding a cluster is a YAML diff that any reviewer can read in any language without checkout. The schema validation in pre-commit and CI prevents the most common drift mode (missing field, wrong region/abbrev pairing). The single-source property eliminates the failure mode where TF was updated but `seed_job.py` was not — that class of bug becomes structurally impossible after FR-V4-03.
+
+The decision **does not couple** the registry to any runtime. Backstage planning, future cost-allocation tooling, and operator scripts can all consume the same file with no dependency on Terraform state, ArgoCD readiness, or Kubernetes API availability.
+
+The decision **respects ADR-013-v2** (two-tier infra-then-workload): the registry is a *git artifact* loaded by the infra tier, not a *cluster artifact* that requires the cluster to exist first.
+
+## Options Reconsidered
+
+### Option A: Committed YAML registry consumed by all (chosen)
+
+- Single source of truth, language-agnostic, PR-reviewable.
+- Pre-commit schema validation catches drift early.
+- Works for tools that have no Terraform state access (Backstage, future planners).
+- **Chosen.**
+
+### Option B: Terraform-emitted registry artifact committed by CI
+
+- Inverts the natural direction (registry *informs* TF, not the other way around).
+- Requires `seed_job.py` to wait for a TF apply before knowing about new clusters.
+- Adds a CI write-back loop with its own failure modes (race with concurrent PRs, signing concerns).
+- **Rejected.**
+
+### Option C: In-cluster `ClusterRegistration` CRD on `mgmt-we`
+
+- Chicken-and-egg: the registry would live in the cluster it bootstraps.
+- Contradicts ADR-013-v2's two-tier ordering.
+- Makes Backstage offline planning impossible.
+- Operationally heavier (controllers, RBAC, reconcile loops) for inert data.
+- **Rejected.**
+
+### Option D: Leave the triple-encoding in place
+
+- The deletion test fails: removing any one encoding concentrates complexity in the others.
+- Drift continues to surface late.
+- **Rejected.**
+
+## Consequences
+
+**Easier:**
+
+- Adding a cluster is one PR to one file; reviewers see the change in a single diff.
+- Backstage / cost tooling / future planners can read cluster identity without TF state access.
+- Tests use the same registry shape; fixture lives at `tools/service_seed/tests/fixtures/registry.yaml`.
+- Schema-driven validation in pre-commit catches the most common onboarding mistakes.
+
+**Harder:**
+
+- A new file becomes a high-traffic merge surface; conflicts are likely during periods of rapid cluster onboarding. Mitigation: keep entries alphabetically sorted; CI fails on out-of-order entries.
+- HCL `yamldecode` returns untyped values; TF code must defensively coerce types where the schema declares them (numbers, booleans). Mitigation: a thin `local.cluster_registry_typed = { for k, v in ... : k => { ... } }` re-projection in `locals.tf`.
+- Backwards compatibility during migration: TF locals must read either the old `local.argocd_registered_clusters` or the new registry until all call sites are converted. PRD-v4 P1 lands the migration in a single release-train (see PRD-v4 Risks R-V4-1).
+
+**Will need to revisit if:**
+
+- Multi-cloud is introduced — the registry schema needs a `csp` discriminator and per-CSP key blocks. (Future ADR-NNN, not an amendment to this one.)
+- A cluster-registry consumer requires authoritative ground-truth from the running cluster (e.g., actual subnet allocations) rather than declared topology — at which point a separate "discovered facts" companion file is added, not a replacement for the declared registry.
+- Per-environment overrides become necessary (see PRD-v4 OQ-V4-01) — the schema is extended; the single-file property may relax.
+
+## Action Items
+
+1. [ ] Author `gitops/clusters/registry.yaml` with the seven day-1 cluster entries (mirrors current v3 state).
+2. [ ] Author `gitops/clusters/registry.schema.json` (draft-2020-12) and wire it into pre-commit + CI.
+3. [ ] Migrate `terraform/argocd_bootstrap.tf:2–100` locals to derive from `local.cluster_registry`.
+4. [ ] Migrate `terraform/clusters.tf` cluster-identity references to read from `local.cluster_registry`.
+5. [ ] Land `tools/service_seed/cli.py` registry loader once US-V4-07 (three-module split) lands.
+6. [ ] Add a CI step that fails any PR adding a hardcoded `subscription_id`, `region`, or `acr_hostname` outside the registry (regex-based linter scoped to `terraform/*.tf` and `tools/service_seed/**/*.py`).
+7. [ ] Update `docs/agents/domain.md` to name the registry as the canonical topology source.
+
+## Related ADRs
+
+- **ADR-003-v2** — Cluster topology three-tier model; this ADR codifies the data shape.
+- **ADR-013-v2** — Two-tier GitOps layout; this ADR sits at the infra tier and is read by the workload tier without modification.
+- **ADR-017** — Management-plane active-passive; `mgmt_role` field carries the active/standby distinction.
+- **ADR-022** — Management-plane singleton lock; the lease is *authoritative for runtime active-ness*, while this registry is *authoritative for declared topology*. The two are intentionally separate (runtime fact vs declared fact).
+- **ADR-024-v3** — RBAC scope-down for platform UAMIs; per-cluster identity scopes derived from this registry's RG entries.
