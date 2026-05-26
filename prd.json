@@ -1,8 +1,44 @@
 {
   "project": "IDP GitOps Blueprint v4",
   "branchName": "ralph/prd-v4-deepening-improvement",
-  "description": "Architecture deepening + hardening pass on the IDP GitOps platform: convert the three-way encoded cluster topology, copy-pasted workload-identity pattern, duplicate Terraform CI workflows, open-coded Go HTTP policy, 981-line seed_job.py, and hand-rolled YAML emission into modules with high leverage and good locality, and close the residual security/robustness gaps the deepening exposes.",
+  "description": "Two-phase delivery: (1) PRD-v3.1 pre-v4 hardening patch closes the residual v3 security gaps (AKV-native rotation policies + TLS history purge); (2) PRD-v4 architecture deepening + hardening pass on the IDP GitOps platform \u2014 convert the three-way encoded cluster topology, copy-pasted workload-identity pattern, duplicate Terraform CI workflows, open-coded Go HTTP policy, 981-line seed_job.py, and hand-rolled YAML emission into modules with high leverage and good locality. PRD-v3.1 (US-V3.1-01 + US-V3.1-02) MUST merge before any v4 P0 work begins.",
   "userStories": [
+    {
+      "id": "US-V3.1-01",
+      "title": "AKV-native quarterly rotation policies for platform secrets and certs (FR-V3.1-01..05)",
+      "description": "As a security-conscious platform engineer, I want AKV-native quarterly rotation policies declared in Terraform for every platform secret and certificate, so that key rotation is enforced by AKV itself (not dependent on saas-token-rotator runtime availability) and verified at PR time by a CI assertion.",
+      "acceptanceCriteria": [
+        "Given terraform/keyvaults.tf declares azurerm_key_vault_certificate resources for every platform TLS certificate (Backstage, Jenkins, any DX tool with a private endpoint); When terraform apply runs in any environment; Then each cert resource carries a certificate_policy.lifetime_action block of action AutoRenew at lifetime_percentage = 75, and the rendered certificate is observable via az keyvault certificate show.",
+        "Given terraform/keyvaults.tf declares azurerm_key_vault_secret resources for every platform-generated secret (Jenkins admin password, PostgreSQL admin password, internal-service tokens); When terraform plan runs; Then every secret resource has expiration_date set to a quarterly boundary 90 days from creation, and the rotation UAMI's role assignment is scoped by AKV secret-name prefix (not vault-wide).",
+        "Given the CI null-expiry assertion runs in advisory mode for the first sprint after US-V3.1-01 lands; When the assertion finds a platform-tagged secret with null expiry; Then the CI job posts a warning comment on the PR but does not fail; from sprint-2 onward the same finding fails the PR.",
+        "Given an operator-rotated secret reaches 14 days before its declared expiry; When the azurerm_monitor_metric_alert fires; Then the platform on-call channel receives the alert with secret name, vault name, expiry date, and runbook link.",
+        "Given the top-of-file catalogue in terraform/keyvaults.tf lists every platform secret and certificate (name, mode, expiry-policy reference, rotation-scope); When a PR adds a new azurerm_key_vault_secret or azurerm_key_vault_certificate resource; Then the PR also updates the catalogue and the CI lints the file to confirm the new resource is listed.",
+        "terraform validate + tflint + CI null-expiry assertion passes",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "PRD-v3.1 gate: must merge before any v4 P0 work begins. Closes FR-V3-12 (audit finding 2026-05-26: AKV rotation policies absent from terraform/keyvaults.tf)."
+    },
+    {
+      "id": "US-V3.1-02",
+      "title": "TLS history purge via git filter-repo (FR-V3.1-06..09)",
+      "description": "As a security engineer, I want the original backstage/etc/tls/tls.key and tls.crt blobs removed from all reachable refs on the canonical remote via git filter-repo, with cert revocation re-confirmed and a re-clone runbook published, so that historical key material is no longer recoverable from origin and the FR-V3-05 contract is honored end-to-end.",
+      "acceptanceCriteria": [
+        "Given the 48-hour pre-cutover window announcement from FR-V3.1-06 has been sent to all active contributors and CI integrations; When the cutover time arrives; Then all merges are paused for the duration of the rewrite + force-push window and a status page (or pinned chat message) reflects the freeze.",
+        "Given the rewrite runs on a fresh mirror clone per FR-V3.1-07 with command `git filter-repo --invert-paths --path backstage/etc/tls/tls.key --path backstage/etc/tls/tls.crt --refs HEAD --refs refs/heads --refs refs/tags`; When the operator runs the verification commands; Then `git log --all -S\"BEGIN PRIVATE KEY\"` returns zero commits AND `git rev-list --all | xargs git grep -l \"BEGIN PRIVATE KEY\" 2>/dev/null` returns zero matches.",
+        "Given verification is clean; When the operator force-pushes to origin for every affected branch (minimum: main, feat/prd-v3-strengthen-tf-code-quality, feat/prd-v4-deepening-improvement) and re-points tags carrying the offending blobs; Then `git log --all -S\"BEGIN PRIVATE KEY\"` against a fresh clone of origin returns zero commits AND open-PR owners receive a re-base notification with the runbook link.",
+        "Given the cert revocation must be re-confirmed; When an operator queries OCSP/CRL for the original cert serial number; Then the response is `revoked` and the timestamp + responder identity are recorded in `docs/tls-history-purge-2026-05-runbook.md` (or equivalent runbook file).",
+        "Given the post-cutover re-clone runbook is published; When every CI runner and contributor re-clones; Then their local working tree contains no commit reachable to the original 7b07f95's tls blob and `git log` reflects the rewritten history.",
+        "Given GitHub Actions cache invalidation is performed (`gh cache delete --all` or equivalent per-workflow cache resets); Then no cached refs/objects reference the old SHAs.",
+        "Given branch protection on main was relaxed for the force-push; When the cutover completes; Then branch protection is re-instated within the same sprint and an audit-log entry confirms the temporary admin-override window.",
+        "Given all of the above pass; Then FR-V3-05 is marked CLOSED in the v3 readiness verification artifact and PRD-v4 \u00a7Pre-existing v3 obligations entry for FR-V3-05 is updated from 'pending' to 'closed via PRD-v3.1 US-V3.1-02.'",
+        "git filter-repo verification commands return zero matches; branch protection re-instated"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "PRD-v3.1 gate: must merge before any v4 P0 work begins. Closes FR-V3-05 (audit finding 2026-05-26: git filter-repo rewrite never performed; BEGIN PRIVATE KEY blobs reachable from 7b07f95, 9d04b71, de9253b on origin). Execution involves a destructive history rewrite + force-push; coordinate admin-override window in advance."
+    },
     {
       "id": "US-V4-11",
       "title": "CI hygiene + version source-of-truth (QW-CI: FR-V4-45..49)",
@@ -14,7 +50,7 @@
         "Given pre-commit run --all-files is invoked in CI after a clean run; Then the resulting diff is empty (no drift between pre-commit and CI Checkov/tflint scopes; FR-V4-48 and FR-V4-49 satisfied).",
         "terraform validate + tflint + pre-commit run --all-files passes"
       ],
-      "priority": 1,
+      "priority": 3,
       "passes": false,
       "notes": ""
     },
@@ -29,7 +65,7 @@
         "Given ADR-031-v4 is merged alongside this PRD; When a reviewer asks 'why YAML and not CRD?'; Then ADR-031-v4 is the linked authoritative answer.",
         "terraform validate + tflint + JSON-schema validation passes; pytest --cov on cli.py registry loader passes"
       ],
-      "priority": 2,
+      "priority": 4,
       "passes": false,
       "notes": ""
     },
@@ -44,7 +80,7 @@
         "Given plan output exceeds 60KB; When the plan job posts the PR comment; Then the comment is truncated at 60KB with the link to the full artifact, and the truncation logic exists in exactly one file.",
         "act-based smoke test of workflow_call inputs passes; plan-truncation logic unit test passes"
       ],
-      "priority": 2,
+      "priority": 4,
       "passes": false,
       "notes": ""
     },
@@ -59,7 +95,7 @@
         "Given a new workload identity needs to be added; When the engineer opens the PR; Then the PR diff is >=60% smaller than the equivalent v3-era PR (success-metric verification).",
         "terraform validate + tflint + terraform test passes"
       ],
-      "priority": 3,
+      "priority": 5,
       "passes": false,
       "notes": ""
     },
@@ -74,7 +110,7 @@
         "Given the cookiecutter fallback renderer is invoked with a template whose filename contains '../'; When rendering attempts to write outside the destination; Then the renderer raises with a path-traversal error before writing any file (closes Q9).",
         "terraform validate + tflint + terraform test passes; pytest --cov on timeouts + path-traversal assertions passes"
       ],
-      "priority": 3,
+      "priority": 5,
       "passes": false,
       "notes": ""
     },
@@ -89,7 +125,7 @@
         "Given go test -race ./internal/httpx/... runs; Then all tests pass with race detection enabled and line coverage is >=80%.",
         "go test -race ./... passes"
       ],
-      "priority": 4,
+      "priority": 6,
       "passes": false,
       "notes": ""
     },
@@ -104,7 +140,7 @@
         "Given an AKV API call returns 5xx; When retry policy is exhausted; Then the returned error is typed and contains no raw response body (closes Q7 for this path).",
         "go test -race ./... passes"
       ],
-      "priority": 4,
+      "priority": 6,
       "passes": false,
       "notes": ""
     },
@@ -119,7 +155,7 @@
         "Given unit tests run for scaling.Runner, bloblease.LeaseRunner, and rotation.Runner; Then the runners are exercised with a fake Kubernetes client, a fake blob client, and a fake AKV/SaaS client respectively and combined line coverage across the three runner packages is >=80%.",
         "go test -race ./... passes"
       ],
-      "priority": 4,
+      "priority": 6,
       "passes": false,
       "notes": ""
     },
@@ -134,7 +170,7 @@
         "Given pyproject.toml exists at tools/service_seed/; When pip install -e tools/service_seed runs; Then the package installs with pinned dependencies and the CLI is exposed as a console_script entry point.",
         "pytest --cov + mypy --strict passes"
       ],
-      "priority": 5,
+      "priority": 7,
       "passes": false,
       "notes": ""
     },
@@ -149,7 +185,7 @@
         "Given the CI kubeconform step runs against rendered output for each SLO class fixture; When any rendered manifest fails schema validation; Then the CI job fails the PR.",
         "pytest --cov + mypy --strict + kubeconform passes"
       ],
-      "priority": 5,
+      "priority": 7,
       "passes": false,
       "notes": ""
     },
@@ -164,7 +200,7 @@
         "Given FR-V4-18 (httpx redaction-by-default) is in effect; When an AKV/Bitbucket/Jira call fails with an HTTP 4xx/5xx; Then the resulting error contains no token material (closes Q7).",
         "terraform validate + tflint (incl. custom rule) + terraform test passes"
       ],
-      "priority": 6,
+      "priority": 8,
       "passes": false,
       "notes": ""
     }
