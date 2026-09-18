@@ -1,0 +1,12 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "IDPGitOps — F-003 Platform invariant gates events",
+    "version": "v4",
+    "description": "Empty. The validators are synchronous processes that exit non-zero on a violation; none publishes or consumes a message.",
+    "x-derived-from": ["scripts/validate-action-pins.py:169"]
+  },
+  "channels": {},
+  "operations": {},
+  "components": { "schemas": {} }
+}

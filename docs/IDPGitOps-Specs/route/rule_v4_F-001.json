@@ -1,0 +1,64 @@
+{
+  "version": "v4",
+  "feature_id": "F-001",
+  "feature_title": "Service onboarding pipeline",
+  "objective": "Implement F-001 exactly as specified by the documents listed in reads.",
+  "reads": {
+    "domain": [
+      "docs/IDPGitOps-Specs/ddd/domain_DOM-001-service-onboarding-pipeline.md"
+    ],
+    "prd": [
+      "docs/IDPGitOps-Specs/PRDs/prd.md",
+      "docs/IDPGitOps-Specs/PRDs/prd_v4_F-001-service-onboarding-pipeline.md"
+    ],
+    "adrs": [
+      "docs/IDPGitOps-Specs/ADRs/adrs_ADR-0001-record-architecture-decisions.md",
+      "_docs/IDP-GitOps-ADRs-v2.md"
+    ],
+    "architecture": [
+      "docs/IDPGitOps-Specs/architect/architect_common.md",
+      "docs/IDPGitOps-Specs/status-model.md",
+      "docs/IDPGitOps-Specs/architect/feature_v4_F-001_architect.md",
+      "docs/IDPGitOps-Specs/architect/architect.md"
+    ],
+    "data": [
+      "docs/IDPGitOps-Specs/data/data-master-erd.md",
+      "docs/IDPGitOps-Specs/data/data-erd_v4_F-001.md",
+      "docs/IDPGitOps-Specs/data/api-contract_v4_F-001.md",
+      "docs/IDPGitOps-Specs/data/data-fixtures_v4_F-001.md",
+      "docs/IDPGitOps-Specs/data/schema/schemas.json",
+      "docs/IDPGitOps-Specs/data/schema/erd_v4_F-001.puml",
+      "docs/IDPGitOps-Specs/data/schema/openapi_v4_F-001.json",
+      "docs/IDPGitOps-Specs/data/schema/asyncapi_v4_F-001.json",
+      "docs/IDPGitOps-Specs/data/fixtures/fixtures_v4_F-001.json"
+    ],
+    "tasks": [
+      "docs/IDPGitOps-Specs/tasks/tasks_v4_F-001.md"
+    ],
+    "tests": [
+      "docs/IDPGitOps-Specs/tests/testing_strategy.md",
+      "docs/IDPGitOps-Specs/tests/test_v4_F-001.md"
+    ],
+    "runbooks": [
+      "docs/IDPGitOps-Specs/runbook/runbook_DEV_RB-001-local-setup.md"
+    ]
+  },
+  "writes": {
+    "code": [],
+    "tests": []
+  },
+  "guardrails": [
+    "Do not invent requirements: if a document is silent, stop and ask.",
+    "Do not change any file under docs/ while executing this route.",
+    "Treat docs/ as read-only, data/ included: schemas, OpenAPI/AsyncAPI and fixtures are the contract, not scratch space. A shape that does not fit is a spec bug \u2014 stop and say so.",
+    "Status cells move only through docs_flow.py task, one legal transition at a time (status-model.md); a done cites evidence that passed here.",
+    "Follow architect_common.md for naming, quality and security; it overrides personal preference.",
+    "One task from tasks_v4_F-001.md at a time, in the stated order."
+  ],
+  "exit_criteria": [
+    "Every acceptance criterion in the feature PRD has a passing test.",
+    "Implemented shapes match data/schema/schemas.json; route.py reports no fixture/model mismatch.",
+    "Review checklist in architect_common.md passes.",
+    "tasks_v4_F-001.md status column is complete."
+  ]
+}

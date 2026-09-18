@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "idpgitops/data/schemas.json",
+  "title": "IDPGitOps data model",
+  "description": "Canonical entity definitions, reconstructed from the code that defines them. Every $defs entry carries the path:line it was derived from; field names and casing are the running system's, not a style guide's. This repository has no database: each entity's system of record is a committed file, a cluster object, a vault or a process boundary. Nothing else in the hub may define a field.",
+  "$defs": {
+    "service_request": {
+      "type": "object",
+      "description": "Validated intake for one new service. Owned by: onboarding intake. Introduced by: F-001. Derived from the frozen dataclass and its __post_init__ validation [D: tools/service_seed/jira_intake.py:48].",
+      "required": ["issue_key", "issue_type", "service_name", "service_slug", "slo_class", "summary", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "issue_key": { "type": "string", "minLength": 1, "description": "Tracker key; required and non-empty [D: tools/service_seed/jira_intake.py:64]." },
+        "issue_type": { "const": "IDP Service Request", "description": "Any other value raises [D: tools/service_seed/jira_intake.py:71]." },
+        "service_name": { "type": "string", "minLength": 1, "description": "Required and non-empty [D: tools/service_seed/jira_intake.py:64]." },
+        "service_slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "description": "Pattern enforced on construction [D: tools/service_seed/jira_intake.py:32]." },
+        "slo_class": { "enum": ["bronze", "silver", "gold"], "description": "Membership enforced [D: tools/service_seed/jira_intake.py:29]; absent from the payload resolves to silver [D: tools/service_seed/jira_intake.py:159]." },
+        "summary": { "type": "string", "description": "Falls back to the issue key when the payload has none [D: tools/service_seed/jira_intake.py:181]." },
+        "description": { "type": "string", "description": "Rich text flattened to plain text [D: tools/service_seed/jira_intake.py:95]." }
+      }
+    },
+    "cluster_entry": {
+      "type": "object",
+      "description": "One cluster in the committed topology catalogue. Owned by: cluster registry. Introduced by: F-001 (first consumer); catalogued by F-003. System of record: gitops/clusters/registry.yaml, schema-enforced [D: gitops/clusters/registry.schema.json:1] and typed on load [D: tools/service_seed/cli.py:43].",
+      "required": ["name", "subscription_id", "region", "region_abbrev", "resource_group", "acr_hostname", "aks_name", "mgmt_role", "azs", "sku_tier", "gitops_addons"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "Catalogue key; the loader rejects an entry whose aks_name differs [D: tools/service_seed/cli.py:198]." },
+        "subscription_id": { "type": "string", "description": "Azure subscription. Committed values are placeholders [D: gitops/clusters/registry.yaml:29]." },
+        "region": { "type": "string", "minLength": 1 },
+        "region_abbrev": { "enum": ["we", "ne", "wus"], "description": "Must match the canonical region map or the Terraform precondition fails [D: terraform/invariants.tf:95]." },
+        "resource_group": { "type": "string", "minLength": 1 },
+        "acr_hostname": { "type": "string", "minLength": 1 },
+        "aks_name": { "type": "string", "minLength": 1 },
+        "mgmt_role": { "enum": ["active", "standby", "workload", "seed"] },
+        "azs": { "type": "array", "items": { "type": "string" }, "description": "Empty list means single-AZ [D: gitops/clusters/registry.yaml:41]." },
+        "sku_tier": { "enum": ["Free", "Standard", "Premium"] },
+        "gitops_addons": { "type": "object", "additionalProperties": { "type": "string" }, "description": "enable_* flags, string-valued [D: tools/service_seed/cli.py:222]." }
+      }
+    },
+    "slo_profile": {
+      "type": "object",
+      "description": "Analysis thresholds for one availability tier. Owned by: release profiles. Introduced by: F-001. System of record: tools/service_seed/profiles/slo.yaml [D: tools/service_seed/profiles/slo.yaml:14]. On disk the tier is the mapping key; slo_class materialises that key so a record can stand alone.",
+      "required": ["slo_class", "has_analysis_template"],
+      "additionalProperties": false,
+      "properties": {
+        "slo_class": { "enum": ["bronze", "silver", "gold"] },
+        "has_analysis_template": { "type": "boolean" },
+        "include_p99_metric": { "type": "boolean" },
+        "analysis_interval": { "type": "string", "pattern": "^[0-9]+[smh]$" },
+        "success_rate_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "p99_latency_ms_threshold": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "rollout_profile": {
+      "type": "object",
+      "description": "Canary step sequence for one availability tier. Owned by: release profiles. Introduced by: F-001. System of record: tools/service_seed/profiles/rollout.yaml [D: tools/service_seed/profiles/rollout.yaml:12]. Steps are joined verbatim into the rendered strategy.",
+      "required": ["slo_class", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "slo_class": { "enum": ["bronze", "silver", "gold"] },
+        "steps": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    },
+    "gitops_manifest_file": {
+      "type": "object",
+      "description": "One rendered file in a service's scaffold, addressed by repository-relative path. Owned by: onboarding render. Introduced by: F-001. Derived from the path keys the renderer returns [D: tools/service_seed/service_template.py:251]. The rendered bytes are template output and are not modelled.",
+      "required": ["service_slug", "path", "tier", "scope"],
+      "additionalProperties": false,
+      "properties": {
+        "service_slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "path": { "type": "string", "minLength": 1, "description": "Always under apps/<service_slug>/ [D: tools/service_seed/service_template.py:303]." },
+        "tier": { "enum": ["infra", "workload"], "description": "The partition key for the two change sets [D: tools/service_seed/cli.py:381]." },
+        "scope": { "enum": ["base", "overlay"] },
+        "env": { "enum": ["dev", "staging", "prod"], "description": "Overlay only; the three environments are fixed [D: tools/service_seed/service_template.py:53]." }
+      }
+    },
+    "gitops_pull_request": {
+      "type": "object",
+      "description": "A proposal opened against the platform GitOps repository. Owned by: onboarding git layer. Introduced by: F-001. Derived from the pull-request payload [D: tools/service_seed/gitops_pr.py:63] and the two call sites that compose it [D: tools/service_seed/cli.py:384].",
+      "required": ["repo_slug", "title", "description", "source_branch", "destination_branch", "path_root", "tier"],
+      "additionalProperties": false,
+      "properties": {
+        "repo_slug": { "type": "string", "minLength": 1, "description": "Derived from the remote URL's last segment, .git stripped [D: tools/service_seed/gitops_pr.py:163]." },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1, "description": "Names the request key and the tier [D: tools/service_seed/cli.py:389]." },
+        "source_branch": { "type": "string", "minLength": 1, "description": "seed/<slug>-<tier>-<issue key lowercased> [D: tools/service_seed/cli.py:388]." },
+        "destination_branch": { "type": "string", "minLength": 1, "description": "Defaults to main [D: tools/service_seed/gitops_pr.py:61]." },
+        "close_source_branch": { "type": "boolean", "description": "Sent as true [D: tools/service_seed/gitops_pr.py:68]." },
+        "path_root": { "type": "string", "minLength": 1, "description": "apps at both call sites [D: tools/service_seed/cli.py:390]." },
+        "tier": { "enum": ["infra", "workload"] }
+      }
+    },
+    "seed_result": {
+      "type": "object",
+      "description": "Machine-readable outcome of one onboarding run, printed as a single JSON line. Owned by: onboarding wiring. Introduced by: F-001. Not persisted. Keys are camelCase because that is how the run emits them [D: tools/service_seed/cli.py:408].",
+      "required": ["service", "issueKey", "sloClass"],
+      "additionalProperties": false,
+      "properties": {
+        "service": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "issueKey": { "type": "string", "minLength": 1 },
+        "sloClass": { "enum": ["bronze", "silver", "gold"] }
+      }
+    },
+    "mgmt_leader_status": {
+      "type": "object",
+      "description": "One management cluster's locally readable statement of what it currently is. Owned by: lease controller (write), scaling reconciler and operators (read). Introduced by: F-002. System of record: a ConfigMap in the cluster it describes, upserted wholesale [D: tools/mgmt-plane-lock/internal/kube/status.go:35].",
+      "required": ["clusterName", "holderIdentity", "leaseBlobURL", "leadershipStatus", "leaseID", "preferredCluster", "lastObservedAt", "lastRenewedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "clusterName": { "type": "string", "minLength": 1 },
+        "holderIdentity": { "type": "string", "description": "Written from the same cluster name [D: tools/mgmt-plane-lock/internal/kube/status.go:37]." },
+        "leaseBlobURL": { "type": "string", "minLength": 1 },
+        "leadershipStatus": { "enum": ["active", "standby"], "description": "The reader accepts only these two [D: tools/mgmt-plane-lock/internal/scaling/scaling.go:91]." },
+        "leaseID": { "type": "string" },
+        "preferredCluster": { "type": "string", "description": "Read from arbiter metadata [D: tools/mgmt-plane-lock/internal/bloblease/bloblease.go:119]." },
+        "lastObservedAt": { "type": "string", "description": "RFC 3339 UTC, written at upsert time [D: tools/mgmt-plane-lock/internal/kube/status.go:42]." },
+        "lastRenewedAt": { "type": "string", "description": "RFC 3339 UTC [D: tools/mgmt-plane-lock/internal/kube/status.go:43]." }
+      }
+    },
+    "lease_controller_config": {
+      "type": "object",
+      "description": "Validated startup contract of the lease controller. Owned by: lease controller. Introduced by: F-002. System of record: the process environment [D: tools/mgmt-plane-lock/internal/config/config.go:22]. Bounds are part of the model because an out-of-bounds value refuses startup rather than being corrected [D: tools/mgmt-plane-lock/internal/config/config.go:79].",
+      "required": ["cluster_name", "lease_blob_url"],
+      "additionalProperties": false,
+      "properties": {
+        "cluster_name": { "type": "string", "minLength": 1, "description": "CLUSTER_NAME; startup fails when empty [D: tools/mgmt-plane-lock/internal/config/config.go:74]." },
+        "lease_blob_url": { "type": "string", "minLength": 1, "description": "LEASE_BLOB_URL; startup fails when empty [D: tools/mgmt-plane-lock/internal/config/config.go:77]." },
+        "status_namespace": { "type": "string", "minLength": 1, "description": "Default kube-system [D: tools/mgmt-plane-lock/internal/config/config.go:13]." },
+        "status_configmap": { "type": "string", "minLength": 1, "description": "Default mgmt-leader-status [D: tools/mgmt-plane-lock/internal/config/config.go:14]." },
+        "metrics_addr": { "type": "string", "minLength": 1, "description": "Default :8080 [D: tools/mgmt-plane-lock/internal/config/config.go:15]." },
+        "lease_duration_seconds": { "type": "integer", "minimum": 15, "maximum": 60, "description": "Default 60 [D: tools/mgmt-plane-lock/internal/config/config.go:16]; outside 15..60 refuses startup [D: tools/mgmt-plane-lock/internal/config/config.go:79]." },
+        "renew_interval_seconds": { "type": "integer", "minimum": 1, "description": "Default 15 [D: tools/mgmt-plane-lock/internal/config/config.go:17]; must be positive and strictly shorter than the term [D: tools/mgmt-plane-lock/internal/config/config.go:85]." },
+        "preferred_metadata_key": { "type": "string", "minLength": 1, "description": "Default preferred-cluster [D: tools/mgmt-plane-lock/internal/config/config.go:70]." }
+      }
+    },
+    "controller_workload": {
+      "type": "object",
+      "description": "One platform controller the scaling reconciler governs, with the replica count each leadership state implies. Owned by: scaling reconciler. Introduced by: F-002. System of record: the declared list compiled into the reconciler [D: tools/mgmt-plane-lock/internal/scaling/scaling.go:34].",
+      "required": ["kind", "namespace", "name", "active_replicas", "standby_replicas"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["Deployment", "StatefulSet"], "description": "Derived from the kind constants [D: tools/mgmt-plane-lock/internal/scaling/scaling.go:21]." },
+        "namespace": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "active_replicas": { "type": "integer", "minimum": 1 },
+        "standby_replicas": { "type": "integer", "minimum": 0, "maximum": 0, "description": "Every declared entry carries 0 [D: tools/mgmt-plane-lock/internal/scaling/scaling.go:34]." },
+        "optional": { "type": "boolean", "description": "Set on two entries [D: tools/mgmt-plane-lock/internal/scaling/scaling.go:70]." }
+      }
+    },
+    "checkov_baseline_finding": {
+      "type": "object",
+      "description": "One suppressed supply-chain finding, with the metadata that keeps a suppression reviewable. Owned by: platform invariant gates. Introduced by: F-003. System of record: .checkov.baseline, whose _schema header names the required fields [D: .checkov.baseline:6] and whose validator reads that header rather than hardcoding them [D: scripts/validate-checkov-baseline.py:63].",
+      "required": ["rationale", "owner", "expiry"],
+      "additionalProperties": true,
+      "properties": {
+        "rationale": { "type": "string", "minLength": 1, "description": "Why the finding is suppressed [D: docs/checkov-baseline-metadata-schema.md:11]." },
+        "owner": { "type": "string", "minLength": 1, "description": "Team or handle accountable for re-evaluation [D: docs/checkov-baseline-metadata-schema.md:12]." },
+        "expiry": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Date after which the suppression fails the PR [D: docs/checkov-baseline-metadata-schema.md:13]." }
+      }
+    },
+    "tool_version_pin": {
+      "type": "object",
+      "description": "One pinned toolchain version. Owned by: platform invariant gates. Introduced by: F-003. System of record: .tool-versions, which is the only file allowed to declare these [D: .tool-versions:11]; a second declaration fails CI [D: scripts/validate-tool-version-singleton.py:1].",
+      "required": ["tool", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "note": { "type": "string", "description": "Trailing comment on the line; advisory, not a pin [D: .tool-versions:11]." }
+      }
+    },
+    "akv_secret_entry": {
+      "type": "object",
+      "description": "One catalogued Key Vault secret and who owns its write path. Owned by: secret lifecycle. Introduced by: F-004. System of record: the two Terraform catalogues — mode terraform_managed [D: terraform/locals.tf:41] and mode referenced_only [D: terraform/locals.tf:67].",
+      "required": ["name", "mode", "vault", "description", "consumed_by"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "Catalogue key; the secret's name in the vault." },
+        "mode": { "enum": ["terraform_managed", "referenced_only"], "description": "terraform_managed entries must also exist as an azurerm_key_vault_secret [D: terraform/locals.tf:38]; referenced_only entries are written elsewhere [D: terraform/locals.tf:64]." },
+        "vault": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "consumed_by": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      }
+    },
+    "akv_secret_version": {
+      "type": "object",
+      "description": "The projection a vault read returns. Owned by: secret lifecycle. Introduced by: F-004. Derived from the Get projection [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:65]. The value field exists in the projection and is deliberately absent from every fixture.",
+      "required": ["name", "updated_at", "enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "updated_at": { "type": "string", "description": "Version timestamp, used to compute token age [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:157]." },
+        "enabled": { "type": "boolean", "description": "Superseded versions are disabled rather than deleted [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter_test.go:308]." }
+      }
+    },
+    "secret_write": {
+      "type": "object",
+      "description": "One write through the single vault write path. Owned by: secret lifecycle. Introduced by: F-004. Derived from the Put surface and its Strategy enum [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:76].",
+      "required": ["name", "strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "strategy": { "enum": ["Overwrite", "RecoverIfSoftDeleted"], "description": "Overwrite is the default and refuses to revive a soft-deleted secret [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:50]." },
+        "outcome": { "enum": ["written", "ErrSecretNotFound", "ErrAuthFailed", "ErrConflict", "ErrSoftDeletedSecretExists"], "description": "Typed sentinels callers test with errors.Is [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:58]." }
+      }
+    }
+  }
+}

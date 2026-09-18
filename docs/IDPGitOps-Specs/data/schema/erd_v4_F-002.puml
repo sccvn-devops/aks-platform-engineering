@@ -1,0 +1,59 @@
+@startuml erd_v4_F-002
+' Feature ERD — v4 F-002 Management plane arbitration (as built).
+hide circle
+skinparam linetype ortho
+
+entity "lease_controller_config" as lease_controller_config {
+  ' D: tools/mgmt-plane-lock/internal/config/config.go:22
+  * cluster_name <<PK>> (required)
+  --
+  * lease_blob_url (required)
+  status_namespace = kube-system
+  status_configmap = mgmt-leader-status
+  metrics_addr = :8080
+  lease_duration_seconds = 60 (15..60)
+  renew_interval_seconds = 15 (< duration)
+  preferred_metadata_key = preferred-cluster
+}
+entity "mgmt_leader_status" as mgmt_leader_status {
+  ' D: tools/mgmt-plane-lock/internal/kube/status.go:35
+  * clusterName <<PK>>
+  --
+  * leadershipStatus : active|standby
+  * holderIdentity = clusterName
+  * leaseBlobURL
+  * leaseID ("" when standby)
+  * preferredCluster
+  * lastObservedAt : RFC3339 UTC
+  * lastRenewedAt : RFC3339 UTC
+}
+entity "controller_workload" as controller_workload {
+  ' D: tools/mgmt-plane-lock/internal/scaling/scaling.go:25
+  * namespace <<PK>>
+  * name <<PK>>
+  --
+  * kind : Deployment|StatefulSet
+  * active_replicas
+  * standby_replicas = 0
+  optional : bool
+}
+entity "cluster_entry" as cluster_entry {
+  ' D: tools/service_seed/cli.py:43 — read only
+  * name <<PK>>
+  --
+  * mgmt_role : active|standby|workload|seed
+  * region, subscription_id, resource_group, …
+}
+
+lease_controller_config ||--|| mgmt_leader_status : "publishes"
+mgmt_leader_status ||--o{ controller_workload : "decides replicas"
+cluster_entry ||--o| mgmt_leader_status : "catalogued role vs observed"
+
+note bottom of mgmt_leader_status
+  The lease itself is not an entity: its authoritative state
+  lives in Azure Storage. leaseID and lastRenewedAt are the
+  only local trace.
+  D: tools/mgmt-plane-lock/internal/bloblease/bloblease.go:43
+end note
+
+@enduml

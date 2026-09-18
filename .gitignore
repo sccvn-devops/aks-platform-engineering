@@ -149,3 +149,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# repowise API keys (local)
+.repowise/.env

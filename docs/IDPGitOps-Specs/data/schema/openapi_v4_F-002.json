@@ -1,0 +1,39 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "IDPGitOps — F-002 Management plane arbitration",
+    "version": "v4",
+    "description": "Two surfaces, reconstructed from code. Inbound: the metrics endpoint this feature actually serves — the only HTTP route the survey found in the whole repository [D: tools/mgmt-plane-lock/internal/bootstrap/bootstrap.go:54]. Outbound: the blob-lease operations the controller performs through the Azure SDK, which are described here as operations rather than as a hand-written REST contract, since the code calls a client library and never composes the request itself. Shapes are $ref'd from schemas.json.",
+    "x-derived-from": ["tools/mgmt-plane-lock/internal/bootstrap/bootstrap.go:48", "tools/mgmt-plane-lock/internal/bloblease/bloblease.go:43"]
+  },
+  "servers": [
+    { "url": "http://{pod}:8080", "description": "Metrics listener, default address [D: tools/mgmt-plane-lock/internal/config/config.go:15]", "variables": { "pod": { "default": "mgmt-leader-lease" } } }
+  ],
+  "paths": {
+    "/metrics": {
+      "get": {
+        "operationId": "scrapeMetrics",
+        "summary": "Prometheus exposition for the lease controller",
+        "description": "Served by the shared bootstrap helper, which every binary calls [D: tools/mgmt-plane-lock/internal/bootstrap/bootstrap.go:52]. The lease controller publishes the last-successful-renew timestamp through it [D: tools/mgmt-plane-lock/internal/bloblease/runner.go:164]. Exposition format, so no JSON schema is declared.",
+        "responses": { "200": { "description": "Metric exposition." } }
+      }
+    }
+  },
+  "components": {
+    "x-outbound-operations": {
+      "description": "Not HTTP paths this feature serves — lease operations it performs against Azure Storage through the SDK client.",
+      "acquire": { "at": "tools/mgmt-plane-lock/internal/bloblease/bloblease.go:43", "note": "Takes the configured term; conflict means another cluster holds it." },
+      "renew": { "at": "tools/mgmt-plane-lock/internal/bloblease/bloblease.go:59", "note": "Called when the renewal interval has elapsed." },
+      "release": { "at": "tools/mgmt-plane-lock/internal/bloblease/bloblease.go:71", "note": "Called on drain and on a preference change; a missing lease is treated as success." },
+      "break": { "at": "tools/mgmt-plane-lock/internal/bloblease/bloblease.go:86", "note": "Operator path only, via the CLI." },
+      "readPreferredCluster": { "at": "tools/mgmt-plane-lock/internal/bloblease/bloblease.go:119", "note": "Blob metadata read, every reconcile." },
+      "setPreferredCluster": { "at": "tools/mgmt-plane-lock/internal/bloblease/bloblease.go:127", "note": "Operator path only, written before a failback." }
+    },
+    "schemas": {
+      "MgmtLeaderStatus": { "$ref": "schemas.json#/$defs/mgmt_leader_status" },
+      "LeaseControllerConfig": { "$ref": "schemas.json#/$defs/lease_controller_config" },
+      "ControllerWorkload": { "$ref": "schemas.json#/$defs/controller_workload" },
+      "ClusterEntry": { "$ref": "schemas.json#/$defs/cluster_entry" }
+    }
+  }
+}

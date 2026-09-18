@@ -1,0 +1,67 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "IDPGitOps — F-001 Service onboarding pipeline",
+    "version": "v4",
+    "description": "Client contract, reconstructed from code. This feature serves no HTTP surface: the surveyed route table for the whole repository holds one entry and it belongs to another feature. What is documented here are the three outbound calls the pipeline makes, each derived from the request it builds. Vendor request and response bodies are named, never redefined — a local copy of someone else's schema drifts silently. Shapes the platform owns are $ref'd from schemas.json.",
+    "x-derived-from": ["tools/service_seed/jira_intake.py:205", "tools/service_seed/gitops_pr.py:38", "tools/service_seed/gitops_pr.py:55"]
+  },
+  "servers": [
+    { "url": "https://{tracker-host}", "description": "Issue tracker, REST v3 [D: tools/service_seed/jira_intake.py:212]", "variables": { "tracker-host": { "default": "example.atlassian.net" } } },
+    { "url": "https://api.bitbucket.org", "description": "Source host API, default base [D: tools/service_seed/cli.py:446]" }
+  ],
+  "paths": {
+    "/rest/api/3/issue/{issueKey}": {
+      "get": {
+        "operationId": "fetchServiceRequestIssue",
+        "summary": "Fetch the issue backing a service request",
+        "description": "Outbound. Bounded at 30 s [D: tools/service_seed/jira_intake.py:27]. Authorization is Basic when an account email is configured and Bearer otherwise [D: tools/service_seed/jira_intake.py:214]. The response is the tracker's own issue payload; the platform's projection of it is service_request.",
+        "tags": ["issue-tracker"],
+        "parameters": [{ "name": "issueKey", "in": "path", "required": true, "schema": { "type": "string" }, "description": "URL-encoded [D: tools/service_seed/jira_intake.py:212]" }],
+        "responses": { "200": { "description": "Issue payload, projected into service_request." } }
+      }
+    },
+    "/2.0/repositories/{workspace}/{repoSlug}": {
+      "post": {
+        "operationId": "createServiceRepository",
+        "summary": "Create the service's private repository",
+        "description": "Outbound. Body is {scm: git, is_private: true} plus an optional project key [D: tools/service_seed/gitops_pr.py:47]. A 400 is treated as success, which is what makes the step idempotent [D: tools/service_seed/gitops_pr.py:93].",
+        "tags": ["source-host"],
+        "parameters": [
+          { "name": "workspace", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "repoSlug", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Equals service_request.service_slug [D: tools/service_seed/cli.py:370]" }
+        ],
+        "responses": { "200": { "description": "Repository created." }, "400": { "description": "Already exists; treated as success." } }
+      }
+    },
+    "/2.0/repositories/{workspace}/{repoSlug}/pullrequests": {
+      "post": {
+        "operationId": "openChangeSet",
+        "summary": "Open one of the two change sets",
+        "description": "Outbound, called exactly twice per run — once per tier [D: tools/service_seed/cli.py:384]. The body carries title, description, source branch, destination branch and close_source_branch [D: tools/service_seed/gitops_pr.py:63]; those values are modelled as gitops_pull_request.",
+        "tags": ["source-host"],
+        "parameters": [
+          { "name": "workspace", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "repoSlug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Change set opened." } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "trackerBasic": { "type": "http", "scheme": "basic", "description": "Email plus token, base64-encoded from the environment [D: tools/service_seed/jira_intake.py:215]" },
+      "trackerBearer": { "type": "http", "scheme": "bearer", "description": "Used when no email is configured [D: tools/service_seed/jira_intake.py:218]" },
+      "sourceHostBasic": { "type": "http", "scheme": "basic", "description": "Username plus token [D: tools/service_seed/gitops_pr.py:86]" }
+    },
+    "schemas": {
+      "ServiceRequest": { "$ref": "schemas.json#/$defs/service_request" },
+      "ClusterEntry": { "$ref": "schemas.json#/$defs/cluster_entry" },
+      "SloProfile": { "$ref": "schemas.json#/$defs/slo_profile" },
+      "RolloutProfile": { "$ref": "schemas.json#/$defs/rollout_profile" },
+      "GitopsManifestFile": { "$ref": "schemas.json#/$defs/gitops_manifest_file" },
+      "GitopsPullRequest": { "$ref": "schemas.json#/$defs/gitops_pull_request" },
+      "SeedResult": { "$ref": "schemas.json#/$defs/seed_result" }
+    }
+  }
+}

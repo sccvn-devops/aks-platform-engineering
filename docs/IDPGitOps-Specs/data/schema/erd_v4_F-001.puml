@@ -1,0 +1,78 @@
+@startuml erd_v4_F-001
+' Feature ERD — v4 F-001 Service onboarding pipeline (as built).
+' Only the entities this feature reads or writes. Names match erd_master.puml
+' and schemas.json exactly; each box carries the path:line it was read from.
+hide circle
+skinparam linetype ortho
+
+entity "service_request" as service_request {
+  ' D: tools/service_seed/jira_intake.py:48
+  * issue_key : string <<PK>>
+  --
+  * issue_type : const "IDP Service Request"
+  * service_name : string non-empty
+  * service_slug : ^[a-z0-9]+(-[a-z0-9]+)*$ <<UK>>
+  * slo_class : bronze|silver|gold
+  * summary : string
+  * description : string (ADF flattened)
+}
+entity "slo_profile" as slo_profile {
+  ' D: tools/service_seed/profiles/slo.yaml:14
+  * slo_class <<PK>>
+  --
+  * has_analysis_template : bool
+  include_p99_metric : bool
+  analysis_interval : ^[0-9]+[smh]$
+  success_rate_threshold : 0..1
+  p99_latency_ms_threshold : int
+}
+entity "rollout_profile" as rollout_profile {
+  ' D: tools/service_seed/profiles/rollout.yaml:12
+  * slo_class <<PK>>
+  --
+  * steps : string[] (>=1)
+}
+entity "cluster_entry" as cluster_entry {
+  ' D: tools/service_seed/cli.py:43 — read only
+  * name <<PK>>
+  --
+  * subscription_id, region, resource_group
+  * acr_hostname, region_abbrev, mgmt_role
+  * azs, sku_tier, gitops_addons
+}
+entity "gitops_manifest_file" as gitops_manifest_file {
+  ' D: tools/service_seed/service_template.py:303
+  * path <<PK>> apps/<slug>/...
+  --
+  * service_slug <<FK>>
+  * tier : infra|workload
+  * scope : base|overlay
+  env : dev|staging|prod
+}
+entity "gitops_pull_request" as gitops_pull_request {
+  ' D: tools/service_seed/gitops_pr.py:63
+  * source_branch <<PK>>
+  --
+  * repo_slug, title, description
+  * destination_branch = main
+  * path_root = apps
+  * tier : infra|workload
+  close_source_branch : bool
+}
+entity "seed_result" as seed_result {
+  ' D: tools/service_seed/cli.py:408
+  * issueKey <<PK>>
+  --
+  * service : slug
+  * sloClass : bronze|silver|gold
+}
+
+slo_profile ||--o{ service_request : "indexed by slo_class"
+rollout_profile ||--o{ service_request : "indexed by slo_class"
+service_request ||--o{ gitops_manifest_file : renders
+cluster_entry ||--o{ gitops_manifest_file : "region + vault identity"
+gitops_pull_request ||--o{ gitops_manifest_file : "carries one tier"
+service_request ||--o{ gitops_pull_request : "exactly two"
+service_request ||--|| seed_result : reports
+
+@enduml

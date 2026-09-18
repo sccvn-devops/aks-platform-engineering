@@ -1,0 +1,93 @@
+{
+  "$comment": "Fixture set for v4 F-002, derived from the defaults and declared values in the code: configuration defaults from tools/mgmt-plane-lock/internal/config/config.go:13, the status keys from tools/mgmt-plane-lock/internal/kube/status.go:35, and the governed workload list from tools/mgmt-plane-lock/internal/scaling/scaling.go:34. Timestamps are fixed literals; the relationship between them is the point. No credential and no real storage account.",
+  "lease_controller_config": [
+    {
+      "cluster_name": "mgmt-we",
+      "lease_blob_url": "https://stplatlease.blob.core.windows.net/leases/mgmt-active",
+      "status_namespace": "kube-system",
+      "status_configmap": "mgmt-leader-status",
+      "metrics_addr": ":8080",
+      "lease_duration_seconds": 60,
+      "renew_interval_seconds": 15,
+      "preferred_metadata_key": "preferred-cluster"
+    },
+    {
+      "cluster_name": "mgmt-ne",
+      "lease_blob_url": "https://stplatlease.blob.core.windows.net/leases/mgmt-active"
+    },
+    {
+      "cluster_name": "mgmt-we-unsafe",
+      "lease_blob_url": "https://stplatlease.blob.core.windows.net/leases/mgmt-active",
+      "lease_duration_seconds": 20,
+      "renew_interval_seconds": 30
+    }
+  ],
+  "mgmt_leader_status": [
+    {
+      "clusterName": "mgmt-we",
+      "holderIdentity": "mgmt-we",
+      "leaseBlobURL": "https://stplatlease.blob.core.windows.net/leases/mgmt-active",
+      "leadershipStatus": "active",
+      "leaseID": "11111111-2222-4333-8444-555555555555",
+      "preferredCluster": "",
+      "lastObservedAt": "2026-01-01T00:00:04Z",
+      "lastRenewedAt": "2026-01-01T00:00:00Z"
+    },
+    {
+      "clusterName": "mgmt-ne",
+      "holderIdentity": "mgmt-ne",
+      "leaseBlobURL": "https://stplatlease.blob.core.windows.net/leases/mgmt-active",
+      "leadershipStatus": "standby",
+      "leaseID": "",
+      "preferredCluster": "",
+      "lastObservedAt": "2026-01-01T00:00:04Z",
+      "lastRenewedAt": "0001-01-01T00:00:00Z"
+    },
+    {
+      "clusterName": "mgmt-we",
+      "holderIdentity": "mgmt-we",
+      "leaseBlobURL": "https://stplatlease.blob.core.windows.net/leases/mgmt-active",
+      "leadershipStatus": "standby",
+      "leaseID": "",
+      "preferredCluster": "mgmt-ne",
+      "lastObservedAt": "2026-01-01T00:01:00Z",
+      "lastRenewedAt": "2026-01-01T00:00:45Z"
+    }
+  ],
+  "controller_workload": [
+    { "kind": "StatefulSet", "namespace": "argocd", "name": "argocd-application-controller", "active_replicas": 3, "standby_replicas": 0 },
+    { "kind": "Deployment", "namespace": "argocd", "name": "argocd-repo-server", "active_replicas": 2, "standby_replicas": 0 },
+    { "kind": "Deployment", "namespace": "argocd", "name": "argocd-server", "active_replicas": 2, "standby_replicas": 0 },
+    { "kind": "Deployment", "namespace": "crossplane-system", "name": "crossplane", "active_replicas": 1, "standby_replicas": 0 },
+    { "kind": "Deployment", "namespace": "external-secrets", "name": "external-secrets", "active_replicas": 1, "standby_replicas": 0, "optional": true },
+    { "kind": "Deployment", "namespace": "jira-bridge", "name": "jira-bridge", "active_replicas": 1, "standby_replicas": 0, "optional": true }
+  ],
+  "cluster_entry": [
+    {
+      "name": "mgmt-we",
+      "subscription_id": "00000000-0000-0000-0000-000000000000",
+      "region": "westeurope",
+      "region_abbrev": "we",
+      "resource_group": "rg-platform-mgmt",
+      "acr_hostname": "acrcityossharedwe.azurecr.io",
+      "aks_name": "mgmt-we",
+      "mgmt_role": "active",
+      "azs": [],
+      "sku_tier": "Standard",
+      "gitops_addons": { "enable_argocd": "true", "enable_kyverno": "true", "enable_external_secrets": "true" }
+    },
+    {
+      "name": "mgmt-ne",
+      "subscription_id": "00000000-0000-0000-0000-000000000000",
+      "region": "northeurope",
+      "region_abbrev": "ne",
+      "resource_group": "rg-platform-mgmt",
+      "acr_hostname": "acrcityossharedwe.azurecr.io",
+      "aks_name": "mgmt-ne",
+      "mgmt_role": "standby",
+      "azs": [],
+      "sku_tier": "Standard",
+      "gitops_addons": { "enable_argocd": "false", "enable_kyverno": "true", "enable_external_secrets": "true" }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "IDPGitOps — F-003 Platform invariant gates",
+    "version": "v4",
+    "description": "No HTTP surface. This feature is a set of validators invoked from pre-commit and from CI; its interface is a process exit code and an annotation on standard output. The paths object is empty for that reason, and the command surface is documented in api-contract_v4_F-003.md. Entity shapes are $ref'd from schemas.json.",
+    "x-derived-from": ["scripts/validate-cluster-registry.py:111", "scripts/validate-tool-version-singleton.py:104", "scripts/validate-action-pins.py:135"]
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "CheckovBaselineFinding": { "$ref": "schemas.json#/$defs/checkov_baseline_finding" },
+      "ToolVersionPin": { "$ref": "schemas.json#/$defs/tool_version_pin" },
+      "ClusterEntry": { "$ref": "schemas.json#/$defs/cluster_entry" }
+    }
+  }
+}
