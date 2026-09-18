@@ -1,0 +1,35 @@
+@startuml erd_v4_F-003
+' Feature ERD — v4 F-003 Platform invariant gates (as built).
+' This feature's "data" is the repository's own committed files. Two of them
+' have a record shape worth modelling; the rest are checks over source text.
+hide circle
+skinparam linetype ortho
+
+entity "checkov_baseline_finding" as checkov_baseline_finding {
+  ' D: .checkov.baseline:6
+  * rationale : string
+  * owner : string
+  * expiry : YYYY-MM-DD
+}
+entity "tool_version_pin" as tool_version_pin {
+  ' D: .tool-versions:17
+  * tool : string <<PK>>
+  --
+  * version : string
+  note : string
+}
+entity "cluster_entry" as cluster_entry {
+  ' D: gitops/clusters/registry.schema.json:1 — validated, not owned by this feature
+  * name <<PK>> = aks_name
+  --
+  * region_abbrev : must match the canonical map
+  * subscription_id, region, resource_group, acr_hostname
+  * mgmt_role, azs, sku_tier, gitops_addons
+}
+
+note bottom of cluster_entry
+  Validated here by scripts/validate-cluster-registry.py and by the
+  Terraform preconditions in terraform/invariants.tf:95.
+end note
+
+@enduml

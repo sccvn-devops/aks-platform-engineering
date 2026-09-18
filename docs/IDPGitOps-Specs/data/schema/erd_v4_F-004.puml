@@ -1,0 +1,39 @@
+@startuml erd_v4_F-004
+' Feature ERD — v4 F-004 Secret and token lifecycle (as built).
+hide circle
+skinparam linetype ortho
+
+entity "akv_secret_entry" as akv_secret_entry {
+  ' D: terraform/locals.tf:41 · terraform/locals.tf:67
+  * name <<PK>>
+  --
+  * mode : terraform_managed|referenced_only
+  * vault : string
+  * description : string
+  * consumed_by : string[]
+}
+entity "akv_secret_version" as akv_secret_version {
+  ' D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:65
+  * name <<PK>>
+  --
+  * updated_at : timestamptz
+  * enabled : bool
+}
+entity "secret_write" as secret_write {
+  ' D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:76
+  * name <<PK>>
+  --
+  * strategy : Overwrite|RecoverIfSoftDeleted
+  outcome : written|Err*
+}
+
+akv_secret_entry ||--o{ akv_secret_version : "has versions"
+secret_write ||--o| akv_secret_version : "creates the latest"
+
+note bottom of secret_write
+  One write path for every caller.
+  Rotation writes the same value to both regional vaults.
+  D: tools/mgmt-plane-lock/internal/rotation/rotation.go:128
+end note
+
+@enduml

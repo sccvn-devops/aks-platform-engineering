@@ -1,0 +1,54 @@
+{
+  "$comment": "Fixture set for v4 F-003, derived from the committed baseline header and .tool-versions. The baseline in the tree currently declares its required metadata and holds no suppressed findings, so the finding record below is a documentation example of the shape the validator enforces, built from the field meanings in docs/checkov-baseline-metadata-schema.md:11. The cluster record is copied verbatim from gitops/clusters/registry.yaml:133. No credential, no real owner handle.",
+  "checkov_baseline_finding": [
+    {
+      "rationale": "Example only: the committed baseline holds no suppressed findings; this record shows the shape the validator requires.",
+      "owner": "platform-engineering",
+      "expiry": "2026-12-31"
+    }
+  ],
+  "tool_version_pin": [
+    {
+      "tool": "terraform",
+      "version": "1.5.7",
+      "note": "pinned to match the required_version constraint in terraform/provider.tf"
+    },
+    {
+      "tool": "tflint",
+      "version": "0.55.0",
+      "note": "CI tflint + pre-commit local hook"
+    },
+    {
+      "tool": "checkov",
+      "version": "3.2.345",
+      "note": "CI checkov job + pre-commit terraform_checkov hook"
+    },
+    {
+      "tool": "kubectl",
+      "version": "1.31.3"
+    },
+    {
+      "tool": "kustomize",
+      "version": "5.4.3"
+    }
+  ],
+  "cluster_entry": [
+    {
+      "name": "seed-wus",
+      "subscription_id": "00000000-0000-0000-0000-000000000000",
+      "region": "westus2",
+      "region_abbrev": "wus",
+      "resource_group": "rg-platform-mgmt",
+      "acr_hostname": "acrcityossharedwe.azurecr.io",
+      "aks_name": "seed-wus",
+      "mgmt_role": "seed",
+      "azs": [],
+      "sku_tier": "Standard",
+      "gitops_addons": {
+        "enable_argocd": "false",
+        "enable_kyverno": "true",
+        "enable_external_secrets": "false"
+      }
+    }
+  ]
+}

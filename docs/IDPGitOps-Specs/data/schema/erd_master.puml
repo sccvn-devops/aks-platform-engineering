@@ -1,0 +1,177 @@
+@startuml erd_master
+' Master ERD — IDPGitOps, reconstructed from code.
+' Every entity any feature owns is introduced here exactly once, with the same
+' name it carries in schemas.json ($defs key), and the path:line it came from.
+hide circle
+skinparam linetype ortho
+
+package "Onboarding — F-001" {
+  entity "service_request" as service_request {
+    ' D: tools/service_seed/jira_intake.py:48
+    * issue_key : string <<PK>>
+    --
+    * service_slug : slug <<UK>>
+    * slo_class : bronze|silver|gold
+    * issue_type : const
+    * service_name : string
+    * summary : string
+    * description : string
+  }
+  entity "gitops_manifest_file" as gitops_manifest_file {
+    ' D: tools/service_seed/service_template.py:251
+    * path : string <<PK>>
+    --
+    * service_slug : slug <<FK>>
+    * tier : infra|workload
+    * scope : base|overlay
+    env : dev|staging|prod
+  }
+  entity "gitops_pull_request" as gitops_pull_request {
+    ' D: tools/service_seed/gitops_pr.py:63
+    * source_branch : string <<PK>>
+    --
+    * repo_slug : string
+    * tier : infra|workload
+    * title : string
+    * description : string
+    * destination_branch : string
+    * path_root : string
+    close_source_branch : bool
+  }
+  entity "seed_result" as seed_result {
+    ' D: tools/service_seed/cli.py:408
+    * issueKey : string <<PK>>
+    --
+    * service : slug
+    * sloClass : bronze|silver|gold
+  }
+  entity "slo_profile" as slo_profile {
+    ' D: tools/service_seed/profiles/slo.yaml:14
+    * slo_class : bronze|silver|gold <<PK>>
+    --
+    * has_analysis_template : bool
+    include_p99_metric : bool
+    analysis_interval : duration
+    success_rate_threshold : number
+    p99_latency_ms_threshold : int
+  }
+  entity "rollout_profile" as rollout_profile {
+    ' D: tools/service_seed/profiles/rollout.yaml:12
+    * slo_class : bronze|silver|gold <<PK>>
+    --
+    * steps : string[]
+  }
+}
+
+package "Topology — read by F-001, F-002, F-003" {
+  entity "cluster_entry" as cluster_entry {
+    ' D: tools/service_seed/cli.py:43 · gitops/clusters/registry.schema.json:1
+    * name : string <<PK>>
+    --
+    * aks_name : string <<UK, = name>>
+    * subscription_id : string
+    * region : string
+    * region_abbrev : we|ne|wus
+    * resource_group : string
+    * acr_hostname : string
+    * mgmt_role : active|standby|workload|seed
+    * azs : string[]
+    * sku_tier : Free|Standard|Premium
+    * gitops_addons : map<string,string>
+  }
+}
+
+package "Arbitration — F-002" {
+  entity "mgmt_leader_status" as mgmt_leader_status {
+    ' D: tools/mgmt-plane-lock/internal/kube/status.go:35
+    * clusterName : string <<PK>>
+    --
+    * leadershipStatus : active|standby
+    * holderIdentity : string
+    * leaseBlobURL : string
+    * leaseID : string
+    * preferredCluster : string
+    * lastObservedAt : timestamptz
+    * lastRenewedAt : timestamptz
+  }
+  entity "lease_controller_config" as lease_controller_config {
+    ' D: tools/mgmt-plane-lock/internal/config/config.go:22
+    * cluster_name : string <<PK>>
+    --
+    * lease_blob_url : string
+    status_namespace : string
+    status_configmap : string
+    metrics_addr : string
+    lease_duration_seconds : int 15..60
+    renew_interval_seconds : int
+    preferred_metadata_key : string
+  }
+  entity "controller_workload" as controller_workload {
+    ' D: tools/mgmt-plane-lock/internal/scaling/scaling.go:25
+    * namespace : string <<PK>>
+    * name : string <<PK>>
+    --
+    * kind : Deployment|StatefulSet
+    * active_replicas : int
+    * standby_replicas : int (0)
+    optional : bool
+  }
+}
+
+package "Invariant gates — F-003" {
+  entity "checkov_baseline_finding" as checkov_baseline_finding {
+    ' D: .checkov.baseline:6
+    * rationale : string
+    * owner : string
+    * expiry : date
+  }
+  entity "tool_version_pin" as tool_version_pin {
+    ' D: .tool-versions:11
+    * tool : string <<PK>>
+    --
+    * version : string
+    note : string
+  }
+}
+
+package "Secret lifecycle — F-004" {
+  entity "akv_secret_entry" as akv_secret_entry {
+    ' D: terraform/locals.tf:41 · terraform/locals.tf:67
+    * name : string <<PK>>
+    --
+    * mode : terraform_managed|referenced_only
+    * vault : string
+    * description : string
+    * consumed_by : string[]
+  }
+  entity "akv_secret_version" as akv_secret_version {
+    ' D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:65
+    * name : string <<PK>>
+    --
+    * updated_at : timestamptz
+    * enabled : bool
+  }
+  entity "secret_write" as secret_write {
+    ' D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:76
+    * name : string <<PK>>
+    --
+    * strategy : Overwrite|RecoverIfSoftDeleted
+    outcome : written|Err*
+  }
+}
+
+' relationships:
+service_request ||--o{ gitops_manifest_file : renders
+service_request ||--o{ gitops_pull_request : "proposes (exactly two)"
+service_request ||--|| seed_result : reports
+gitops_pull_request ||--o{ gitops_manifest_file : "carries, partitioned by tier"
+slo_profile ||--o{ service_request : "classifies by slo_class"
+rollout_profile ||--o{ service_request : "classifies by slo_class"
+cluster_entry ||--o{ gitops_manifest_file : "supplies region and vault identity"
+cluster_entry ||--o| mgmt_leader_status : "catalogued role vs observed status"
+lease_controller_config ||--|| mgmt_leader_status : produces
+mgmt_leader_status ||--o{ controller_workload : "decides replica count of"
+akv_secret_entry ||--o{ akv_secret_version : "has versions"
+secret_write ||--o| akv_secret_version : "creates"
+
+@enduml

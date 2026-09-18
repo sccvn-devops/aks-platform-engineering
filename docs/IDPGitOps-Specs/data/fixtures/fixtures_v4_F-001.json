@@ -1,0 +1,103 @@
+{
+  "$comment": "Fixture set for v4 F-001, derived from the repository's own test data and committed catalogues rather than invented. Request keys and service names come from tools/service_seed/tests/test_service_template.py:34 and tools/service_seed/tests/test_jira_intake.py:150; cluster entries are the committed production rows from gitops/clusters/registry.yaml:96; profile records are the committed values from tools/service_seed/profiles/. Fixed literals only, no clock reads, no credential anywhere.",
+  "service_request": [
+    {
+      "issue_key": "IDP-42",
+      "issue_type": "IDP Service Request",
+      "service_name": "Orders",
+      "service_slug": "orders",
+      "slo_class": "silver",
+      "summary": "Orders",
+      "description": "Service Name: Orders"
+    },
+    {
+      "issue_key": "IDP-43",
+      "issue_type": "IDP Service Request",
+      "service_name": "Payments",
+      "service_slug": "payments",
+      "slo_class": "gold",
+      "summary": "Payments",
+      "description": "Service Name: Payments\nSLO Class: gold"
+    },
+    {
+      "issue_key": "IDP-44",
+      "issue_type": "IDP Service Request",
+      "service_name": "Cart",
+      "service_slug": "cart",
+      "slo_class": "bronze",
+      "summary": "Cart",
+      "description": "Service Name: Cart\nSLO Class: bronze"
+    }
+  ],
+  "slo_profile": [
+    { "slo_class": "gold", "has_analysis_template": true, "include_p99_metric": true, "analysis_interval": "60s", "success_rate_threshold": 0.99, "p99_latency_ms_threshold": 500 },
+    { "slo_class": "silver", "has_analysis_template": true, "include_p99_metric": false, "analysis_interval": "60s", "success_rate_threshold": 0.99 },
+    { "slo_class": "bronze", "has_analysis_template": false }
+  ],
+  "rollout_profile": [
+    { "slo_class": "gold", "steps": ["setWeight: 5", "pause: {duration: 5m}", "setWeight: 25", "pause: {duration: 5m}", "setWeight: 50", "pause: {duration: 5m}", "setWeight: 100"] },
+    { "slo_class": "silver", "steps": ["setWeight: 25", "pause: {duration: 5m}", "setWeight: 100"] },
+    { "slo_class": "bronze", "steps": ["setWeight: 100"] }
+  ],
+  "cluster_entry": [
+    {
+      "name": "aks-prod-we",
+      "subscription_id": "00000000-0000-0000-0000-000000000000",
+      "region": "westeurope",
+      "region_abbrev": "we",
+      "resource_group": "rg-platform-prod",
+      "acr_hostname": "acrcityossharedwe.azurecr.io",
+      "aks_name": "aks-prod-we",
+      "mgmt_role": "workload",
+      "azs": ["1", "2", "3"],
+      "sku_tier": "Premium",
+      "gitops_addons": { "enable_argocd": "false", "enable_kyverno": "true", "enable_external_secrets": "true" }
+    },
+    {
+      "name": "aks-prod-ne",
+      "subscription_id": "00000000-0000-0000-0000-000000000000",
+      "region": "northeurope",
+      "region_abbrev": "ne",
+      "resource_group": "rg-platform-prod",
+      "acr_hostname": "acrcityossharedwe.azurecr.io",
+      "aks_name": "aks-prod-ne",
+      "mgmt_role": "workload",
+      "azs": ["1", "2", "3"],
+      "sku_tier": "Premium",
+      "gitops_addons": { "enable_argocd": "false", "enable_kyverno": "true", "enable_external_secrets": "true" }
+    }
+  ],
+  "gitops_manifest_file": [
+    { "service_slug": "orders", "path": "apps/orders/infra/base/xrc-sql.yaml", "tier": "infra", "scope": "base" },
+    { "service_slug": "orders", "path": "apps/orders/infra/base/xrc-namespace-binding.yaml", "tier": "infra", "scope": "base" },
+    { "service_slug": "orders", "path": "apps/orders/infra/overlays/prod/kustomization.yaml", "tier": "infra", "scope": "overlay", "env": "prod" },
+    { "service_slug": "orders", "path": "apps/orders/workload/base/analysis-template.yaml", "tier": "workload", "scope": "base" },
+    { "service_slug": "orders", "path": "apps/orders/workload/overlays/dev/rollout.yaml", "tier": "workload", "scope": "overlay", "env": "dev" },
+    { "service_slug": "orders", "path": "apps/orders/workload/overlays/prod/rollout.yaml", "tier": "workload", "scope": "overlay", "env": "prod" }
+  ],
+  "gitops_pull_request": [
+    {
+      "repo_slug": "platform-gitops",
+      "title": "[Seed] Add orders infra scaffolding",
+      "description": "Seeded from Jira IDP-42 (silver SLO).",
+      "source_branch": "seed/orders-infra-idp-42",
+      "destination_branch": "main",
+      "close_source_branch": true,
+      "path_root": "apps",
+      "tier": "infra"
+    },
+    {
+      "repo_slug": "platform-gitops",
+      "title": "[Seed] Add orders workload scaffolding",
+      "description": "Seeded from Jira IDP-42 (silver SLO).",
+      "source_branch": "seed/orders-workload-idp-42",
+      "destination_branch": "main",
+      "close_source_branch": true,
+      "path_root": "apps",
+      "tier": "workload"
+    }
+  ],
+  "seed_result": [
+    { "service": "orders", "issueKey": "IDP-42", "sloClass": "silver" }
+  ]
+}

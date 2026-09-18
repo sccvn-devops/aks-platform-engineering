@@ -1,0 +1,12 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "IDPGitOps — F-002 Management plane arbitration events",
+    "version": "v4",
+    "description": "Empty. Both controllers are poll loops: the lease runner ticks on a fixed interval [D: tools/mgmt-plane-lock/internal/bloblease/runner.go:78] and the scaling runner reconciles from the cluster-local status object [D: tools/mgmt-plane-lock/internal/scaling/runner.go:113]. No broker client, topic literal or subscription appears in either package, so there is no asynchronous contract to describe.",
+    "x-derived-from": ["tools/mgmt-plane-lock/internal/bloblease/runner.go:74", "tools/mgmt-plane-lock/internal/scaling/runner.go:39"]
+  },
+  "channels": {},
+  "operations": {},
+  "components": { "schemas": {} }
+}

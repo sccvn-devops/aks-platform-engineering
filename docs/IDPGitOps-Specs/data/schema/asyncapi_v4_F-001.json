@@ -1,0 +1,12 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "IDPGitOps — F-001 Service onboarding pipeline events",
+    "version": "v4",
+    "description": "Empty, and that is a finding rather than an omission: the survey recorded one event literal in the whole repository and it belongs to a Key Vault alert topic, not to this feature. No broker client, no publish call and no subscription appears in the onboarding modules. The pipeline's only asynchronous coupling is git itself — a merged change set is reconciled later by the GitOps engine — and a repository state change is not a message this feature emits.",
+    "x-derived-from": ["tools/service_seed/cli.py:340", "tools/service_seed/gitops_pr.py:1"]
+  },
+  "channels": {},
+  "operations": {},
+  "components": { "schemas": {} }
+}

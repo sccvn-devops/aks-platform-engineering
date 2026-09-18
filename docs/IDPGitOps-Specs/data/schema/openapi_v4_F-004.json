@@ -1,0 +1,24 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "IDPGitOps — F-004 Secret and token lifecycle",
+    "version": "v4",
+    "description": "Client contract. This feature serves nothing; it calls Azure Key Vault through one client [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:81] and two SaaS token endpoints through the shared transport seam [D: tools/mgmt-plane-lock/cmd/saas-token-rotator/minters.go:20]. Vendor payloads are named, not redefined. Shapes are $ref'd from schemas.json.",
+    "x-derived-from": ["tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:76", "tools/mgmt-plane-lock/internal/rotation/rotation.go:110"]
+  },
+  "paths": {},
+  "components": {
+    "x-outbound-operations": {
+      "putSecret": { "at": "tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:76", "note": "One write path; strategy decides soft-delete behaviour." },
+      "getSecret": { "at": "tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:77", "note": "Returns the projection modelled as akv_secret_version." },
+      "disableOldVersions": { "at": "tools/mgmt-plane-lock/internal/rotation/rotation.go:146", "note": "Post-rotation cleanup; failures are logged, not fatal." },
+      "mintBitbucketToken": { "at": "tools/mgmt-plane-lock/cmd/saas-token-rotator/minters.go:20", "note": "Outbound to the source host." },
+      "mintJiraToken": { "at": "tools/mgmt-plane-lock/cmd/saas-token-rotator/minters.go:57", "note": "Outbound to the issue tracker." }
+    },
+    "schemas": {
+      "AkvSecretEntry": { "$ref": "schemas.json#/$defs/akv_secret_entry" },
+      "AkvSecretVersion": { "$ref": "schemas.json#/$defs/akv_secret_version" },
+      "SecretWrite": { "$ref": "schemas.json#/$defs/secret_write" }
+    }
+  }
+}

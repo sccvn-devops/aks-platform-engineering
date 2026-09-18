@@ -1,0 +1,12 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "IDPGitOps — F-004 Secret and token lifecycle events",
+    "version": "v4",
+    "description": "Empty as a message contract. The one event-shaped thing in the whole survey belongs here in spirit — an Event Grid topic type on the Key Vault alert resources [D: terraform/akv_alerts.tf:47] — but it is infrastructure configuration consumed by Azure Monitor, not a channel this code publishes to or subscribes from. Recorded here so the absence is a stated fact.",
+    "x-derived-from": ["terraform/akv_alerts.tf:47"]
+  },
+  "channels": {},
+  "operations": {},
+  "components": { "schemas": {} }
+}

@@ -1,0 +1,34 @@
+{
+  "$comment": "Fixture set for v4 F-004, derived from the committed Terraform catalogues at terraform/locals.tf:41 and terraform/locals.tf:67 and from the write path's typed outcomes at tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:58. Secret names only — no value field appears in any record, and the schema gives a value nowhere to live in akv_secret_version.",
+  "akv_secret_entry": [
+    {
+      "name": "backstage-postgres-password",
+      "mode": "terraform_managed",
+      "vault": "management_ci",
+      "description": "Backstage Postgres admin password, written to the management vault for projection into the cluster.",
+      "consumed_by": ["helm_release.backstage"]
+    },
+    {
+      "name": "bitbucket-workspace-token",
+      "mode": "referenced_only",
+      "vault": "management_ci",
+      "description": "Source-host workspace token, rotated quarterly by the rotator and projected to CI.",
+      "consumed_by": ["jenkins (via ESO)"]
+    },
+    {
+      "name": "jira-service-account-token",
+      "mode": "referenced_only",
+      "vault": "management_ci",
+      "description": "Issue-tracker service-account token, rotated quarterly and consumed by CI and the drift bridge.",
+      "consumed_by": ["jenkins (via ESO)", "argocd-jira-bridge (via ESO)"]
+    }
+  ],
+  "akv_secret_version": [
+    { "name": "bitbucket-workspace-token", "updated_at": "2026-01-01T00:00:00Z", "enabled": true },
+    { "name": "bitbucket-workspace-token", "updated_at": "2025-10-03T00:00:00Z", "enabled": false }
+  ],
+  "secret_write": [
+    { "name": "bitbucket-workspace-token", "strategy": "RecoverIfSoftDeleted", "outcome": "written" },
+    { "name": "backstage-github-token", "strategy": "Overwrite", "outcome": "ErrSoftDeletedSecretExists" }
+  ]
+}
