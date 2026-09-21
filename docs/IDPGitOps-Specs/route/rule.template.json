@@ -13,7 +13,9 @@
     "architecture": [
       "docs/IDPGitOps-Specs/architect/architect_common.md",
       "docs/IDPGitOps-Specs/status-model.md",
-      "docs/IDPGitOps-Specs/architect/feature_{{VERSION}}_{{FEATURE_ID}}_architect.md"
+      "docs/IDPGitOps-Specs/architect/feature_{{VERSION}}_{{FEATURE_ID}}_architect_diagram/feature_{{VERSION}}_{{FEATURE_ID}}_front-matter.yaml",
+      "docs/IDPGitOps-Specs/architect/feature_{{VERSION}}_{{FEATURE_ID}}_architect.md",
+      "docs/IDPGitOps-Specs/architect/feature_{{VERSION}}_{{FEATURE_ID}}_architect_diagram/feature_{{VERSION}}_{{FEATURE_ID}}_sequence.puml"
     ],
     "data": [
       "docs/IDPGitOps-Specs/data/data-master-erd.md",

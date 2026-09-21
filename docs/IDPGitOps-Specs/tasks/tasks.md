@@ -16,7 +16,7 @@ updated: 2026-09-18
 | v4 | F-001 Service onboarding pipeline | [tasks_v4_F-001.md](tasks_v4_F-001.md) | 11 | — |
 | v4 | F-002 Management plane arbitration | [tasks_v4_F-002.md](tasks_v4_F-002.md) | 11 | — |
 | v4 | F-003 Platform invariant gates | [tasks_v4_F-003.md](tasks_v4_F-003.md) | 11 | — |
-| v4 | F-004 Secret and token lifecycle | [tasks_v4_F-004.md](tasks_v4_F-004.md) | 8 | — |
+| v4 | F-004 Secret and token lifecycle | [tasks_v4_F-004.md](tasks_v4_F-004.md) | 10 | — |
 
 Roll-up is printed, not transcribed:
 

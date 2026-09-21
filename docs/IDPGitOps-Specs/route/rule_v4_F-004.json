@@ -11,22 +11,20 @@
       "docs/IDPGitOps-Specs/PRDs/prd.md",
       "docs/IDPGitOps-Specs/PRDs/prd_v4_F-004-secret-and-token-lifecycle.md"
     ],
-    "adrs": [
-      "docs/IDPGitOps-Specs/ADRs/adrs_ADR-0001-record-architecture-decisions.md",
-      "_docs/IDP-GitOps-ADRs-v2.md"
-    ],
+    "adrs": [],
     "architecture": [
       "docs/IDPGitOps-Specs/architect/architect_common.md",
       "docs/IDPGitOps-Specs/status-model.md",
+      "docs/IDPGitOps-Specs/architect/feature_v4_F-004_architect_diagram/feature_v4_F-004_front-matter.yaml",
       "docs/IDPGitOps-Specs/architect/feature_v4_F-004_architect.md",
-      "docs/IDPGitOps-Specs/architect/architect.md"
+      "docs/IDPGitOps-Specs/architect/feature_v4_F-004_architect_diagram/feature_v4_F-004_sequence.puml"
     ],
     "data": [
       "docs/IDPGitOps-Specs/data/data-master-erd.md",
+      "docs/IDPGitOps-Specs/data/schema/schemas.json",
       "docs/IDPGitOps-Specs/data/data-erd_v4_F-004.md",
       "docs/IDPGitOps-Specs/data/api-contract_v4_F-004.md",
       "docs/IDPGitOps-Specs/data/data-fixtures_v4_F-004.md",
-      "docs/IDPGitOps-Specs/data/schema/schemas.json",
       "docs/IDPGitOps-Specs/data/schema/erd_v4_F-004.puml",
       "docs/IDPGitOps-Specs/data/schema/openapi_v4_F-004.json",
       "docs/IDPGitOps-Specs/data/schema/asyncapi_v4_F-004.json",
@@ -39,14 +37,31 @@
       "docs/IDPGitOps-Specs/tests/testing_strategy.md",
       "docs/IDPGitOps-Specs/tests/test_v4_F-004.md"
     ],
-    "runbooks": [
-      "docs/IDPGitOps-Specs/runbook/runbook_DEV_RB-001-local-setup.md",
-      "docs/akv-near-expiry-runbook.md"
-    ]
+    "runbooks": []
   },
   "writes": {
-    "code": [],
-    "tests": []
+    "code": [
+      "tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go",
+      "tools/mgmt-plane-lock/cmd/saas-token-rotator/minters.go",
+      "tools/mgmt-plane-lock/cmd/saas-token-rotator/wiring.go",
+      "tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go",
+      "tools/mgmt-plane-lock/internal/rotation/rotation.go",
+      "tools/mgmt-plane-lock/internal/httpx/httpx.go",
+      "scripts/validate-akv-catalogue.py",
+      "scripts/validate-akv-null-expiry.py",
+      "terraform/keyvaults.tf",
+      "terraform/locals.tf",
+      "terraform/akv_alerts.tf",
+      "terraform/akv_sync_exporter.tf",
+      "gitops/platform/saas-token-rotator/",
+      "gitops/platform/akv-sync-exporter/"
+    ],
+    "tests": [
+      "tools/mgmt-plane-lock/internal/akvwriter/akvwriter_test.go",
+      "tools/mgmt-plane-lock/internal/akvwriter/fake_test.go",
+      "tools/mgmt-plane-lock/internal/httpx/httpx_test.go",
+      "tools/mgmt-plane-lock/internal/rotation/rotation_test.go"
+    ]
   },
   "guardrails": [
     "Do not invent requirements: if a document is silent, stop and ask.",

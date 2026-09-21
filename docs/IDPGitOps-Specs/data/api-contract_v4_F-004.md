@@ -3,7 +3,7 @@ title: API Contract v4 F-004 — Secret and token lifecycle
 id: F-004
 status: draft
 owner: Platform Engineering
-updated: 2026-09-18
+updated: 2026-09-21
 ---
 
 # API Contract v4 F-004 — Secret and token lifecycle
@@ -28,7 +28,7 @@ catalogue that declares which secrets exist and who writes them
 | Mint source-host token | Obtain a new SaaS credential | SaaS credentials | [D: tools/mgmt-plane-lock/cmd/saas-token-rotator/minters.go:20] |
 | Mint tracker token | Obtain a new SaaS credential | SaaS credentials | [D: tools/mgmt-plane-lock/cmd/saas-token-rotator/minters.go:57] |
 
-Every outbound HTTP call goes through the shared transport seam, which retries 5xx
+Every outbound HTTP call goes through the shared transport seam — 30 s per attempt, 3 retries, 200 ms backoff doubling to a 5 s cap — which retries 5xx
 and does not retry 4xx [D: tools/mgmt-plane-lock/internal/httpx/httpx_test.go:55]
 [D: tools/mgmt-plane-lock/internal/httpx/httpx_test.go:81].
 
@@ -79,6 +79,6 @@ old versions is logged and not fatal
 
 ## Open questions
 
-- OPEN: Rotation writes the west vault and then the north vault [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:128]; a failure between the two leaves the pair inconsistent, and nothing in the code repairs it. The skew alert exists in Terraform [D: terraform/akv_sync_exporter.tf:1] — is operator repair the intended answer?
-- OPEN: What grace period is configured in production, and why? The field exists [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:71] with no value in the tree.
-- OPEN: Who holds the SaaS credentials that mint new tokens, and how are those rotated?
+- RESOLVED 2026-09-21: The pair is eventually consistent, not atomic. A failure between the two writes aborts the run, and the scheduled job's on-failure retry re-mints and rewrites both [D: gitops/platform/saas-token-rotator/templates/cronjobs.yaml:23]. The skew alert [D: gitops/platform/akv-sync-exporter/templates/prometheus-rule.yaml:18] covers the case where the retry budget is exhausted; operator repair is the fallback, not the design. See DOM-004-R3.
+- RESOLVED 2026-09-20: The grace period is 24 hours — `gracePeriodHours: 24` [D: gitops/platform/saas-token-rotator/values.yaml:16] rendered into both CronJobs' `--grace-period-hours` argument [D: gitops/platform/saas-token-rotator/templates/cronjobs.yaml:28]; the binary's flag default is the same [D: tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go:23].
+- OPEN: How are the rotator's own minting credentials rotated? They are the Kubernetes Secrets `saas-rotator-bitbucket-creds` and `saas-rotator-jira-creds` [D: gitops/platform/saas-token-rotator/templates/cronjobs.yaml:36], neither of which is in the vault catalogue.

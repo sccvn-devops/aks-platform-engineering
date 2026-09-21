@@ -6,7 +6,7 @@ feature: F-004
 version: v4
 status: draft
 owner: Platform Engineering
-updated: 2026-09-18
+updated: 2026-09-20
 ---
 
 # PRD v4 F-004 — Secret and token lifecycle
@@ -35,8 +35,12 @@ I: every platform secret is declared in one catalogue, written through one path,
 
 **F-004-US4** — a write succeeds [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter_test.go:69]; auth failures are typed [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter_test.go:93]; a soft-deleted target is refused by default [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter_test.go:113] and recovered on request [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter_test.go:137]; a 5xx is redacted [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter_test.go:190].
 
-OPEN: F-004-US1 and F-004-US5 have no test; both are enforced by Terraform and a
-validator whose run conditions are not visible from the tree.
+OPEN: F-004-US1 and F-004-US5 have no `-TC` case. Both are now evidenced by a
+validator that runs in CI — `akv-catalogue` and `akv-null-expiry`
+[D: .github/workflows/terraform-ci.yml:214] [D: .github/workflows/terraform-ci.yml:192] —
+so the run conditions are visible after all. What is still open is that the expiry
+job runs advisory, so US5's guarantee holds today by inspection rather than by a
+gate that would stop a regression.
 
 ## Implementation status
 
@@ -46,7 +50,7 @@ validator whose run conditions are not visible from the tree.
 | F-004-US2 | done — go test ./... in tools/mgmt-plane-lock, every package ok here 2026-09-18 | F-004-TC7, TC8, TC9, TC10 · F-004-T4, T5 | — |
 | F-004-US3 | done — go test ./... in tools/mgmt-plane-lock, every package ok here 2026-09-18 | F-004-TC6, TC11, TC12 · F-004-T2, T4 | — |
 | F-004-US4 | done — go test ./... in tools/mgmt-plane-lock, every package ok here 2026-09-18 | F-004-TC1, TC2, TC3, TC4, TC5 · F-004-T1, T3 | — |
-| F-004-US5 | wip — advisory-mode validator passes here; a blocking-mode run was not performed | F-004-T7 | — |
+| F-004-US5 | done — NULL_EXPIRY_MODE=block python3 scripts/validate-akv-null-expiry.py exits 0 here 2026-09-20 — 14 secrets scanned, every non-allowlisted one declares expiration_date | F-004-T7 | — |
 
 ## Scope boundaries
 
@@ -66,14 +70,19 @@ validator whose run conditions are not visible from the tree.
 
 ## Metrics
 
-Two signals exist: secret age after rotation
-[D: tools/mgmt-plane-lock/internal/rotation/rotation.go:157] and dual-write skew
-[D: terraform/akv_sync_exporter.tf:1]. OPEN: neither is stated as a target — no
-threshold for acceptable age or skew appears in the repository outside the alert
-definitions.
+Two signals exist, and both now carry a committed threshold:
+
+| Signal | Threshold | Alert | Evidence |
+| --- | --- | --- | --- |
+| Secret age after rotation | 100 days | `SaaSTokenAgeExceeded`, for 5m | [D: gitops/platform/saas-token-rotator/values.yaml:37] |
+| Dual-write skew between the regional vaults | 600 s | `PerRegionAKVDualWriteSkew`, for 5m | [D: gitops/platform/akv-sync-exporter/values.yaml:36] |
+
+OPEN: the two numbers are alert thresholds someone chose, not targets anyone
+agreed. 100 days against a 90-day rotation leaves a 10-day margin; nothing states
+whether that is the intent.
 
 ## Open questions
 
-- OPEN: What rotation interval is actually configured, and where? The 90-day boundary governs expiry [D: terraform/keyvaults.tf:59]; the rotator's schedule is not in this repository.
+- RESOLVED 2026-09-20: The rotation interval is quarterly — `schedule: "0 3 1 */3 *"`, 03:00 on the first of every third month [D: gitops/platform/saas-token-rotator/values.yaml:13], rendered into one CronJob per token type with `concurrencyPolicy: Forbid` [D: gitops/platform/saas-token-rotator/templates/cronjobs.yaml:12]. It matches the 90-day expiry boundary [D: terraform/keyvaults.tf:59].
 - OPEN: What is the business consequence of a leaked SaaS token, and does it justify a shorter interval?
 - OPEN: Who is accountable for a secret whose consumer has been decommissioned? The catalogue records consumers but nothing prunes.

@@ -1,0 +1,252 @@
+# feature_v4_F-004_front-matter.yaml — instant architectural context for a coding agent.
+# Pointers and names only. Every shape is defined once, in data/; restating one here
+# creates a second source of truth that drifts silently. Unknown -> an `open:` entry.
+
+# --- identity: the same contract every hub document carries -------------------
+id: "F-004"
+feature: "F-004"
+version: "v4"
+kind: front-matter
+title: "Secret and token lifecycle"
+status: ready            # draft | ready | accepted | superseded
+owner: Platform Engineering
+updated: "2026-09-21"
+
+# --- activation: what an agent decides from the first ten lines ---------------
+description: Every platform secret is declared in one catalogue, written through one path, carries an expiry, and — where it is a SaaS credential — is minted and replaced on a schedule by the active management cluster only.
+globs:                   # the file surface this feature owns; a path outside it is scope creep
+  - tools/mgmt-plane-lock/internal/akvwriter/**
+  - tools/mgmt-plane-lock/internal/rotation/**
+  - tools/mgmt-plane-lock/internal/httpx/**
+  - tools/mgmt-plane-lock/cmd/saas-token-rotator/**
+  - terraform/keyvaults.tf
+  - terraform/locals.tf
+  - terraform/akv_alerts.tf
+  - terraform/akv_sync_exporter.tf
+  - scripts/validate-akv-null-expiry.py
+  - scripts/validate-akv-catalogue.py
+
+# --- the cast: identical to the participants of the sequence diagram ----------
+participants:
+  - name: Security reviewer
+    role: actor
+    path: external
+  - name: Terraform root
+    role: service
+    path: terraform/keyvaults.tf
+  - name: saas-token-rotator
+    role: entrypoint
+    path: tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go
+  - name: akvwriter
+    role: service
+    path: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go
+  - name: AKV expiry validator
+    role: service
+    path: scripts/validate-akv-null-expiry.py
+  - name: Metrics endpoint
+    role: entrypoint
+    path: tools/mgmt-plane-lock/internal/bootstrap/bootstrap.go
+  - name: SaaS token API
+    role: external
+    path: external
+  - name: Secret catalogue
+    role: store
+    path: terraform/locals.tf
+  - name: Key Vault West Europe
+    role: external
+    path: external
+  - name: Key Vault North Europe
+    role: external
+    path: external
+  - name: mgmt-leader-status ConfigMap
+    role: store
+    path: tools/mgmt-plane-lock/internal/kube/status.go
+
+# --- where execution starts ---------------------------------------------------
+entrypoints:
+  - kind: job
+    path: tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go
+    symbol: main
+  - kind: cli
+    path: scripts/validate-akv-null-expiry.py
+    symbol: main
+  - kind: cli
+    path: scripts/validate-akv-catalogue.py
+    symbol: main
+  - kind: job
+    path: terraform/keyvaults.tf
+    symbol: platform secret resources with a computed expiration date
+
+# --- contracts: named here, shaped in data/ -----------------------------------
+contracts:
+  endpoints:             # -> data/schema/openapi_v4_F-004.json; outbound operations only, nothing served
+    - "Put secret"
+    - "Get secret"
+    - "Disable old versions"
+    - "Mint source-host token"
+    - "Mint tracker token"
+  events: []             # none as a message contract; the Key Vault alert topic is consumed by Azure Monitor, not by this code
+  entities:              # $defs names in data/schema/schemas.json
+    - akv_secret_entry
+    - akv_secret_version
+    - secret_write
+
+depends_on:
+  internal:
+    - tools/mgmt-plane-lock/internal/httpx/httpx.go
+    - tools/mgmt-plane-lock/internal/kube/status.go
+    - tools/mgmt-plane-lock/internal/bootstrap/bootstrap.go
+  external:
+    - "Go 1.24.0"
+    - "Azure Key Vault, two regional vaults — hard"
+    - "Azure Workload Identity for the vault token — hard"
+    - "F-002 arbitration — hard; rotation runs only where the cluster is active"
+    - "SaaS APIs for minting — hard"
+    - "Terraform 1.5.7 for the catalogue and the expiry boundary"
+
+# --- the decision `requirement` made ------------------------------------------
+approach:
+  chosen: One catalogue split by write ownership, one Put/Get write path every caller programs against, and rotation as a small state machine whose first act after validation is a leadership check.
+  because: >-
+    Efficiency — a single client with a shared transport seam means timeouts, retries
+    and redaction are configured once rather than per caller, and the expiry is computed
+    in infrastructure from a quarterly boundary instead of being tracked at runtime.
+    Robustness — four typed sentinels let callers branch on cause rather than on message
+    text, the default write refuses to revive a soft-deleted secret, and no secret value
+    can reach an error because bodies are redacted by default.
+    Resilience — 5xx is retried three times with exponential backoff while 4xx is not,
+    the grace period between publishing and disabling is interruptible within a second,
+    and a failed disable is logged rather than fatal. What it does not buy is atomicity
+    across the regional pair, which is declared as a failure mode.
+  rejected:
+    - "A per-caller vault client — rejected so there is exactly one write path and one place where redaction and retry policy live."
+    - "Reviving a soft-deleted secret by default — rejected; recovery is an explicit strategy the caller opts into."
+    - "Deleting superseded versions — rejected in favour of disabling them, so a rollback is possible."
+    - "Rotating from any management cluster — rejected; the leadership gate is the only coupling between this feature and arbitration."
+    - "An atomic dual-vault write — rejected, and confirmed as the intent on 2026-09-21: Key Vault offers no cross-vault transaction, and the scheduled job's on-failure retry already converges the pair. DOM-004-R3 states eventual consistency rather than atomicity."
+  # Bare decision identifiers are deliberately not written here: the platform decision
+  # record lives outside this hub, so an identifier in a routed document cannot resolve.
+  adr: "_docs/IDP-GitOps-ADRs-v2.md — the secrets-operator-with-a-per-region-vault-pair and per-namespace-identity decisions. The rotation state machine, the grace period and the disable-rather-than-delete choice have no recorded decision at all."
+
+# --- what must not break ------------------------------------------------------
+invariants:
+  - DOM-004-R1
+  - DOM-004-R2
+  - DOM-004-R3
+  - DOM-004-R4
+  - DOM-004-R5
+  - DOM-004-R6
+  - DOM-004-R7
+  - DOM-004-R8
+  - DOM-004-R9
+  - DOM-004-R10
+  - DOM-004-R11
+
+failure_modes:
+  - when: this cluster is not the active management cluster
+    expect: return the skipped-not-active sentinel, log it and exit 0; nothing is minted and no vault is written
+  - when: minting the new credential fails
+    expect: abort the run naming the token type; neither vault is written
+  - when: the West Europe vault write fails
+    expect: abort before the second write, leaving the pair unchanged
+  - when: the North Europe vault write fails after the West Europe write succeeded
+    expect: abort with the regional pair inconsistent, then converge on the scheduled job's on-failure retry, which mints a fresh credential and rewrites both vaults; the skew alert covers an exhausted retry budget
+  - when: the process is cancelled during the grace period
+    expect: the interruptible sleep returns the context error within a second, leaving superseded versions enabled
+  - when: disabling superseded versions fails
+    expect: log it and continue; the run still succeeds with the new version live
+  - when: the destination secret is soft-deleted and the strategy is the default
+    expect: return the soft-deleted sentinel without reviving anything
+  - when: the vault refuses the credential with a 401 or 403
+    expect: return the auth-failed sentinel, carrying no secret value and no response body
+  - when: the vault returns a 5xx
+    expect: retry up to three times with exponential backoff, then return a redacted error
+  - when: a platform-managed secret carries no expiry
+    expect: NULL_EXPIRY_MODE=advisory reports and exits 0; NULL_EXPIRY_MODE=block exits non-zero. CI runs it in advisory mode today.
+
+resilience:              # numbers, not adjectives; every one is testable
+  timeout_ms: 30000      # per outbound attempt, set in the shared transport seam
+  retry: "3 attempts, 5xx only, base backoff 200 ms doubling to a 5000 ms cap; no 4xx is retried"
+  idempotency: "the secret name plus the vault's own versioning — a repeated Put adds a version rather than colliding, and disabling is by definition repeatable. A retried run mints a new credential rather than replaying the old one, which is what converges a divergent pair."
+  degraded: "a standby cluster skips the run and exits 0; a failed disable is logged and not fatal; a write that fails between the two vaults leaves a real skew that only the exporter notices (alert above 600 s) until the on-failure retry converges it, and the grace period keeps the superseded version usable for 86400000 ms — 24 h, as deployed"
+
+observability:
+  logs:
+    - "not the active management cluster, skipping rotation"
+    - "wrote rotated token to both regional vaults"
+    - "disable old versions"
+    - "disabled old versions after grace period"
+  metrics:
+    - "saas_token_age_days — alert SaaSTokenAgeExceeded above 100 days"
+    - "akv_dual_write_skew_seconds — alert PerRegionAKVDualWriteSkew above 600 s"
+    - "near-expiry: Event Grid SecretNearExpiry and CertificateNearExpiry, 30 days ahead, not a metric"
+  traces: []             # none
+
+non_goals:
+  - Projecting secrets into clusters — that is the secrets operator's job, referenced by the catalogue.
+  - Access control — role assignments live in infrastructure, not here.
+  - Certificate issuance — certificate material is referenced, not minted.
+  - Repairing a skewed vault pair — the skew is exported, not corrected.
+  - Modelling a secret value anywhere in this hub.
+  - Owning the whole of terraform/locals.tf — only the two secret catalogue maps in it belong to this feature.
+
+# --- traceability: both directions must be walkable ---------------------------
+traceability:
+  stories:
+    - F-004-US1
+    - F-004-US2
+    - F-004-US3
+    - F-004-US4
+    - F-004-US5
+  rules:
+    - DOM-004-R1
+    - DOM-004-R2
+    - DOM-004-R3
+    - DOM-004-R4
+    - DOM-004-R5
+    - DOM-004-R6
+    - DOM-004-R7
+    - DOM-004-R8
+    - DOM-004-R9
+    - DOM-004-R10
+    - DOM-004-R11
+  tasks:
+    - F-004-T1
+    - F-004-T2
+    - F-004-T3
+    - F-004-T4
+    - F-004-T5
+    - F-004-T6
+    - F-004-T7
+    - F-004-T8
+    - F-004-T9
+    - F-004-T10
+  tests:
+    - F-004-TC1
+    - F-004-TC2
+    - F-004-TC3
+    - F-004-TC4
+    - F-004-TC5
+    - F-004-TC6
+    - F-004-TC7
+    - F-004-TC8
+    - F-004-TC9
+    - F-004-TC10
+    - F-004-TC11
+    - F-004-TC12
+    - F-004-TC13
+    - F-004-TC14
+    - F-004-TC15
+  route: docs/IDPGitOps-Specs/route/route_v4_F-004.md
+
+open:
+  - "How are the rotator's own minting credentials rotated? They are the Kubernetes Secrets saas-rotator-bitbucket-creds and saas-rotator-jira-creds, neither of which is in the vault catalogue."
+  - "The two alert thresholds (100 days age, 600 s skew) are numbers someone chose, not targets anyone agreed; 100 days against a 90-day rotation leaves a 10-day margin and nothing states whether that is the intent. Nothing records rotation outcomes over time — the age gauge is a level, not a history."
+  - "Disabling superseded versions sits behind a type assertion on the store; a store that does not satisfy the disabler interface is skipped silently, with no log, and DOM-004-R8 would then not hold with nothing saying so. Production wires the real client, which does satisfy it."
+  - "DOM-004-R7 holds today, verified with NULL_EXPIRY_MODE=block, but CI runs the validator in advisory mode, so a future secret can land without an expiry and only warn. When is the cutover to block?"
+  - "F-004-US1 and F-004-US5 have no test; both are enforced by Terraform and a validator whose run conditions are not visible from the tree."
+  - "DOM-004-R2 is enforced by convention and a comment; nothing states whether the catalogue validator runs on every change."
+  - "Who is accountable for a secret whose consumer has been decommissioned? The catalogue records consumers but nothing prunes."
+  - "tools/mgmt-plane-lock/internal/httpx is inside this feature's surface but is also imported by the drift bridge, which has no feature document and no route; a change made here reaches a binary nobody has specified."
+  - "The metrics bootstrap package is claimed by F-002 and read by this feature. Both design pairs name a Metrics endpoint participant pointing at the same file; only F-002 owns it, so a change here belongs in F-002."
+  - "The platform decision record lives at _docs/IDP-GitOps-ADRs-v2.md, outside this hub, so the decision identifiers this feature rests on cannot resolve through the route — the hub's decision directory holds only its own first record. Should each cited platform decision get a stub in the hub?"

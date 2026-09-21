@@ -6,7 +6,7 @@ feature: F-004
 version: v4
 status: draft
 owner: Platform Engineering
-updated: 2026-09-18
+updated: 2026-09-21
 ---
 
 # Feature Architecture v4 F-004 — Secret and token lifecycle
@@ -42,8 +42,8 @@ Rotation run [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:110]:
 3. Mint a new credential [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:120].
 4. Write it to the west vault with the recovering strategy [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:128].
 5. Write the same value to the north vault [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:131].
-6. Sleep out the grace period, interruptibly [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:140].
-7. Disable superseded versions [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:146].
+6. Sleep out the grace period, interruptibly — 24 h as deployed [D: gitops/platform/saas-token-rotator/values.yaml:16].
+7. Disable superseded versions in **both** regional vaults, each behind a type assertion for the disabler interface [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:146].
 8. Report the resulting secret age [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:157].
 
 Write path [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:76]: attempt
@@ -58,7 +58,7 @@ and retry [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:16].
 | Not the active cluster | Leadership check | Run exits without minting | [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:115] |
 | Mint fails | Error from the minter | Run aborts; no vault write | [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:121] |
 | West vault write fails | Error from the store | Run aborts before the second write | [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:128] |
-| North vault write fails | Error from the store | Run aborts with the pair inconsistent | [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:131] |
+| North vault write fails | Error from the store | Run aborts with the pair inconsistent; the scheduled job's on-failure retry re-mints and rewrites both, so the divergence is bounded by the retry budget rather than permanent | [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:131] [D: gitops/platform/saas-token-rotator/templates/cronjobs.yaml:23] |
 | Shutdown during the grace period | Interruptible sleep | Returns within a second | [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:140] |
 | Disabling old versions fails | Error from the disabler | Logged, not fatal | [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:146] |
 | Secret soft-deleted, default strategy | Conflict then probe | Typed error, no revival | [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:50] |
@@ -70,12 +70,18 @@ and retry [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:16].
 
 | Signal | Where | Evidence |
 | --- | --- | --- |
-| Secret age after rotation | Gauge, reported by the runner | [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:157] |
-| Dual-write skew between the regional vaults | Exporter deployed on the active cluster | [D: terraform/akv_sync_exporter.tf:1] |
-| Near-expiry alerting | Key Vault alert resources | [D: terraform/akv_alerts.tf:47] |
+| Signal | Name | Alert and threshold | Evidence |
+| --- | --- | --- | --- |
+| Secret age after rotation | `saas_token_age_days` | `SaaSTokenAgeExceeded` above 100 days, for 5m, 3600s interval | [D: gitops/platform/saas-token-rotator/templates/prometheus-rule.yaml:19] |
+| Dual-write skew between the regional vaults | `akv_dual_write_skew_seconds` | `PerRegionAKVDualWriteSkew` above 600 s, for 5m, 60s interval | [D: gitops/platform/akv-sync-exporter/templates/prometheus-rule.yaml:17] |
+| Near-expiry | Event Grid, not a metric | `SecretNearExpiry` / `CertificateNearExpiry`, 30 days ahead | [D: terraform/akv_alerts.tf:63] |
+
+The skew exporter is a Python script mounted from a ConfigMap, not a Go binary
+[D: gitops/platform/akv-sync-exporter/templates/configmap.yaml:11].
 
 - OPEN: Nothing records rotation outcomes over time; the age gauge is a level, not a history.
-- OPEN: The skew exporter publishes a metric [D: terraform/akv_sync_exporter.tf:1]; nothing in the code repairs a skew it detects.
+- OPEN: The skew exporter publishes a metric [D: gitops/platform/akv-sync-exporter/templates/configmap.yaml:60] and alerts above 600 s; nothing in the code repairs a skew it detects.
+- OPEN: Disabling superseded versions is behind a type assertion on the store [D: tools/mgmt-plane-lock/internal/rotation/rotation.go:147]. A store that does not satisfy the disabler interface is skipped silently, with no log — DOM-004-R8 would then not hold, and nothing would say so. Production wires `*akvwriter.Client`, which does satisfy it [D: tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go:317].
 
 ## Traceability
 

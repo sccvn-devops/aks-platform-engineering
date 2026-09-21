@@ -1,0 +1,164 @@
+@startuml feature_v4_F-001_sequence
+' Runtime truth for F-001 v4 — Service onboarding pipeline
+' The cast below is the `participants:` list of feature_v4_F-001_front-matter.yaml, name for name.
+' One group per story; one group per failure mode the front matter declares.
+title F-001 v4 — Service onboarding pipeline
+autonumber
+
+actor "Requester" as Requester
+participant "service-seed CLI" as CLI
+participant "jira_intake" as Intake
+participant "service_template" as Template
+participant "gitops_pr" as GitOps
+participant "Issue tracker" as Tracker
+participant "Source host" as SourceHost
+database "Cluster registry" as Registry
+database "Tier profiles" as Profiles
+
+group F-001-US1 — one tracker request is read once into one agreed description
+  Requester -> CLI : seed-from-jira --jira-issue-key {issueKey}
+  CLI -> CLI : read the two credential variables from the environment by name
+  CLI -> Tracker : GET rest/api/3/issue/{issueKey}
+  Tracker --> CLI : tracker-native issue
+  CLI -> Intake : parse_service_request(issue, overrides)
+  Intake -> Intake : __post_init__ checks issue type, issue key, service name, slug, SLO class
+  Intake --> CLI : frozen service_request
+end
+
+group F-001-US2 — an unusable request is refused immediately, naming the field
+  CLI -> Intake : parse_service_request(issue, overrides)
+  Intake --> CLI : JiraIntakeError carrying the offending field
+  CLI --> Requester : error: invalid Jira intake (field=...), exit 2, nothing created
+end
+
+group F-001-US3 — the service repository is created and seeded from the standard template
+  CLI -> GitOps : create_repository(service_slug, project_key)
+  GitOps -> SourceHost : POST 2.0/repositories/{workspace}/{repoSlug}
+  SourceHost --> GitOps : repository
+  CLI -> GitOps : create_service_repository(template_dir, service_request, repo_url)
+  GitOps -> Template : render_cookiecutter_template(template_dir, service_request)
+  Template -> Template : _safe_join rejects any rendered path outside the destination before the first mkdir
+  Template --> GitOps : gitops_manifest_file set
+  GitOps -> SourceHost : commit as PlatformBot and push the first commit
+  SourceHost --> GitOps : pushed
+end
+
+group F-001-US6 — the availability tier alone fixes release strictness
+  CLI -> Template : build_gitops_files(service_request)
+  Template -> Profiles : read slo_profile and rollout_profile for the request's SLO class
+  Profiles --> Template : slo_profile, rollout_profile
+  Template -> Registry : look up cluster_entry for each target cluster
+  Registry --> Template : cluster_entry
+  Template --> CLI : gitops_manifest_file set for dev, staging and prod, in that order
+end
+
+group F-001-US4 — the infrastructure a service needs is proposed as its own reviewable change
+  CLI -> CLI : partition the rendered set on the apps/{slug}/infra/ path segment
+  CLI -> GitOps : stage_gitops_pr(branch seed/{slug}-infra-{issuekey}, infra gitops_manifest_file set)
+  GitOps -> SourceHost : shallow clone, branch, remove the existing subtree for the slug, write, commit with the CI-skip marker, push
+  GitOps -> SourceHost : POST 2.0/repositories/{workspace}/{repoSlug}/pullrequests
+  SourceHost --> GitOps : gitops_pull_request
+  GitOps --> CLI : gitops_pull_request
+end
+
+group F-001-US5 — the runtime declarations are proposed separately, covering every environment
+  CLI -> CLI : partition the rendered set on the apps/{slug}/workload/ path segment
+  CLI -> GitOps : stage_gitops_pr(branch seed/{slug}-workload-{issuekey}, workload gitops_manifest_file set for dev, staging and prod)
+  GitOps -> SourceHost : POST 2.0/repositories/{workspace}/{repoSlug}/pullrequests
+  SourceHost --> GitOps : gitops_pull_request
+  GitOps --> CLI : gitops_pull_request
+  CLI --> Requester : seed_result on stdout, exit 0
+end
+
+group F-001-US7 — see what a request would produce, and which cluster identity it would use, without touching anything
+  Requester -> CLI : generate-gitops --service-name --slo-class --output-dir
+  CLI -> Template : build_gitops_files(service_request)
+  Template -> Profiles : slo_profile, rollout_profile
+  Template -> Registry : cluster_entry
+  Template --> CLI : gitops_manifest_file set written to the local output directory
+  CLI --> Requester : exit 0, no tracker call and no source-host call
+  Requester -> CLI : registry-show [name] or registry-paths
+  CLI -> Registry : read the committed catalogue
+  Registry --> CLI : cluster_entry records
+  CLI --> Requester : cluster_entry records as JSON, or the catalogue path, exit 0
+end
+
+== Failure modes ==
+
+group failure — a credential variable is absent
+  CLI -> CLI : os.environ lookup by the configured variable name
+  CLI --> Requester : error: environment variable {name} is not set, exit 2 before any network call
+end
+
+group failure — the issue type, key, name, slug or SLO class is unusable
+  Intake --> CLI : JiraIntakeError carrying .field
+  CLI --> Requester : exit 2 naming the field; no repository and no change set exist
+end
+
+group failure — the tracker is slow or unreachable
+  CLI -> Tracker : GET rest/api/3/issue/{issueKey}
+  Tracker --> CLI : no response within the 30 s urlopen bound
+  CLI --> Requester : urlopen raises; the run stops with no partial state
+end
+
+group failure — the source host returns a 4xx that is not a repository conflict
+  GitOps -> SourceHost : POST 2.0/repositories/{workspace}/{repoSlug}
+  SourceHost --> GitOps : HTTPError
+  GitOps --> CLI : RuntimeError naming method, path, status and body, never a credential
+end
+
+group failure — the repository already exists
+  GitOps -> SourceHost : POST 2.0/repositories/{workspace}/{repoSlug}
+  SourceHost --> GitOps : 400 carrying the repository-exists flag
+  GitOps --> CLI : treated as success; the run continues to the template push
+end
+
+group failure — a rendered template path escapes the destination
+  Template -> Template : _safe_join on every rendered path
+  Template --> GitOps : raises with zero filesystem effect, before any mkdir or write
+end
+
+group failure — a template variable is undefined
+  Template -> Template : Jinja2 StrictUndefined
+  Template --> GitOps : raises at render; no gitops_manifest_file is produced
+end
+
+group failure — a tier profile is missing an SLO class
+  Profiles --> Template : slo_profile or rollout_profile without one of bronze, silver, gold
+  Template --> CLI : the module refuses to import, naming the missing classes
+end
+
+group failure — the requested cluster is not in the catalogue
+  Template -> Registry : look up cluster_entry
+  Registry --> Template : no such entry
+  Template --> Requester : error: cluster not in registry, listing the known names, exit 2
+end
+
+group failure — a git subprocess hangs
+  GitOps -> SourceHost : git clone, commit or push
+  SourceHost --> GitOps : no response within the 300 s subprocess bound
+  GitOps --> CLI : subprocess.TimeoutExpired raises
+end
+
+group failure — the cookiecutter binary is absent
+  GitOps -> Template : render_cookiecutter_template
+  Template -> Template : FileNotFoundError, fall back to the pure-Python renderer
+  Template --> GitOps : gitops_manifest_file set, path safety still enforced
+end
+
+group failure — the run fails after the repository has been created
+  CLI -> GitOps : a later step raises
+  GitOps --> Requester : no compensating delete exists; the repository and any pushed commit remain, and re-running is the only recovery
+end
+
+note over CLI, GitOps
+  invariants: DOM-001-R1, DOM-001-R2, DOM-001-R3, DOM-001-R4, DOM-001-R5, DOM-001-R6,
+  DOM-001-R7, DOM-001-R8, DOM-001-R9, DOM-001-R10, DOM-001-R11, DOM-001-R12
+  timeout 30000 ms per HTTP call, 300000 ms per git subprocess
+  retry: none — a transient tracker or source-host failure fails the run
+  idempotency: repository-exists tolerated; branch name seed/{slug}-{tier}-{issuekey};
+  a re-seed replaces the service subtree rather than merging into it
+  degraded: none — the run is not atomic across the tracker, the source host and the two change sets
+end note
+
+@enduml

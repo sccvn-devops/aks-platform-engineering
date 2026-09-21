@@ -1,0 +1,256 @@
+# feature_v4_F-002_front-matter.yaml — instant architectural context for a coding agent.
+# Pointers and names only. Every shape is defined once, in data/; restating one here
+# creates a second source of truth that drifts silently. Unknown -> an `open:` entry.
+
+# --- identity: the same contract every hub document carries -------------------
+id: "F-002"
+feature: "F-002"
+version: "v4"
+kind: front-matter
+title: "Management plane arbitration"
+status: ready            # draft | ready | accepted | superseded
+owner: Platform Engineering
+updated: "2026-09-20"
+
+# --- activation: what an agent decides from the first ten lines ---------------
+description: Exactly one management cluster reconciles at a time, decided by a renewable Azure Storage blob lease rather than by configuration, with every governed platform controller following the leadership status that cluster publishes.
+globs:                   # the file surface this feature owns; a path outside it is scope creep
+  - tools/mgmt-plane-lock/internal/bloblease/**
+  - tools/mgmt-plane-lock/internal/scaling/**
+  - tools/mgmt-plane-lock/internal/kube/**
+  - tools/mgmt-plane-lock/internal/config/**
+  - tools/mgmt-plane-lock/internal/bootstrap/**
+  - tools/mgmt-plane-lock/cmd/mgmt-leader-lease/**
+  - tools/mgmt-plane-lock/cmd/controller-scaler/**
+  - tools/mgmt-plane-lock/cmd/mgmt-cli/**
+  - gitops/platform/mgmt-plane-lock/**
+
+# --- the cast: identical to the participants of the sequence diagram ----------
+participants:
+  - name: Operator
+    role: actor
+    path: external
+  - name: Metrics scraper
+    role: actor
+    path: external
+  - name: mgmt-leader-lease
+    role: service
+    path: tools/mgmt-plane-lock/internal/bloblease/runner.go
+  - name: controller-scaler
+    role: service
+    path: tools/mgmt-plane-lock/internal/scaling/runner.go
+  - name: mgmt-cli
+    role: entrypoint
+    path: tools/mgmt-plane-lock/cmd/mgmt-cli/main.go
+  - name: Metrics endpoint
+    role: entrypoint
+    path: tools/mgmt-plane-lock/internal/bootstrap/bootstrap.go
+  - name: Lease blob
+    role: external
+    path: external
+  - name: mgmt-leader-status ConfigMap
+    role: store
+    path: tools/mgmt-plane-lock/internal/kube/status.go
+  - name: Governed workloads
+    role: store
+    path: tools/mgmt-plane-lock/internal/scaling/scaling.go
+  - name: ArgoCD cluster Secret
+    role: store
+    path: tools/mgmt-plane-lock/internal/scaling/scaling.go
+
+# --- where execution starts ---------------------------------------------------
+entrypoints:
+  - kind: job
+    path: tools/mgmt-plane-lock/cmd/mgmt-leader-lease/main.go
+    symbol: main
+  - kind: job
+    path: tools/mgmt-plane-lock/cmd/controller-scaler/main.go
+    symbol: main
+  - kind: cli
+    path: tools/mgmt-plane-lock/cmd/mgmt-cli/main.go
+    symbol: main
+  - kind: http
+    path: tools/mgmt-plane-lock/internal/bootstrap/bootstrap.go
+    symbol: ServeMetrics
+
+# --- contracts: named here, shaped in data/ -----------------------------------
+contracts:
+  endpoints:             # -> data/schema/openapi_v4_F-002.json
+    - "GET metrics"
+    - "Acquire"
+    - "Renew"
+    - "Release"
+    - "Break"
+    - "Read preferred cluster"
+    - "Set preferred cluster"
+    - "mgmt-cli failback"
+    - "mgmt-cli break-lease"
+  events: []             # none: both controllers poll; data/schema/asyncapi_v4_F-002.json is empty
+  entities:              # $defs names in data/schema/schemas.json
+    - lease_controller_config
+    - mgmt_leader_status
+    - controller_workload
+    - cluster_entry
+
+depends_on:
+  internal:
+    # none inside tools/mgmt-plane-lock: these packages do not use the shared
+    # transport seam — the lease goes through the Azure SDK and the rest through client-go.
+    - gitops/clusters/registry.yaml
+  external:
+    - "Go 1.24.0"
+    - "Azure Storage blob lease — hard, it is the arbiter"
+    - "Kubernetes API in each management cluster — hard, the status object and the replica patches"
+    - "ArgoCD cluster Secret — soft, labelled with the lease status"
+    - "Prometheus client — the renewal gauge"
+
+# --- the decision `requirement` made ------------------------------------------
+approach:
+  chosen: Activeness is a renewable external lease, not a stored flag, and the two controllers are decoupled through a cluster-local ConfigMap rather than a shared process.
+  because: >-
+    Efficiency — one blob and two poll loops, no consensus protocol and no extra
+    control-plane dependency; a tick is one metadata read plus at most one lease call.
+    Robustness — leader state is set only from a successful acquire and dropped on any
+    renew failure, so a cluster cannot believe it is active while the arbiter disagrees,
+    and a status value that is neither active nor standby scales nothing up.
+    Resilience — possession expires on its own if the holder dies, the status object
+    stays readable in-cluster while the arbiter is unreachable, and a planned restart
+    drains the lease on a fresh context so the successor does not wait out the term.
+  rejected:
+    - "A stored activeness flag or operator belief — rejected because nothing would expire it when the holder dies."
+    - "Three-cluster arbitration — the design is one blob and one holder; a third cluster is out of scope."
+    - "Coupling the two loops in one process — rejected in favour of the ConfigMap seam, so the scaler keeps reconciling from the last published status."
+    - "A promotion endpoint — no handler, flag or API sets leadership; the only way to become active is a successful acquire."
+  # Bare decision identifiers are deliberately not written here: the platform decision
+  # record lives outside this hub, so an identifier in a routed document cannot resolve.
+  adr: "_docs/IDP-GitOps-ADRs-v2.md — the management-plane singleton lock (Azure Storage blob lease) and the standby-runs-controllers-at-zero decision"
+
+# --- what must not break ------------------------------------------------------
+invariants:
+  - DOM-002-R1
+  - DOM-002-R2
+  - DOM-002-R3
+  - DOM-002-R4
+  - DOM-002-R5
+  - DOM-002-R6
+  - DOM-002-R7
+  - DOM-002-R8
+  - DOM-002-R9
+  - DOM-002-R10
+  - DOM-002-R11
+  - DOM-002-R12
+
+failure_modes:
+  - when: another cluster already holds the lease when this one tries to acquire
+    expect: publish standby and return from the tick without an error
+  - when: a renew is refused because the lease conflicts or no longer exists
+    expect: clear leader state and publish standby, surfacing no error
+  - when: a renew fails for any other reason
+    expect: clear leader state and return the error to the tick, which logs it and retries next tick
+  - when: the leadership status is missing or holds a value other than active or standby
+    expect: the read errors and nothing is scaled up
+  - when: a governed workload is absent from the cluster
+    expect: an entry marked optional is skipped and the cycle continues; a required one fails the cycle
+  - when: the ArgoCD cluster Secret is not found by the cluster name
+    expect: fall back to the cluster-type and cluster-name label selector, then error if the list is empty
+  - when: the lease manager or the Kubernetes client is nil when Run is called
+    expect: return ErrMissingDependency before the first tick
+  - when: a duration variable is unparseable or non-positive
+    expect: the loader silently substitutes the default (60 s term, 15 s renew, 5 s poll) and the range check then passes, so the process starts on values the operator did not set
+  - when: every governed workload is already at the implied replica count
+    expect: issue no patch and report the cycle successful
+
+resilience:              # numbers, not adjectives; every one is testable
+  timeout_ms: 5000       # the shutdown drain context; lease and Kubernetes calls inherit the tick context
+  retry: "none — the next tick is the retry; the lease loop ticks every 5000 ms and the scaler polls every 5000 ms by default"
+  idempotency: "the blob lease ID — Acquire is exclusive, a conflict is not an error, and Release on a lease this cluster does not hold is a no-op"
+  degraded: "the mgmt_leader_status ConfigMap stays readable in-cluster while the arbiter is unreachable; a status that cannot be read or is unrecognised scales nothing up, so the failure mode is a frozen control plane rather than two active ones"
+
+observability:
+  logs:
+    - "lease transitions, through the injectable logger"
+    - "scaling decisions, through the injectable logger"
+    - "initial reconcile failed"
+    - "reconcile failed"
+    - "release lease during shutdown"
+    - "write standby status during shutdown"
+  metrics:
+    - mgmt_leader_lease_renewed_seconds
+  traces: []             # none: no tracing appears anywhere in the tree
+
+non_goals:
+  - Touching tenant workloads — only the declared platform controllers are patched.
+  - Data replication or write placement — these packages touch no datastore.
+  - Provisioning the arbiter — the blob URL is configuration.
+  - Three-cluster arbitration — one blob, one holder.
+  - Drift reporting — that is a separate binary.
+  - Measuring handover time — no metric records how long a promotion took.
+
+# --- traceability: both directions must be walkable ---------------------------
+traceability:
+  stories:
+    - F-002-US1
+    - F-002-US2
+    - F-002-US3
+    - F-002-US4
+    - F-002-US5
+    - F-002-US6
+    - F-002-US7
+  rules:
+    - DOM-002-R1
+    - DOM-002-R2
+    - DOM-002-R3
+    - DOM-002-R4
+    - DOM-002-R5
+    - DOM-002-R6
+    - DOM-002-R7
+    - DOM-002-R8
+    - DOM-002-R9
+    - DOM-002-R10
+    - DOM-002-R11
+    - DOM-002-R12
+  tasks:
+    - F-002-T1
+    - F-002-T2
+    - F-002-T3
+    - F-002-T4
+    - F-002-T5
+    - F-002-T6
+    - F-002-T7
+    - F-002-T8
+    - F-002-T9
+    - F-002-T10
+    - F-002-T11
+  tests:
+    - F-002-TC1
+    - F-002-TC2
+    - F-002-TC3
+    - F-002-TC4
+    - F-002-TC5
+    - F-002-TC6
+    - F-002-TC7
+    - F-002-TC8
+    - F-002-TC9
+    - F-002-TC10
+    - F-002-TC11
+    - F-002-TC12
+    - F-002-TC13
+    - F-002-TC14
+    - F-002-TC15
+    - F-002-TC16
+    - F-002-TC17
+    - F-002-TC18
+    - F-002-TC19
+    - F-002-TC20
+  route: docs/IDPGitOps-Specs/route/route_v4_F-002.md
+
+open:
+  - "Is the single-replica, 5 s-tick shape of both controllers a deliberate self-healing choice or simply what was built? Nothing records it."
+  - "The 120-second recovery objective quoted in docs/architect.md is unobserved — no metric records handover duration. Commitment or estimate?"
+  - "Nothing exports whether the two clusters disagree; a split would be visible only by reading both status objects. Is a split-brain detector wanted?"
+  - "The metrics route is served with no authentication in code; is it expected to be reachable only from inside the cluster, and is that enforced by a NetworkPolicy anywhere?"
+  - "Which consumer reads the lease-status label on the ArgoCD cluster Secret, and is it load-bearing or informational?"
+  - "Who is allowed to run mgmt-cli failback or break-lease, and is its use audited?"
+  - "Is a frozen control plane, with neither cluster active, acceptable indefinitely, and after how long should it page?"
+  - "tools/mgmt-plane-lock/internal/bootstrap is inside this feature's surface but is also used by the rotator (F-004) and by the drift bridge, which has no feature document; a change here reaches both."
+  - "The platform decision record lives at _docs/IDP-GitOps-ADRs-v2.md, outside this hub, so the decision identifiers this feature rests on cannot resolve through the route — the hub's decision directory holds only its own first record. Should each cited platform decision get a stub in the hub?"

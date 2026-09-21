@@ -1,0 +1,253 @@
+# feature_v4_F-003_front-matter.yaml — instant architectural context for a coding agent.
+# Pointers and names only. Every shape is defined once, in data/; restating one here
+# creates a second source of truth that drifts silently. Unknown -> an `open:` entry.
+
+# --- identity: the same contract every hub document carries -------------------
+id: "F-003"
+feature: "F-003"
+version: "v4"
+kind: front-matter
+title: "Platform invariant gates"
+status: ready            # draft | ready | accepted | superseded
+owner: Platform Engineering
+updated: "2026-09-20"
+
+# --- activation: what an agent decides from the first ten lines ---------------
+description: Repository-wide platform invariants are enforced by small independent validators that run before a commit and again on a pull request, plus Terraform preconditions that fail the plan, so a violation is a failing check rather than a review comment.
+globs:                   # the file surface this feature owns; a path outside it is scope creep
+  - scripts/validate-*.py
+  - scripts/validate-*.sh
+  - scripts/truncate-plan-output.py
+  - scripts/tests/**
+  - terraform/invariants.tf
+
+# --- the cast: identical to the participants of the sequence diagram ----------
+participants:
+  - name: Contributor
+    role: actor
+    path: external
+  - name: pre-commit
+    role: external
+    path: external
+  - name: GitHub Actions
+    role: external
+    path: .github/workflows/
+  - name: Repository validators
+    role: service
+    path: scripts/
+  - name: Terraform preconditions
+    role: service
+    path: terraform/invariants.tf
+  - name: Checkov baseline
+    role: store
+    path: .checkov.baseline
+  - name: Toolchain versions
+    role: store
+    path: .tool-versions
+  - name: Workflow files
+    role: store
+    path: .github/workflows/
+  - name: Cluster registry
+    role: store
+    path: gitops/clusters/registry.yaml
+
+# --- where execution starts ---------------------------------------------------
+entrypoints:
+  - kind: cli
+    path: scripts/validate-checkov-baseline.py
+    symbol: main
+  - kind: cli
+    path: scripts/validate-checkov-suppressions.py
+    symbol: main
+  - kind: cli
+    path: scripts/validate-tool-version-singleton.py
+    symbol: scan
+  - kind: cli
+    path: scripts/validate-action-pins.py
+    symbol: main
+  - kind: cli
+    path: scripts/validate-cluster-registry.py
+    symbol: main
+  - kind: cli
+    path: scripts/validate-helm-release-secrets.py
+    symbol: main
+  - kind: cli
+    path: scripts/validate-workflow-call-contract.py
+    symbol: main
+  - kind: cli
+    path: scripts/validate-akv-null-expiry.py
+    symbol: main
+  - kind: cli
+    path: scripts/truncate-plan-output.py
+    symbol: main
+  - kind: cli
+    path: scripts/validate-mgmt-plane-lock-runners.sh
+    symbol: script body
+  - kind: cli
+    path: scripts/validate-state-partitioning.sh
+    symbol: script body
+  - kind: cli
+    path: scripts/validate-blob-lease-locking.sh
+    symbol: script body
+  - kind: job
+    path: terraform/invariants.tf
+    symbol: terraform_data preconditions
+
+# --- contracts: named here, shaped in data/ -----------------------------------
+contracts:
+  endpoints:             # commands with an exit-code contract; data/schema/openapi_v4_F-003.json has empty paths, stated
+    - "python3 scripts/validate-cluster-registry.py"
+    - "python3 scripts/validate-tool-version-singleton.py"
+    - "python3 scripts/validate-action-pins.py"
+    - "python3 scripts/validate-checkov-baseline.py"
+    - "python3 scripts/validate-checkov-suppressions.py"
+    - "python3 scripts/validate-helm-release-secrets.py"
+    - "python3 scripts/validate-workflow-call-contract.py"
+    - "python3 scripts/validate-akv-null-expiry.py"
+    - "python3 scripts/truncate-plan-output.py"
+    - "bash scripts/validate-mgmt-plane-lock-runners.sh"
+    - "bash scripts/validate-state-partitioning.sh"
+    - "bash scripts/validate-blob-lease-locking.sh"
+    - "Terraform preconditions"
+  events: []             # none: every validator is a synchronous process; asyncapi_v4_F-003.json is empty
+  entities:              # $defs names in data/schema/schemas.json
+    - checkov_baseline_finding
+    - tool_version_pin
+    - cluster_entry
+
+depends_on:
+  internal:
+    - tools/service_seed/cli.py
+    - gitops/clusters/registry.schema.json
+  external:
+    - "pre-commit — local execution"
+    - "GitHub Actions — pull-request execution"
+    - "Terraform 1.5.7, tflint 0.55.0, checkov 3.2.345, pinned in .tool-versions"
+    - "Python >= 3.10"
+
+# --- the decision `requirement` made ------------------------------------------
+approach:
+  chosen: One standalone process per invariant over the committed repository text, wired into pre-commit individually and sharing no library, with the cross-variable Terraform invariants expressed as plan-time preconditions instead.
+  because: >-
+    Efficiency — a validator reads only what is committed, so it runs in milliseconds
+    on a laptop and needs no cluster, no credential and no provider call.
+    Robustness — each gate is independent, so one failing check cannot mask another,
+    and a validator reuses the loader of the code it guards so the two cannot disagree
+    about what is parseable.
+    Resilience — there is deliberately none to buy: a gate blocks rather than degrades,
+    and the one variable behaviour, the expiry check's advisory-or-blocking mode, is
+    called out as an open question rather than treated as a feature.
+  rejected:
+    - "A policy framework or shared validator library — rejected in the tree; eleven scripts share no code, which keeps each gate independently runnable at the cost of duplication."
+    - "Admission-time enforcement — that is Kyverno's job, not this feature's; these gates never see a live cluster."
+    - "Heuristic secret detection — rejected for a curated sensitive-attribute list, because a false negative here is expensive."
+  adr: none              # no ADR records the gate design; the rule each validator enforces is usually only in a comment beside it
+
+# --- what must not break ------------------------------------------------------
+invariants:
+  - DOM-003-R1
+  - DOM-003-R2
+  - DOM-003-R3
+  - DOM-003-R4
+  - DOM-003-R5
+  - DOM-003-R6
+  - DOM-003-R7
+  - DOM-003-R8
+  - DOM-003-R9
+  - DOM-003-R10
+
+failure_modes:
+  - when: a suppression lacks a rationale, an owner or an expiry
+    expect: non-zero exit naming the entry index and the missing field
+  - when: a toolchain version is declared outside the pin file
+    expect: non-zero exit naming the offending file
+  - when: a workflow action is referenced by tag rather than by a commit SHA with a tag comment
+    expect: a file-and-line annotation and a non-zero exit
+  - when: a cluster catalogue entry does not match the committed schema
+    expect: non-zero exit naming the entry
+  - when: a catalogue key and its cluster name disagree
+    expect: the shared loader raises before any consumer sees the entry
+  - when: a cluster's short region code is not in the canonical map
+    expect: the Terraform precondition fails and the plan aborts with the formatted message
+  - when: a spoke network range equals a hub range
+    expect: the Terraform precondition fails and the plan aborts before any provider work
+  - when: a sensitive value is passed to a chart as a set-value
+    expect: non-zero exit naming the release and the attribute, matched against the curated list with one alias hop
+  - when: a binary entry point exceeds 40 lines or handles signals itself
+    expect: non-zero exit naming the binary
+  - when: a platform-managed secret carries no expiry
+    expect: advisory mode reports and exits 0; blocking mode exits non-zero — the mode comes from an environment variable
+
+resilience:              # numbers, not adjectives; every one is testable
+  timeout_ms: none       # every validator is a local synchronous process over the committed tree; no outbound call
+  retry: none            # a gate is deterministic over its input, so re-running it changes nothing
+  idempotency: "total — the validators read and never write"
+  degraded: "none by design: a gate blocks rather than falls back. The one exception is the expiry check, whose advisory-or-blocking mode is read from NULL_EXPIRY_MODE and is not visible from the script."
+
+observability:
+  logs:
+    - "GitHub Actions annotation with a level, a file and a line, or the same text plain when that environment variable is absent"
+    - "Terraform precondition failure message"
+  metrics: []            # none: nothing counts gate failures, time-to-fix or suppressions past expiry
+  traces: []             # none
+
+non_goals:
+  - Runtime enforcement — every gate runs before or during a pull request, never against a live cluster.
+  - Being a policy engine — admission-time enforcement is Kyverno's.
+  - Secret scanning beyond private keys and the Helm set-value path.
+  - Dependency-update automation — version bumps are operator-driven.
+  - Recording a history of violations — the gates are binary and leave no trace beyond a CI log.
+
+# --- traceability: both directions must be walkable ---------------------------
+traceability:
+  stories:
+    - F-003-US1
+    - F-003-US2
+    - F-003-US3
+    - F-003-US4
+    - F-003-US5
+    - F-003-US6
+    - F-003-US7
+  rules:
+    - DOM-003-R1
+    - DOM-003-R2
+    - DOM-003-R3
+    - DOM-003-R4
+    - DOM-003-R5
+    - DOM-003-R6
+    - DOM-003-R7
+    - DOM-003-R8
+    - DOM-003-R9
+    - DOM-003-R10
+  tasks:
+    - F-003-T1
+    - F-003-T2
+    - F-003-T3
+    - F-003-T4
+    - F-003-T5
+    - F-003-T6
+    - F-003-T7
+    - F-003-T8
+    - F-003-T9
+    - F-003-T10
+    - F-003-T11
+  tests:
+    - F-003-TC1
+    - F-003-TC2
+    - F-003-TC3
+    - F-003-TC4
+    - F-003-TC5
+    - F-003-TC6
+    - F-003-TC7
+    - F-003-TC8
+  route: docs/IDPGitOps-Specs/route/route_v4_F-003.md
+
+open:
+  - "Which validators actually run in CI as opposed to only in pre-commit? The hook list and the workflow steps are maintained separately and nothing enforces parity."
+  - "Are the shell validators run anywhere automatically? Only the runner-shape one appears in the pre-commit hook list."
+  - "F-003-US1, F-003-US2, F-003-US3 and F-003-US6 have no test, so their acceptance criteria are the validator's own behaviour and nothing verifies it."
+  - "DOM-003-R1 is unexercised: the committed baseline holds no suppression to test the rule against."
+  - "DOM-003-R5 and DOM-003-R6 are unverified here — the preconditions are evaluated only during terraform plan."
+  - "Which mode does CI run the expiry check in? The advisory-or-blocking switch is an environment variable and the answer is not in the tree."
+  - "Nothing records how often a gate fires, so the gates' value cannot be measured, and no incident or defect record connects a gate to a prevented failure."
+  - "Who owns a failing gate that blocks an unrelated change — the contributor or the platform team? And is there an agreed policy for adding a suppression beyond the three metadata fields?"

@@ -1,0 +1,145 @@
+@startuml feature_v4_F-004_sequence
+' Runtime truth for F-004 v4 — Secret and token lifecycle
+' The cast below is the `participants:` list of feature_v4_F-004_front-matter.yaml, name for name.
+' One group per story; one group per failure mode the front matter declares.
+title F-004 v4 — Secret and token lifecycle
+autonumber
+
+actor "Security reviewer" as Reviewer
+participant "Terraform root" as Terraform
+participant "saas-token-rotator" as Rotator
+participant "akvwriter" as Writer
+participant "AKV expiry validator" as ExpiryGate
+participant "Metrics endpoint" as Metrics
+participant "SaaS token API" as Saas
+database "Secret catalogue" as Catalogue
+database "Key Vault West Europe" as VaultWE
+database "Key Vault North Europe" as VaultNE
+database "mgmt-leader-status ConfigMap" as Status
+
+group F-004-US1 — every platform secret is visible, with who writes it
+  Reviewer -> Catalogue : read the two catalogue maps, split by write ownership
+  Catalogue --> Reviewer : akv_secret_entry records, each naming its mode and its consumers
+  Terraform -> VaultWE : create each Terraform-managed secret with its computed expiry
+  Terraform -> VaultNE : create the same secret in the regional pair
+end
+
+group F-004-US2 — SaaS credentials are replaced on a schedule without anyone handling them
+  Rotator -> Rotator : validate TokenType, SecretName, both stores and the minter
+  Rotator -> Status : IsActive
+  Status --> Rotator : leadershipStatus active
+  Rotator -> Saas : mint a new credential
+  Saas --> Rotator : the new token value
+  Rotator -> Writer : Put(secretName, value, RecoverIfSoftDeleted)
+  Writer -> VaultWE : set secret
+  VaultWE --> Writer : secret_write recorded
+  Writer --> Rotator : nil
+  Rotator -> Writer : Put(secretName, value, RecoverIfSoftDeleted)
+  Writer -> VaultNE : set secret
+  VaultNE --> Writer : secret_write recorded
+  Writer --> Rotator : nil
+end
+
+group F-004-US3 — a rotation does not break a consumer mid-flight
+  Rotator -> Rotator : SleepWithContext for the grace period, 24 h by default, interruptible
+  Rotator -> Writer : DisableOldVersions(secretName) on each regional store
+  Writer -> VaultWE : disable every superseded akv_secret_version, deleting none
+  Writer -> VaultNE : disable every superseded akv_secret_version, deleting none
+  Rotator -> Metrics : saas_token_age_days for the rotated secret, read from the West Europe vault
+end
+
+group F-004-US4 — one write path, with predictable failures
+  Rotator -> Writer : every write goes through the SecretStore interface; no caller builds its own request
+  Writer -> VaultWE : set secret through the shared transport seam
+  VaultWE --> Writer : success, or a status the seam maps to one of the four typed sentinels
+  Writer --> Rotator : nil, or ErrSecretNotFound, ErrAuthFailed, ErrConflict or ErrSoftDeletedSecretExists, with the response body redacted
+end
+
+group F-004-US5 — no platform secret sits without an expiry
+  Terraform -> Terraform : compute the expiry from the 90-day rotating quarterly boundary
+  Terraform -> VaultWE : every platform-managed secret carries that expiration date
+  ExpiryGate -> Catalogue : scan the Terraform secret resources for a null expiry
+  Catalogue --> ExpiryGate : every entry carries an expiry
+  ExpiryGate --> Reviewer : exit 0
+end
+
+== Failure modes ==
+
+group failure — this cluster is not the active management cluster
+  Rotator -> Status : IsActive
+  Status --> Rotator : leadershipStatus standby
+  Rotator --> Reviewer : ErrSkippedNotActive, logged and exited 0; nothing is minted and no vault is written
+end
+
+group failure — minting the new credential fails
+  Rotator -> Saas : mint a new credential
+  Saas --> Rotator : error
+  Rotator --> Reviewer : the run aborts naming the token type; neither vault is written
+end
+
+group failure — the West Europe vault write fails
+  Rotator -> Writer : Put(secretName, value, RecoverIfSoftDeleted)
+  Writer -> VaultWE : set secret
+  VaultWE --> Writer : error
+  Writer --> Rotator : typed error; the run aborts before the second write, leaving the pair unchanged
+end
+
+group failure — the North Europe vault write fails after the first succeeded
+  Rotator -> Writer : Put(secretName, value, RecoverIfSoftDeleted)
+  Writer -> VaultNE : set secret
+  VaultNE --> Writer : error
+  Writer --> Rotator : the run aborts with the regional pair inconsistent
+  Rotator -> Rotator : the scheduled job retries on failure, minting a fresh credential and rewriting both vaults
+  Rotator --> Reviewer : eventually consistent, not atomic; the skew alert covers an exhausted retry budget
+end
+
+group failure — the process is cancelled during the grace period
+  Rotator -> Rotator : SleepWithContext observes the cancelled context
+  Rotator --> Reviewer : returns the context error within a second; superseded versions stay enabled
+end
+
+group failure — disabling superseded versions fails
+  Writer -> VaultWE : disable superseded akv_secret_version records
+  VaultWE --> Writer : error
+  Rotator --> Reviewer : logged and not fatal; the run still reports success with the new version live
+end
+
+group failure — the destination secret is soft-deleted and the strategy is the default
+  Writer -> VaultWE : set secret with the Overwrite strategy
+  VaultWE --> Writer : conflict, then the probe finds a deleted-but-recoverable secret
+  Writer --> Rotator : ErrSoftDeletedSecretExists; nothing is revived
+end
+
+group failure — the vault refuses the credential
+  Writer -> VaultWE : set secret
+  VaultWE --> Writer : 401 or 403
+  Writer --> Rotator : ErrAuthFailed, with no secret value and no response body in the error
+end
+
+group failure — the vault returns a server error
+  Writer -> VaultWE : set secret
+  VaultWE --> Writer : 5xx
+  Writer -> VaultWE : up to 3 retries, 200 ms backoff doubling to a 5 s cap, 5xx only
+  Writer --> Rotator : a redacted error once the budget is spent
+end
+
+group failure — a platform-managed secret has no expiry
+  ExpiryGate -> Catalogue : scan for a null expiry
+  Catalogue --> ExpiryGate : an entry without an expiration date
+  ExpiryGate --> Reviewer : NULL_EXPIRY_MODE=advisory reports and exits 0; NULL_EXPIRY_MODE=block exits non-zero. CI runs advisory today.
+end
+
+note over Rotator, Writer
+  invariants: DOM-004-R1, DOM-004-R2, DOM-004-R3, DOM-004-R4, DOM-004-R5, DOM-004-R6,
+  DOM-004-R7, DOM-004-R8, DOM-004-R9, DOM-004-R10, DOM-004-R11
+  timeout 30000 ms per outbound attempt, in the shared transport seam
+  retry: 3 attempts, 5xx only, backoff 200 ms doubling to a 5000 ms cap; no 4xx is retried
+  grace period 86400000 ms by default, interruptible within 1000 ms of shutdown
+  expiry: every platform-managed secret carries the 90-day quarterly boundary
+  idempotency: the secret name plus the vault's own versioning — a repeated Put adds a version
+  degraded: a standby cluster skips the run and exits 0; a failed disable is logged, not fatal;
+  a write that fails between the two vaults leaves a skew bounded by the job's retry budget,
+  alerting above 600000 ms — DOM-004-R3 is eventual consistency, not atomicity
+end note
+
+@enduml

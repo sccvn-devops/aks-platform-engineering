@@ -27,5 +27,38 @@ EXTRA = {
     "tests": ["docs/IDPGitOps-Specs/tests/test_v4_F-004.md"],
 }
 
+# The write surface this feature owns, confirmed against the tree by
+# `product-docs-flow revise` on 2026-09-21. It is set explicitly rather than left
+# to `drift --apply`: this hub's masters (data-master-erd.md, schemas.json,
+# architect_common.md, status-model.md, testing_strategy.md) cite every feature's
+# code, so a mechanical sweep over F-004's route claims F-001, F-002 and F-003
+# files as well — and `writes` is what bounds `implement` and scopes `data`.
+WRITES = {
+    "code": [
+        "tools/mgmt-plane-lock/cmd/saas-token-rotator/main.go",
+        "tools/mgmt-plane-lock/cmd/saas-token-rotator/minters.go",
+        "tools/mgmt-plane-lock/cmd/saas-token-rotator/wiring.go",
+        "tools/mgmt-plane-lock/internal/akvwriter/akvwriter.go",
+        "tools/mgmt-plane-lock/internal/rotation/rotation.go",
+        "tools/mgmt-plane-lock/internal/httpx/httpx.go",
+        "scripts/validate-akv-catalogue.py",
+        "scripts/validate-akv-null-expiry.py",
+        "terraform/keyvaults.tf",
+        "terraform/locals.tf",
+        "terraform/akv_alerts.tf",
+        "terraform/akv_sync_exporter.tf",
+        "gitops/platform/saas-token-rotator/",
+        "gitops/platform/akv-sync-exporter/",
+    ],
+    "tests": [
+        "tools/mgmt-plane-lock/internal/akvwriter/akvwriter_test.go",
+        "tools/mgmt-plane-lock/internal/akvwriter/fake_test.go",
+        "tools/mgmt-plane-lock/internal/httpx/httpx_test.go",
+        "tools/mgmt-plane-lock/internal/rotation/rotation_test.go",
+    ],
+}
+
 if __name__ == "__main__":
-    emit(build(VERSION, FEATURE_ID, FEATURE_TITLE, EXTRA))
+    rule = build(VERSION, FEATURE_ID, FEATURE_TITLE, EXTRA)
+    rule["writes"] = WRITES
+    emit(rule)

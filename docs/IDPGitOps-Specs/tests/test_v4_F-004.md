@@ -6,7 +6,7 @@ feature: F-004
 version: v4
 status: draft
 owner: Platform Engineering
-updated: 2026-09-18
+updated: 2026-09-21
 ---
 
 # Test Plan v4 F-004 — Secret and token lifecycle
@@ -20,11 +20,11 @@ code in the repository; the Terraform side of this feature has no test at all.
 
 | Story | Test cases | Level |
 | --- | --- | --- |
-| F-004-US1 | — (no test) | — |
-| F-004-US2 | F-004-TC7, TC8, TC9, TC10 | unit |
+| F-004-US1 | — (no `-TC` case) | command — `python3 scripts/validate-akv-catalogue.py`, which enforces the catalogue round-trip |
+| F-004-US2 | F-004-TC7, TC8, TC9, TC10, TC15 | unit |
 | F-004-US3 | F-004-TC6, TC11, TC12 | unit |
 | F-004-US4 | F-004-TC1, TC2, TC3, TC4, TC5 | unit |
-| F-004-US5 | — (no test) | — |
+| F-004-US5 | — (no `-TC` case) | command — `NULL_EXPIRY_MODE=block python3 scripts/validate-akv-null-expiry.py`, which is what moved the story to done |
 
 ## Test cases
 
@@ -44,6 +44,7 @@ code in the repository; the Terraform side of this feature has no test at all.
 | F-004-TC12 | A disable failure is logged, not fatal | [D: tools/mgmt-plane-lock/internal/rotation/rotation_test.go:218] |
 | F-004-TC13 | Required runner fields are validated | [D: tools/mgmt-plane-lock/internal/rotation/rotation_test.go:196] |
 | F-004-TC14 | The fake and the real client satisfy one interface | [D: tools/mgmt-plane-lock/internal/akvwriter/fake_test.go:181] |
+| F-004-TC15 | A failure between the two vault writes leaves West Europe new and North Europe old, and a re-run converges them | — (not yet written; carried by F-004-T10) |
 
 ## Implementation status
 
@@ -63,6 +64,7 @@ code in the repository; the Terraform side of this feature has no test at all.
 | F-004-TC12 | done — go test ./... in tools/mgmt-plane-lock, every package ok here 2026-09-18 | — |
 | F-004-TC13 | done — go test ./... in tools/mgmt-plane-lock, every package ok here 2026-09-18 | — |
 | F-004-TC14 | done — go test ./... in tools/mgmt-plane-lock, every package ok here 2026-09-18 | — |
+| F-004-TC15 | todo — raised by `revise` 2026-09-21; no test exists yet | — |
 
 ## Edge and negative cases
 
@@ -82,9 +84,9 @@ code in the repository; the Terraform side of this feature has no test at all.
 - **The Terraform half has no test**: expiry dates, the rotating boundary and the vault topology are asserted nowhere [D: terraform/keyvaults.tf:58].
 - **The minters have no test**: both SaaS token functions are untested [D: tools/mgmt-plane-lock/cmd/saas-token-rotator/minters.go:20].
 - **The skew exporter has no test** [D: terraform/akv_sync_exporter.tf:1].
-- **Nothing tests the inconsistent-pair state** that a mid-rotation failure leaves.
+- ~~Nothing tests the inconsistent-pair state~~ — now planned as F-004-TC15, carried by F-004-T10 (DOM-004-R3 decision, 2026-09-21). Until it lands, the divergent state is still unexercised.
 
 ## Open questions
 
-- OPEN: The minters call live SaaS APIs; is there a contract test or a recorded interaction anywhere outside this repository?
+- OPEN: The minters call live SaaS APIs; is there a contract test or a recorded interaction anywhere outside this repository? F-004-T9 raises one inside it.
 - OPEN: What proves, on a running platform, that no secret value has ever been logged? The unit test covers the transport seam only.

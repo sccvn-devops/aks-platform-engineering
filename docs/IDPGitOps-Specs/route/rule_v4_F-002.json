@@ -18,7 +18,9 @@
     "architecture": [
       "docs/IDPGitOps-Specs/architect/architect_common.md",
       "docs/IDPGitOps-Specs/status-model.md",
+      "docs/IDPGitOps-Specs/architect/feature_v4_F-002_architect_diagram/feature_v4_F-002_front-matter.yaml",
       "docs/IDPGitOps-Specs/architect/feature_v4_F-002_architect.md",
+      "docs/IDPGitOps-Specs/architect/feature_v4_F-002_architect_diagram/feature_v4_F-002_sequence.puml",
       "docs/IDPGitOps-Specs/architect/architect.md"
     ],
     "data": [

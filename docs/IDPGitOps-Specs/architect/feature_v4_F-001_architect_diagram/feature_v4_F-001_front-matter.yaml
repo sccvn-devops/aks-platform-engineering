@@ -1,0 +1,251 @@
+# feature_v4_F-001_front-matter.yaml — instant architectural context for a coding agent.
+# Pointers and names only. Every shape is defined once, in data/; restating one here
+# creates a second source of truth that drifts silently. Unknown -> an `open:` entry.
+
+# --- identity: the same contract every hub document carries -------------------
+id: "F-001"
+feature: "F-001"
+version: "v4"
+kind: front-matter
+title: "Service onboarding pipeline"
+status: ready            # draft | ready | accepted | superseded
+owner: Platform Engineering
+updated: "2026-09-20"
+
+# --- activation: what an agent decides from the first ten lines ---------------
+description: One tracker request becomes a seeded service repository plus two disjoint reviewable change sets covering dev, staging and prod, with the availability tier alone deciding release strictness and the platform merging nothing.
+globs:                   # the file surface this feature owns; a path outside it is scope creep
+  - tools/service_seed/**
+
+# --- the cast: identical to the participants of the sequence diagram ----------
+participants:
+  - name: Requester
+    role: actor
+    path: external
+  - name: service-seed CLI
+    role: entrypoint
+    path: tools/service_seed/cli.py
+  - name: jira_intake
+    role: service
+    path: tools/service_seed/jira_intake.py
+  - name: service_template
+    role: service
+    path: tools/service_seed/service_template.py
+  - name: gitops_pr
+    role: service
+    path: tools/service_seed/gitops_pr.py
+  - name: Issue tracker
+    role: external
+    path: external
+  - name: Source host
+    role: external
+    path: external
+  - name: Cluster registry
+    role: store
+    path: gitops/clusters/registry.yaml
+  - name: Tier profiles
+    role: store
+    path: tools/service_seed/profiles/
+
+# --- where execution starts ---------------------------------------------------
+entrypoints:
+  - kind: cli
+    path: tools/service_seed/cli.py
+    symbol: _cmd_seed_from_jira
+  - kind: cli
+    path: tools/service_seed/cli.py
+    symbol: _cmd_generate_gitops
+  - kind: cli
+    path: tools/service_seed/cli.py
+    symbol: _cmd_registry_show
+  - kind: cli
+    path: tools/service_seed/cli.py
+    symbol: _cmd_registry_paths
+
+# --- contracts: named here, shaped in data/ -----------------------------------
+contracts:
+  endpoints:             # -> data/schema/openapi_v4_F-001.json; this feature serves none of them
+    - "GET rest/api/3/issue/{issueKey}"
+    - "POST 2.0/repositories/{workspace}/{repoSlug}"
+    - "POST 2.0/repositories/{workspace}/{repoSlug}/pullrequests"
+    - "seed-from-jira"
+    - "generate-gitops"
+    - "registry-show"
+    - "registry-paths"
+  events: []             # none: data/schema/asyncapi_v4_F-001.json has empty channels and operations
+  entities:              # $defs names in data/schema/schemas.json
+    - service_request
+    - gitops_manifest_file
+    - gitops_pull_request
+    - seed_result
+    - slo_profile
+    - rollout_profile
+    - cluster_entry
+
+depends_on:
+  internal:
+    - gitops/clusters/registry.yaml
+    - tools/service_seed/profiles/
+    - tools/service_seed/cookiecutter-service/
+  external:
+    - "Python >= 3.10"
+    - "Jinja2 >=3.1,<4 with StrictUndefined"
+    - "cookiecutter, optional — absence falls back to the pure-Python renderer"
+    - "git, invoked as a subprocess"
+    - "Jira Cloud REST API v3"
+    - "Bitbucket Cloud REST API 2.0"
+
+# --- the decision `requirement` made ------------------------------------------
+approach:
+  chosen: Four separable modules sharing exactly one frozen type, with rendering pure with respect to the outside world and every tier numeric living in a profile file rather than in code.
+  because: >-
+    Efficiency — rendering takes the request and a registry mapping as arguments and
+    returns a path-to-content mapping, so a dry run costs no network call and the
+    profiles are loaded once at import and indexed by class.
+    Robustness — the request is frozen and self-validating at construction, so every
+    later step consumes one agreed description and an unusable request is refused
+    before any external object is created.
+    Resilience — every call leaving the process is time-bounded (30 s HTTP, 300 s
+    subprocess), a repository conflict is tolerated as success, and no rendered path
+    can escape its destination; what the design does not buy is atomicity, which is
+    recorded as a failure mode rather than hidden.
+  rejected:
+    - "One command with a dry-run flag, rather than two subparsers — rejected in the tree, but the reason was never written down (see open)."
+    - "A second registry read inside rendering — ruled out by passing the registry mapping in as an argument, so identity has one source."
+    - "Tier numerics as literals in Python — ruled out by the import-time cross-check that refuses the module when a profile omits a class."
+  adr: none              # no ADR records this pipeline's shape; architect.md lists it as a decision in force with no recorded reasoning
+
+# --- what must not break ------------------------------------------------------
+invariants:
+  - DOM-001-R1
+  - DOM-001-R2
+  - DOM-001-R3
+  - DOM-001-R4
+  - DOM-001-R5
+  - DOM-001-R6
+  - DOM-001-R7
+  - DOM-001-R8
+  - DOM-001-R9
+  - DOM-001-R10
+  - DOM-001-R11
+  - DOM-001-R12
+
+failure_modes:
+  - when: a credential variable named on the command line is absent from the environment
+    expect: print the variable name and exit 2 before any network call
+  - when: the issue type, issue key, service name, slug or SLO class is unusable
+    expect: exit 2 naming the offending field; no repository and no change set exist
+  - when: the tracker does not answer within the HTTP bound
+    expect: urlopen raises at 30 s; the run stops with no partial state
+  - when: the source host returns a 4xx that is not a repository conflict
+    expect: raise carrying method, path, status and body, and never a credential
+  - when: the repository already exists
+    expect: treat the conflict-flagged 400 as success and continue to the template push
+  - when: a rendered template path resolves outside the destination
+    expect: raise before any mkdir or write, with zero filesystem effect
+  - when: a template variable is undefined
+    expect: StrictUndefined raises at render; no manifest is produced
+  - when: a tier profile omits one of bronze, silver or gold
+    expect: the module refuses to import, naming the missing classes
+  - when: the requested cluster is not in the committed catalogue
+    expect: exit 2 listing the known cluster names
+  - when: a git subprocess does not return within the subprocess bound
+    expect: the subprocess timeout raises at 300 s
+  - when: the cookiecutter binary is absent
+    expect: fall back to the pure-Python renderer, with the path-safety check still applied
+  - when: any step fails after the repository has been created
+    expect: nothing compensates — the repository and any pushed commit remain, and re-running is the only recovery
+
+resilience:              # numbers, not adjectives; every one is testable
+  timeout_ms: 30000      # every outbound HTTP call; 300000 for every git subprocess
+  retry: none            # no retry anywhere; a transient tracker or source-host failure fails the run
+  idempotency: "repository-exists tolerated as success; change-set branch name seed/{slug}-{tier}-{issuekey}; a re-seed replaces the service subtree rather than merging into it"
+  degraded: "none — the run spans the tracker, the source host and two change sets with no compensating action, so a partial run leaves cross-system state behind"
+
+observability:
+  logs:                  # stdout lines, by message shape; there is no logging library in these modules
+    - "seed_result JSON line: service, issueKey, sloClass"
+    - "error: invalid Jira intake (field=...)"
+    - "error: environment variable ... is not set"
+    - "error: cluster ... not in registry; known: [...]"
+    - "bitbucket api <method> <path> failed: <code> <body>"
+  metrics: []            # none: the pipeline emits no metric, so no end-to-end onboarding duration can be observed
+  traces: []             # none: no span and no correlation identifier exists anywhere in the tree
+
+non_goals:
+  - Merging either change set — the source-host client has no merge call.
+  - Provisioning cloud resources — the claims it writes are reconciled elsewhere.
+  - Creating identities or role assignments.
+  - Sequencing promotion between environments — all three overlays are written at once.
+  - Offering an intake surface of its own — the run takes an issue key on the command line.
+  - Emitting telemetry — metrics and tracing belong to other features.
+  - Adding behaviour to tools/service_seed/seed_job.py — it is a deprecation shim re-exporting the split modules and is slated for removal once the in-tree callers migrate.
+
+# --- traceability: both directions must be walkable ---------------------------
+traceability:
+  stories:
+    - F-001-US1
+    - F-001-US2
+    - F-001-US3
+    - F-001-US4
+    - F-001-US5
+    - F-001-US6
+    - F-001-US7
+  rules:
+    - DOM-001-R1
+    - DOM-001-R2
+    - DOM-001-R3
+    - DOM-001-R4
+    - DOM-001-R5
+    - DOM-001-R6
+    - DOM-001-R7
+    - DOM-001-R8
+    - DOM-001-R9
+    - DOM-001-R10
+    - DOM-001-R11
+    - DOM-001-R12
+  tasks:
+    - F-001-T1
+    - F-001-T2
+    - F-001-T3
+    - F-001-T4
+    - F-001-T5
+    - F-001-T6
+    - F-001-T7
+    - F-001-T8
+    - F-001-T9
+    - F-001-T10
+    - F-001-T11
+  tests:
+    - F-001-TC1
+    - F-001-TC2
+    - F-001-TC3
+    - F-001-TC4
+    - F-001-TC5
+    - F-001-TC6
+    - F-001-TC7
+    - F-001-TC8
+    - F-001-TC9
+    - F-001-TC10
+    - F-001-TC11
+    - F-001-TC12
+    - F-001-TC13
+    - F-001-TC14
+    - F-001-TC15
+    - F-001-TC16
+    - F-001-TC17
+    - F-001-TC18
+    - F-001-TC19
+    - F-001-TC20
+    - F-001-TC21
+    - F-001-TC22
+    - F-001-TC23
+    - F-001-TC24
+  route: docs/IDPGitOps-Specs/route/route_v4_F-001.md
+
+open:
+  - "Why two subcommands rather than one with a dry-run flag is recorded nowhere; the design pair states the shape, not the reason."
+  - "Is a transient tracker failure meant to fail the whole seed run, or be retried by the job around it? There is no retry and no rate-limit handling for either vendor API."
+  - "Is re-running the intended recovery for a run that created the repository and then failed, and is anything expected to clean up a half-seeded service?"
+  - "Is there an intended correlation identifier between the request key, the two change sets and the eventual deployment? Nothing emits one."
+  - "DOM-001-R11 destroys hand edits on a re-seed and nothing warns; is a service ever legitimately re-seeded after a human has edited its scaffold?"

@@ -1,0 +1,140 @@
+@startuml feature_v4_F-003_sequence
+' Runtime truth for F-003 v4 — Platform invariant gates
+' The cast below is the `participants:` list of feature_v4_F-003_front-matter.yaml, name for name.
+' One group per story; one group per failure mode the front matter declares.
+title F-003 v4 — Platform invariant gates
+autonumber
+
+actor "Contributor" as Contributor
+participant "pre-commit" as PreCommit
+participant "GitHub Actions" as Actions
+participant "Repository validators" as Validators
+participant "Terraform preconditions" as Preconditions
+database "Checkov baseline" as Baseline
+database "Toolchain versions" as ToolVersions
+database "Workflow files" as Workflows
+database "Cluster registry" as Registry
+
+group F-003-US1 — an accepted supply-chain finding carries a reason, an owner and an expiry
+  Contributor -> PreCommit : git commit touching the checkov baseline
+  PreCommit -> Validators : python3 scripts/validate-checkov-baseline.py
+  Validators -> Baseline : read the _schema header and every checkov_baseline_finding
+  Baseline --> Validators : suppression entries
+  Validators --> PreCommit : exit 0
+  PreCommit --> Contributor : the commit is allowed
+end
+
+group F-003-US2 — exactly one file declares a toolchain version
+  PreCommit -> Validators : python3 scripts/validate-tool-version-singleton.py
+  Validators -> ToolVersions : read every tool_version_pin
+  Validators -> Workflows : scan the workflows and Dockerfiles for a second declaration
+  Workflows --> Validators : no second declaration
+  Validators --> PreCommit : exit 0
+end
+
+group F-003-US3 — every workflow action reference is a commit SHA carrying a tag comment
+  PreCommit -> Validators : python3 scripts/validate-action-pins.py
+  Validators -> Workflows : read every uses: reference
+  Workflows --> Validators : every reference is a 40-character SHA with its tag comment
+  Validators --> PreCommit : exit 0
+end
+
+group F-003-US4 — a malformed cluster catalogue fails before anything consumes it
+  PreCommit -> Validators : python3 scripts/validate-cluster-registry.py
+  Validators -> Registry : load through the same loader the consumers use
+  Registry --> Validators : cluster_entry records
+  Validators -> Validators : validate against registry.schema.json and check that each key equals its aks_name
+  Validators --> PreCommit : exit 0
+  Contributor -> Actions : open a pull request touching terraform
+  Actions -> Preconditions : terraform plan
+  Preconditions -> Preconditions : evaluate the region_abbrev and spoke-versus-hub CIDR preconditions before any provider work
+  Preconditions --> Actions : the plan proceeds
+end
+
+group F-003-US5 — no sensitive value reaches a chart through a set-value
+  PreCommit -> Validators : python3 scripts/validate-helm-release-secrets.py
+  Validators -> Validators : match every set-value against the curated sensitive-attribute list, following one alias hop
+  Validators --> PreCommit : exit 0; a Secret named by reference is allowed
+end
+
+group F-003-US6 — binary entry points stay wiring-only
+  PreCommit -> Validators : bash scripts/validate-mgmt-plane-lock-runners.sh
+  Validators -> Validators : check every cmd main.go is at most 40 lines and imports no os/signal
+  Validators --> PreCommit : exit 0
+end
+
+group F-003-US7 — the pull request carries a readable plan
+  Actions -> Validators : python3 scripts/truncate-plan-output.py
+  Validators --> Actions : output at or under the threshold passes through unchanged; oversize output is truncated with a footer
+  Actions --> Contributor : the plan comment on the pull request
+end
+
+== Failure modes ==
+
+group failure — a suppression is missing its metadata
+  Validators -> Baseline : read each checkov_baseline_finding
+  Baseline --> Validators : an entry without a rationale, an owner or an expiry
+  Validators --> Contributor : non-zero exit naming the entry index and the missing field
+end
+
+group failure — a toolchain version is declared twice
+  Validators -> Workflows : scan for a version declaration outside the pin file
+  Workflows --> Validators : a second declaration
+  Validators --> Contributor : non-zero exit naming the offending file
+end
+
+group failure — an action is referenced by tag rather than by commit SHA
+  Validators -> Workflows : read the uses: references
+  Workflows --> Validators : a reference that is not a 40-character SHA
+  Validators --> Contributor : a file-and-line annotation and a non-zero exit
+end
+
+group failure — a cluster catalogue entry does not match the schema
+  Validators -> Registry : validate against registry.schema.json
+  Registry --> Validators : an entry with a missing or malformed field
+  Validators --> Contributor : non-zero exit naming the entry
+end
+
+group failure — a catalogue key and its aks_name disagree
+  Validators -> Registry : load through the shared loader
+  Registry --> Validators : the loader raises before any consumer sees the entry
+  Validators --> Contributor : non-zero exit naming the key and the name
+end
+
+group failure — a region short code is not in the canonical map
+  Actions -> Preconditions : terraform plan
+  Preconditions --> Actions : the precondition fails and the plan aborts with the formatted message
+end
+
+group failure — a spoke network range equals a hub range
+  Actions -> Preconditions : terraform plan
+  Preconditions --> Actions : the precondition fails and the plan aborts before any provider work
+end
+
+group failure — a sensitive value is passed to a chart as a set-value
+  Validators -> Validators : the set-value matches the curated sensitive-attribute list
+  Validators --> Contributor : non-zero exit naming the release and the attribute
+end
+
+group failure — a binary entry point handles signals itself
+  Validators -> Validators : a cmd main.go exceeds 40 lines or imports os/signal
+  Validators --> Contributor : non-zero exit naming the binary
+end
+
+group failure — a platform-managed secret has no expiry
+  Validators -> Validators : python3 scripts/validate-akv-null-expiry.py reads NULL_EXPIRY_MODE
+  Validators --> Contributor : advisory mode prints the finding and exits 0; blocking mode exits non-zero
+end
+
+note over Validators, Preconditions
+  invariants: DOM-003-R1, DOM-003-R2, DOM-003-R3, DOM-003-R4, DOM-003-R5,
+  DOM-003-R6, DOM-003-R7, DOM-003-R8, DOM-003-R9, DOM-003-R10
+  timeout: none — every validator is a local synchronous process over the committed tree
+  retry: none — a gate is deterministic over its input, so re-running changes nothing
+  idempotency: total — the gates read and never write
+  degraded: none, by design. A gate blocks; it does not fall back.
+  The only variable behaviour is the expiry check, whose advisory-or-blocking
+  mode comes from NULL_EXPIRY_MODE and is not visible from the script.
+end note
+
+@enduml

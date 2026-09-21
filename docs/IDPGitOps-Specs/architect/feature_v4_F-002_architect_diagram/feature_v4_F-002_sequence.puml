@@ -1,0 +1,158 @@
+@startuml feature_v4_F-002_sequence
+' Runtime truth for F-002 v4 — Management plane arbitration
+' The cast below is the `participants:` list of feature_v4_F-002_front-matter.yaml, name for name.
+' One group per story; one group per failure mode the front matter declares.
+title F-002 v4 — Management plane arbitration
+autonumber
+
+actor "Operator" as Operator
+actor "Metrics scraper" as Scraper
+participant "mgmt-leader-lease" as Lease
+participant "controller-scaler" as Scaler
+participant "mgmt-cli" as Cli
+participant "Metrics endpoint" as Metrics
+database "Lease blob" as Blob
+database "mgmt-leader-status ConfigMap" as Status
+database "Governed workloads" as Workloads
+database "ArgoCD cluster Secret" as ArgoSecret
+
+group F-002-US6 — an unsafe renewal configuration stops the controller at startup
+  Lease -> Lease : config.LoadController reads CLUSTER_NAME, LEASE_BLOB_URL, LEASE_DURATION_SECONDS, LEASE_RENEW_INTERVAL_SECONDS
+  Lease -> Lease : accept only 15 s <= lease term <= 60 s and 0 < renew interval < lease term
+  Lease --> Operator : lease_controller_config accepted, the tick loop starts
+end
+
+group F-002-US1 — activeness expires unless it is renewed
+  loop every tick, 5 s by default
+    Lease -> Blob : read the preferred-cluster metadata
+    Blob --> Lease : preferred cluster name, or empty
+    alt this cluster holds the lease and the renew interval has elapsed
+      Lease -> Blob : Renew(leaseID)
+      Blob --> Lease : renewed
+      Lease -> Metrics : SetLeaseRenewedSeconds(now)
+    else this cluster holds no lease and no other cluster is preferred
+      Lease -> Blob : Acquire(leaseDuration)
+      Blob --> Lease : leaseID
+      Lease -> Metrics : SetLeaseRenewedSeconds(now)
+    end
+  end
+end
+
+group F-002-US3 — every cluster publishes what it currently believes it is
+  Lease -> Status : UpsertStatus writing mgmt_leader_status with leadershipStatus active, leaseID, preferredCluster, lastObservedAt and lastRenewedAt
+  Status --> Lease : created when absent, updated in place when present
+  Operator -> Status : read the mgmt-leader-status ConfigMap in this cluster
+  Status --> Operator : mgmt_leader_status, readable even while the arbiter is unreachable
+end
+
+group F-002-US2 — a cluster that is not active runs no platform controllers
+  loop every poll interval, 5 s by default
+    Scaler -> Status : ReadLeaseStatus
+    Status --> Scaler : leadershipStatus, accepted only as active or standby
+    Scaler -> Workloads : ReconcileWorkloads to the active or standby replica count of every controller_workload
+    Workloads --> Scaler : patched, or left alone when already at the count
+    Scaler -> ArgoSecret : set the lease-status label, only when it differs
+    ArgoSecret --> Scaler : labelled
+  end
+end
+
+group F-002-US4 — a planned restart hands activeness back at once rather than after the term
+  Operator -> Lease : SIGTERM
+  Lease -> Lease : drainOnShutdown on a fresh 5 s context, so the cancelled context cannot block the release
+  Lease -> Blob : Release(leaseID)
+  Blob --> Lease : released
+  Lease -> Status : UpsertStatus with leadershipStatus standby
+  Status --> Lease : published
+end
+
+group F-002-US5 — activeness moves to a named cluster deliberately
+  Operator -> Cli : mgmt-cli failback --to {cluster} --confirm
+  Cli -> Blob : SetPreferredCluster(target)
+  Cli -> Blob : Break()
+  Cli --> Operator : failback requested for the target cluster
+  Lease -> Blob : read the preferred-cluster metadata on the next tick
+  Blob --> Lease : another cluster is preferred
+  Lease -> Blob : Release(leaseID)
+  Lease -> Status : UpsertStatus with leadershipStatus standby
+  note right of Lease
+    A non-holder that reads a preference naming another cluster
+    does not attempt to acquire at all.
+  end note
+end
+
+group F-002-US7 — a signal distinguishes up from still renewing
+  Scraper -> Metrics : GET metrics
+  Metrics --> Scraper : exposition text carrying the last-successful-renew timestamp gauge
+end
+
+== Failure modes ==
+
+group failure — another cluster already holds the lease
+  Lease -> Blob : Acquire(leaseDuration)
+  Blob --> Lease : lease conflict
+  Lease -> Status : UpsertStatus with leadershipStatus standby
+  Status --> Lease : published; the tick returns no error
+end
+
+group failure — a renew is refused because the lease conflicts or no longer exists
+  Lease -> Blob : Renew(leaseID)
+  Blob --> Lease : conflict, or the lease is missing
+  Lease -> Lease : clear leader state
+  Lease -> Status : UpsertStatus with leadershipStatus standby
+end
+
+group failure — a renew fails for any other reason
+  Lease -> Blob : Renew(leaseID)
+  Blob --> Lease : transport or service error
+  Lease -> Lease : clear leader state
+  Lease --> Operator : the error is returned to the tick, logged, and retried on the next tick
+end
+
+group failure — the leadership status is missing or is neither active nor standby
+  Scaler -> Status : ReadLeaseStatus
+  Status --> Scaler : empty or unsupported leadershipStatus
+  Scaler --> Operator : the cycle errors and nothing is scaled up
+end
+
+group failure — a governed workload is absent from the cluster
+  Scaler -> Workloads : patch the replica count
+  Workloads --> Scaler : NotFound
+  Scaler --> Operator : an entry marked optional is skipped and the cycle continues; a required one fails the cycle
+end
+
+group failure — the ArgoCD cluster Secret is not found by name
+  Scaler -> ArgoSecret : get the Secret named for the cluster
+  ArgoSecret --> Scaler : NotFound
+  Scaler -> ArgoSecret : list by the argocd cluster-type and cluster-name label selector
+  ArgoSecret --> Scaler : the matching Secret, or an error when the list is empty
+end
+
+group failure — a required dependency is nil when the runner starts
+  Lease -> Lease : Run checks Manager and Clientset
+  Lease --> Operator : ErrMissingDependency, returned before the first tick
+end
+
+group failure — a duration variable is unparseable or non-positive
+  Lease -> Lease : config.LoadController parses LEASE_DURATION_SECONDS, LEASE_RENEW_INTERVAL_SECONDS or POLL_INTERVAL_SECONDS
+  Lease --> Operator : the loader substitutes the default and the range check passes, so the process starts on a value the operator did not set
+end
+
+group failure — every governed workload is already at the implied replica count
+  Scaler -> Workloads : compare current replicas with the desired count
+  Workloads --> Scaler : already equal
+  Scaler --> Operator : no patch is issued and the cycle reports success
+end
+
+note over Lease, Status
+  invariants: DOM-002-R1, DOM-002-R2, DOM-002-R3, DOM-002-R4, DOM-002-R5, DOM-002-R6,
+  DOM-002-R7, DOM-002-R8, DOM-002-R9, DOM-002-R10, DOM-002-R11, DOM-002-R12
+  lease term 60000 ms by default, accepted only in 15000..60000 ms
+  renew interval 15000 ms by default, rejected unless shorter than the term
+  lease tick 5000 ms, scaler poll 5000 ms, shutdown drain context 5000 ms
+  retry: none — the next tick is the retry
+  idempotency: the blob lease ID; Acquire is exclusive and a conflict is not an error
+  degraded: mgmt_leader_status stays readable in-cluster while the arbiter is unreachable,
+  and an unreadable or unrecognised status scales nothing up
+end note
+
+@enduml
